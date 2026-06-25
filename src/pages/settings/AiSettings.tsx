@@ -17,7 +17,6 @@ import {
 
 const AiSettings = () => {
   const { user } = useAuth();
-  const [aiProvider, setAiProvider] = useState("managed");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [openaiModel, setOpenaiModel] = useState("gpt-4o");
   const [showApiKey, setShowApiKey] = useState(false);
@@ -33,7 +32,6 @@ const AiSettings = () => {
         .maybeSingle();
       if (data) {
         const d = data as any;
-        setAiProvider(d.provider === "openai" && d.api_key ? "openai" : "managed");
         setOpenaiApiKey(d.api_key || "");
         setOpenaiModel(d.model || "gpt-4o");
       }
@@ -45,7 +43,7 @@ const AiSettings = () => {
     if (!user) return;
     setSavingAi(true);
     try {
-      if (aiProvider === "openai" && !openaiApiKey.trim()) {
+      if (!openaiApiKey.trim()) {
         toast.error("Informe a chave da API da OpenAI");
         setSavingAi(false);
         return;
@@ -53,9 +51,9 @@ const AiSettings = () => {
 
       const payload = {
         user_id: user.id,
-        provider: aiProvider,
-        api_key: aiProvider === "openai" ? openaiApiKey.trim() : null,
-        model: aiProvider === "openai" ? openaiModel : null,
+        provider: "openai",
+        api_key: openaiApiKey.trim(),
+        model: openaiModel,
       };
 
       const { data: existing } = await supabase
@@ -92,68 +90,51 @@ const AiSettings = () => {
           <Brain className="w-5 h-5 text-primary" /> Provedor de IA
         </h3>
         <div className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Cada conta usa sua própria chave da OpenAI, para que o custo de IA seja
+            atribuído individualmente. Configure abaixo a chave desta conta.
+          </p>
+
           <div className="space-y-2">
-            <Label>Provedor</Label>
-            <Select value={aiProvider} onValueChange={setAiProvider}>
+            <Label>Chave da API (OpenAI)</Label>
+            <div className="relative">
+              <Input
+                type={showApiKey ? "text" : "password"}
+                placeholder="sk-..."
+                value={openaiApiKey}
+                onChange={(e) => setOpenaiApiKey(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Obtenha em{" "}
+              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" className="text-primary underline">
+                platform.openai.com/api-keys
+              </a>
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Modelo</Label>
+            <Select value={openaiModel} onValueChange={setOpenaiModel}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="managed">OpenAI gerenciado (Padrão)</SelectItem>
-                <SelectItem value="openai">Minha chave OpenAI</SelectItem>
+                <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">
-              {aiProvider === "managed"
-                ? "Usando o ChatGPT (OpenAI) gerenciado pelo sistema — sem necessidade de configuração extra."
-                : "Use sua própria chave da OpenAI para análises com ChatGPT."}
-            </p>
           </div>
-
-          {aiProvider === "openai" && (
-            <>
-              <div className="space-y-2">
-                <Label>Chave da API (OpenAI)</Label>
-                <div className="relative">
-                  <Input
-                    type={showApiKey ? "text" : "password"}
-                    placeholder="sk-..."
-                    value={openaiApiKey}
-                    onChange={(e) => setOpenaiApiKey(e.target.value)}
-                    className="pr-10"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  >
-                    {showApiKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Obtenha em{" "}
-                  <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener" className="text-primary underline">
-                    platform.openai.com/api-keys
-                  </a>
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Modelo</Label>
-                <Select value={openaiModel} onValueChange={setOpenaiModel}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gpt-4o">GPT-4o</SelectItem>
-                    <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
-                    <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                    <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </>
-          )}
 
           <Button onClick={saveAiProvider} disabled={savingAi}>
             {savingAi ? "Salvando..." : "Salvar configuração de IA"}

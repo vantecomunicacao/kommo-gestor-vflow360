@@ -1,4 +1,4 @@
-import { AverageTimePerStage } from "@/hooks/useGhlData";
+import { AverageTimePerStage } from "@/hooks/useKommoData";
 import { Clock, Timer } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 

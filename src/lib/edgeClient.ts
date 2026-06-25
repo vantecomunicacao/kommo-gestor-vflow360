@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 /**
  * Call a Supabase edge function via the SDK (supabase.functions.invoke).
  * Used for edge functions that return the `{ success, data, error }` envelope
- * (uazap-manage, evolution-manage, ghl-manage). Unwraps the envelope and
+ * (ex.: kommo-manage). Unwraps the envelope and
  * throws on `success === false`.
  */
 export async function callEdge<T = unknown>(

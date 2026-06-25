@@ -270,12 +270,14 @@ export async function enrichPending(
 
 // Resolve a API key + modelo da OpenAI: override por usuario (ai_provider_config
 // do owner) ou fallback no env. Reusado pelo wrapper e pelo tick do cron.
+// Resolve a chave/modelo de IA do owner do workspace. Cada conta DEVE ter sua
+// propria chave (sem fallback de token global do sistema). Retorna aiKey vazio
+// se a conta nao tiver chave configurada — o chamador decide pular/lancar.
 export async function resolveAiKey(
   supabase: SupabaseClient,
   ownerId: string | null,
-  envKey: string,
 ): Promise<{ aiKey: string; aiModel: string }> {
-  let aiKey = envKey;
+  let aiKey = "";
   let aiModel = "gpt-4o-mini";
   if (ownerId) {
     const { data: providerCfg } = await supabase

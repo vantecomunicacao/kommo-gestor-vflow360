@@ -129,7 +129,6 @@ serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -204,7 +203,7 @@ serve(async (req) => {
     const periodStart = brtDate(d(7));
     const periodEnd = brtDate(now.toISOString());
 
-    const resolved = await resolveAiProvider(supabase, ownerId, OPENAI_API_KEY);
+    const resolved = await resolveAiProvider(supabase, ownerId);
     const versionStr = `${PROMPT_VERSION} (${aiProviderString(resolved)})`;
     const collected: any[] = [];
     let usageAcc = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };

@@ -99,7 +99,6 @@ serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -502,10 +501,10 @@ REGRAS OBRIGATÓRIAS:
 
     const resolved = resolveAiModel(providerConfig || null);
     const aiEndpoint = "https://api.openai.com/v1/chat/completions";
-    const aiApiKey = resolved.useOpenAI ? providerConfig!.api_key : OPENAI_API_KEY;
-    if (!aiApiKey) throw new Error("No OpenAI API key configured. Set OPENAI_API_KEY or configure a provider in Settings.");
+    const aiApiKey = resolved.useOpenAI ? providerConfig!.api_key : "";
+    if (!aiApiKey) throw new Error("Nenhuma chave de IA configurada para esta conta. Configure sua chave de OpenAI em Configurações › IA.");
 
-    console.log(`[v2] OpenAI (${resolved.useOpenAI ? "user key" : "global key"}), model: ${resolved.model}`);
+    console.log(`[v2] OpenAI (user key), model: ${resolved.model}`);
 
     // 8. Chamada de IA (tool calling)
     const aiRequestBody: any = {

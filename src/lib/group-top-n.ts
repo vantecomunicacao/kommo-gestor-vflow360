@@ -1,4 +1,4 @@
-import { LeadOrigin } from "@/hooks/useGhlData";
+import { LeadOrigin } from "@/hooks/useKommoData";
 
 export const OUTRAS_LABEL = "Outras";
 export const NAO_IDENTIFICADO_LABEL = "Não identificado";

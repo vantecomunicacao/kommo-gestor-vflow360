@@ -200,7 +200,7 @@ export function SuggestionsSkeleton() {
 }
 
 /**
- * Skeleton para Integrações: cards de WhatsApp / GHL com status e ações.
+ * Skeleton para Integrações: cards de integração (Kommo) com status e ações.
  */
 export function IntegrationsSkeleton() {
   return (

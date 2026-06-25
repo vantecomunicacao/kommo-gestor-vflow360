@@ -12,302 +12,54 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  public: {
+  kommo: {
     Tables: {
-      ai_config: {
+      contacts: {
         Row: {
-          action_type: string
-          auto_approve: boolean
           created_at: string
-          enabled: boolean
+          custom_fields: Json | null
+          email: string | null
           id: string
+          kommo_created_at: string | null
+          kommo_id: string
+          kommo_updated_at: string | null
+          name: string | null
+          phone: string | null
+          responsible_user_id: string | null
           updated_at: string
-          user_id: string
-          workspace_id: string | null
-        }
-        Insert: {
-          action_type: string
-          auto_approve?: boolean
-          created_at?: string
-          enabled?: boolean
-          id?: string
-          updated_at?: string
-          user_id: string
-          workspace_id?: string | null
-        }
-        Update: {
-          action_type?: string
-          auto_approve?: boolean
-          created_at?: string
-          enabled?: boolean
-          id?: string
-          updated_at?: string
-          user_id?: string
-          workspace_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ai_config_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ai_provider_config: {
-        Row: {
-          api_key: string | null
-          created_at: string
-          id: string
-          model: string | null
-          provider: string
-          updated_at: string
-          user_id: string
-          workspace_id: string | null
-        }
-        Insert: {
-          api_key?: string | null
-          created_at?: string
-          id?: string
-          model?: string | null
-          provider?: string
-          updated_at?: string
-          user_id: string
-          workspace_id?: string | null
-        }
-        Update: {
-          api_key?: string | null
-          created_at?: string
-          id?: string
-          model?: string | null
-          provider?: string
-          updated_at?: string
-          user_id?: string
-          workspace_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ai_provider_config_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ai_usage_log: {
-        Row: {
-          completion_tokens: number
-          conversation_id: string | null
-          cost_usd: number
-          created_at: string
-          id: string
-          model: string
-          prompt_tokens: number
-          provider: string
-          total_tokens: number
-          user_id: string | null
-          workspace_id: string | null
-        }
-        Insert: {
-          completion_tokens?: number
-          conversation_id?: string | null
-          cost_usd?: number
-          created_at?: string
-          id?: string
-          model: string
-          prompt_tokens?: number
-          provider: string
-          total_tokens?: number
-          user_id?: string | null
-          workspace_id?: string | null
-        }
-        Update: {
-          completion_tokens?: number
-          conversation_id?: string | null
-          cost_usd?: number
-          created_at?: string
-          id?: string
-          model?: string
-          prompt_tokens?: number
-          provider?: string
-          total_tokens?: number
-          user_id?: string | null
-          workspace_id?: string | null
-        }
-        Relationships: []
-      }
-      conversations: {
-        Row: {
-          analyze_after: string | null
-          analyze_started_at: string | null
-          contact_name: string | null
-          contact_phone: string | null
-          created_at: string
-          ghl_user_id: string | null
-          id: string
-          integration_label: string | null
-          integration_type: string | null
-          last_message: string | null
-          last_message_at: string | null
-          unread_count: number
-          updated_at: string
-          user_id: string
-          workspace_id: string | null
-        }
-        Insert: {
-          analyze_after?: string | null
-          analyze_started_at?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          created_at?: string
-          ghl_user_id?: string | null
-          id?: string
-          integration_label?: string | null
-          integration_type?: string | null
-          last_message?: string | null
-          last_message_at?: string | null
-          unread_count?: number
-          updated_at?: string
-          user_id: string
-          workspace_id?: string | null
-        }
-        Update: {
-          analyze_after?: string | null
-          analyze_started_at?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          created_at?: string
-          ghl_user_id?: string | null
-          id?: string
-          integration_label?: string | null
-          integration_type?: string | null
-          last_message?: string | null
-          last_message_at?: string | null
-          unread_count?: number
-          updated_at?: string
-          user_id?: string
-          workspace_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conversations_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      disabled_contacts: {
-        Row: {
-          contact_phone: string
-          created_at: string
-          id: string
-          user_id: string
-          workspace_id: string | null
-        }
-        Insert: {
-          contact_phone: string
-          created_at?: string
-          id?: string
-          user_id: string
-          workspace_id?: string | null
-        }
-        Update: {
-          contact_phone?: string
-          created_at?: string
-          id?: string
-          user_id?: string
-          workspace_id?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "disabled_contacts_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_conversations: {
-        Row: {
-          analyze_after: string | null
-          analyze_started_at: string | null
-          assigned_ghl_user_id: string | null
-          channel_type: string | null
-          contact_email: string | null
-          contact_name: string | null
-          contact_phone: string | null
-          ghl_contact_id: string
-          ghl_conversation_id: string
-          ghl_date_added: string | null
-          ghl_date_updated: string | null
-          ghl_location_id: string
-          id: string
-          last_analyzed_at: string | null
-          last_message_at: string | null
-          last_message_body: string | null
-          last_message_direction: string | null
-          messages_synced_until: string | null
-          profile_photo_url: string | null
-          synced_at: string
-          unread_count: number
           workspace_id: string
         }
         Insert: {
-          analyze_after?: string | null
-          analyze_started_at?: string | null
-          assigned_ghl_user_id?: string | null
-          channel_type?: string | null
-          contact_email?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          ghl_contact_id: string
-          ghl_conversation_id: string
-          ghl_date_added?: string | null
-          ghl_date_updated?: string | null
-          ghl_location_id: string
+          created_at?: string
+          custom_fields?: Json | null
+          email?: string | null
           id?: string
-          last_analyzed_at?: string | null
-          last_message_at?: string | null
-          last_message_body?: string | null
-          last_message_direction?: string | null
-          messages_synced_until?: string | null
-          profile_photo_url?: string | null
-          synced_at?: string
-          unread_count?: number
+          kommo_created_at?: string | null
+          kommo_id: string
+          kommo_updated_at?: string | null
+          name?: string | null
+          phone?: string | null
+          responsible_user_id?: string | null
+          updated_at?: string
           workspace_id: string
         }
         Update: {
-          analyze_after?: string | null
-          analyze_started_at?: string | null
-          assigned_ghl_user_id?: string | null
-          channel_type?: string | null
-          contact_email?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          ghl_contact_id?: string
-          ghl_conversation_id?: string
-          ghl_date_added?: string | null
-          ghl_date_updated?: string | null
-          ghl_location_id?: string
+          created_at?: string
+          custom_fields?: Json | null
+          email?: string | null
           id?: string
-          last_analyzed_at?: string | null
-          last_message_at?: string | null
-          last_message_body?: string | null
-          last_message_direction?: string | null
-          messages_synced_until?: string | null
-          profile_photo_url?: string | null
-          synced_at?: string
-          unread_count?: number
+          kommo_created_at?: string | null
+          kommo_id?: string
+          kommo_updated_at?: string | null
+          name?: string | null
+          phone?: string | null
+          responsible_user_id?: string | null
+          updated_at?: string
           workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "ghl_conversations_workspace_id_fkey"
+            foreignKeyName: "contacts_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -315,46 +67,52 @@ export type Database = {
           },
         ]
       }
-      ghl_custom_fields: {
+      custom_fields: {
         Row: {
+          code: string | null
           created_at: string
-          data_type: string | null
-          field_key: string | null
-          ghl_id: string
+          entity_type: string
+          enums: Json | null
+          field_type: string | null
           id: string
-          model: string | null
+          is_predefined: boolean
+          kommo_id: string
           name: string
-          picklist_options: Json | null
+          sort: number | null
           updated_at: string
           workspace_id: string
         }
         Insert: {
+          code?: string | null
           created_at?: string
-          data_type?: string | null
-          field_key?: string | null
-          ghl_id: string
+          entity_type: string
+          enums?: Json | null
+          field_type?: string | null
           id?: string
-          model?: string | null
+          is_predefined?: boolean
+          kommo_id: string
           name: string
-          picklist_options?: Json | null
+          sort?: number | null
           updated_at?: string
           workspace_id: string
         }
         Update: {
+          code?: string | null
           created_at?: string
-          data_type?: string | null
-          field_key?: string | null
-          ghl_id?: string
+          entity_type?: string
+          enums?: Json | null
+          field_type?: string | null
           id?: string
-          model?: string | null
+          is_predefined?: boolean
+          kommo_id?: string
           name?: string
-          picklist_options?: Json | null
+          sort?: number | null
           updated_at?: string
           workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "ghl_custom_fields_workspace_id_fkey"
+            foreignKeyName: "custom_fields_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -362,12 +120,13 @@ export type Database = {
           },
         ]
       }
-      ghl_dashboard_settings: {
+      dashboard_settings: {
         Row: {
           additional_date_field: string | null
-          ai_allowed_pipeline_ids: string[]
-          business_hours_end: string
-          business_hours_start: string
+          ai_allowed_pipeline_ids: string[] | null
+          ai_insights_config: Json | null
+          business_hours_end: string | null
+          business_hours_start: string | null
           chart_custom_fields: string[]
           created_at: string
           default_pipeline_ids: string[] | null
@@ -385,9 +144,10 @@ export type Database = {
         }
         Insert: {
           additional_date_field?: string | null
-          ai_allowed_pipeline_ids?: string[]
-          business_hours_end?: string
-          business_hours_start?: string
+          ai_allowed_pipeline_ids?: string[] | null
+          ai_insights_config?: Json | null
+          business_hours_end?: string | null
+          business_hours_start?: string | null
           chart_custom_fields?: string[]
           created_at?: string
           default_pipeline_ids?: string[] | null
@@ -405,9 +165,10 @@ export type Database = {
         }
         Update: {
           additional_date_field?: string | null
-          ai_allowed_pipeline_ids?: string[]
-          business_hours_end?: string
-          business_hours_start?: string
+          ai_allowed_pipeline_ids?: string[] | null
+          ai_insights_config?: Json | null
+          business_hours_end?: string | null
+          business_hours_start?: string | null
           chart_custom_fields?: string[]
           created_at?: string
           default_pipeline_ids?: string[] | null
@@ -425,417 +186,9 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "ghl_dashboard_settings_workspace_id_fkey"
+            foreignKeyName: "dashboard_settings_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: true
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_loss_reasons: {
-        Row: {
-          created_at: string
-          ghl_id: string
-          id: string
-          name: string
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          ghl_id: string
-          id?: string
-          name: string
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          ghl_id?: string
-          id?: string
-          name?: string
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_loss_reasons_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_messages: {
-        Row: {
-          attachments_json: Json | null
-          body: string | null
-          date_added: string
-          direction: string
-          enrich_error: string | null
-          enriched_at: string | null
-          enriched_body: string | null
-          from_field: string | null
-          ghl_conversation_id: string
-          ghl_message_id: string
-          ghl_user_id: string | null
-          id: string
-          message_type: string | null
-          synced_at: string
-          to_field: string | null
-          workspace_id: string
-        }
-        Insert: {
-          attachments_json?: Json | null
-          body?: string | null
-          date_added: string
-          direction: string
-          enrich_error?: string | null
-          enriched_at?: string | null
-          enriched_body?: string | null
-          from_field?: string | null
-          ghl_conversation_id: string
-          ghl_message_id: string
-          ghl_user_id?: string | null
-          id?: string
-          message_type?: string | null
-          synced_at?: string
-          to_field?: string | null
-          workspace_id: string
-        }
-        Update: {
-          attachments_json?: Json | null
-          body?: string | null
-          date_added?: string
-          direction?: string
-          enrich_error?: string | null
-          enriched_at?: string | null
-          enriched_body?: string | null
-          from_field?: string | null
-          ghl_conversation_id?: string
-          ghl_message_id?: string
-          ghl_user_id?: string | null
-          id?: string
-          message_type?: string | null
-          synced_at?: string
-          to_field?: string | null
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_messages_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ghl_messages_workspace_id_ghl_conversation_id_fkey"
-            columns: ["workspace_id", "ghl_conversation_id"]
-            isOneToOne: false
-            referencedRelation: "ghl_conversations"
-            referencedColumns: ["workspace_id", "ghl_conversation_id"]
-          },
-        ]
-      }
-      ghl_opportunities: {
-        Row: {
-          assigned_to: string | null
-          contact_email: string | null
-          contact_id: string | null
-          contact_name: string | null
-          contact_phone: string | null
-          created_at: string
-          custom_fields: Json | null
-          ghl_created_at: string | null
-          ghl_id: string
-          ghl_updated_at: string | null
-          id: string
-          last_status_change_at: string | null
-          lost_reason_id: string | null
-          monetary_value: number | null
-          name: string | null
-          pipeline_id: string | null
-          source: string | null
-          stage_id: string | null
-          status: string | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          assigned_to?: string | null
-          contact_email?: string | null
-          contact_id?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          created_at?: string
-          custom_fields?: Json | null
-          ghl_created_at?: string | null
-          ghl_id: string
-          ghl_updated_at?: string | null
-          id?: string
-          last_status_change_at?: string | null
-          lost_reason_id?: string | null
-          monetary_value?: number | null
-          name?: string | null
-          pipeline_id?: string | null
-          source?: string | null
-          stage_id?: string | null
-          status?: string | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          assigned_to?: string | null
-          contact_email?: string | null
-          contact_id?: string | null
-          contact_name?: string | null
-          contact_phone?: string | null
-          created_at?: string
-          custom_fields?: Json | null
-          ghl_created_at?: string | null
-          ghl_id?: string
-          ghl_updated_at?: string | null
-          id?: string
-          last_status_change_at?: string | null
-          lost_reason_id?: string | null
-          monetary_value?: number | null
-          name?: string | null
-          pipeline_id?: string | null
-          source?: string | null
-          stage_id?: string | null
-          status?: string | null
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_opportunities_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_pipelines: {
-        Row: {
-          created_at: string
-          ghl_id: string
-          id: string
-          name: string
-          stages: Json
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          ghl_id: string
-          id?: string
-          name: string
-          stages?: Json
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          ghl_id?: string
-          id?: string
-          name?: string
-          stages?: Json
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_pipelines_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_sync_status: {
-        Row: {
-          created_at: string
-          is_running: boolean
-          last_sync_at: string | null
-          last_sync_duration_ms: number | null
-          last_sync_error: string | null
-          last_sync_status: string | null
-          opportunities_count: number | null
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          is_running?: boolean
-          last_sync_at?: string | null
-          last_sync_duration_ms?: number | null
-          last_sync_error?: string | null
-          last_sync_status?: string | null
-          opportunities_count?: number | null
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          is_running?: boolean
-          last_sync_at?: string | null
-          last_sync_duration_ms?: number | null
-          last_sync_error?: string | null
-          last_sync_status?: string | null
-          opportunities_count?: number | null
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_sync_status_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: true
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_sync_watermarks: {
-        Row: {
-          conversations_last_seen_at: string | null
-          last_run_at: string | null
-          last_run_count: number | null
-          last_run_error: string | null
-          last_run_status: string | null
-          workspace_id: string
-        }
-        Insert: {
-          conversations_last_seen_at?: string | null
-          last_run_at?: string | null
-          last_run_count?: number | null
-          last_run_error?: string | null
-          last_run_status?: string | null
-          workspace_id: string
-        }
-        Update: {
-          conversations_last_seen_at?: string | null
-          last_run_at?: string | null
-          last_run_count?: number | null
-          last_run_error?: string | null
-          last_run_status?: string | null
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_sync_watermarks_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: true
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      ghl_users: {
-        Row: {
-          created_at: string
-          email: string | null
-          ghl_id: string
-          id: string
-          name: string
-          updated_at: string
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          email?: string | null
-          ghl_id: string
-          id?: string
-          name: string
-          updated_at?: string
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          email?: string | null
-          ghl_id?: string
-          id?: string
-          name?: string
-          updated_at?: string
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ghl_users_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      integration_pairing_tokens: {
-        Row: {
-          created_at: string
-          created_by_user_id: string
-          expires_at: string | null
-          id: string
-          integration_id: string
-          last_paired_at: string | null
-          last_seen_at: string | null
-          max_uses: number | null
-          revoked_at: string | null
-          token_hash: string
-          token_prefix: string
-          updated_at: string
-          use_count: number
-          workspace_id: string
-        }
-        Insert: {
-          created_at?: string
-          created_by_user_id: string
-          expires_at?: string | null
-          id?: string
-          integration_id: string
-          last_paired_at?: string | null
-          last_seen_at?: string | null
-          max_uses?: number | null
-          revoked_at?: string | null
-          token_hash: string
-          token_prefix: string
-          updated_at?: string
-          use_count?: number
-          workspace_id: string
-        }
-        Update: {
-          created_at?: string
-          created_by_user_id?: string
-          expires_at?: string | null
-          id?: string
-          integration_id?: string
-          last_paired_at?: string | null
-          last_seen_at?: string | null
-          max_uses?: number | null
-          revoked_at?: string | null
-          token_hash?: string
-          token_prefix?: string
-          updated_at?: string
-          use_count?: number
-          workspace_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "integration_pairing_tokens_integration_id_fkey"
-            columns: ["integration_id"]
-            isOneToOne: false
-            referencedRelation: "integrations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "integration_pairing_tokens_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
@@ -843,30 +196,39 @@ export type Database = {
       }
       integrations: {
         Row: {
+          account_id: string | null
           config: Json
           created_at: string
           id: string
           status: string
+          subdomain: string | null
+          token_secret_id: string | null
           type: string
           updated_at: string
           user_id: string
           workspace_id: string | null
         }
         Insert: {
+          account_id?: string | null
           config?: Json
           created_at?: string
           id?: string
           status?: string
-          type: string
+          subdomain?: string | null
+          token_secret_id?: string | null
+          type?: string
           updated_at?: string
           user_id: string
           workspace_id?: string | null
         }
         Update: {
+          account_id?: string | null
           config?: Json
           created_at?: string
           id?: string
           status?: string
+          subdomain?: string | null
+          token_secret_id?: string | null
           type?: string
           updated_at?: string
           user_id?: string
@@ -882,37 +244,173 @@ export type Database = {
           },
         ]
       }
-      messages: {
+      leads: {
         Row: {
-          content: string
-          conversation_id: string
+          closed_at: string | null
+          contact_email: string | null
+          contact_id: string | null
+          contact_name: string | null
+          contact_phone: string | null
           created_at: string
-          direction: string
+          custom_fields: Json | null
           id: string
-          media_url: string | null
+          is_deleted: boolean
+          kommo_created_at: string | null
+          kommo_id: string
+          kommo_updated_at: string | null
+          last_status_change_at: string | null
+          loss_reason_id: string | null
+          name: string | null
+          pipeline_id: string | null
+          price: number | null
+          responsible_user_id: string | null
+          source: string | null
+          status: string | null
+          status_id: string | null
+          updated_at: string
+          workspace_id: string
         }
         Insert: {
-          content: string
-          conversation_id: string
+          closed_at?: string | null
+          contact_email?: string | null
+          contact_id?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
           created_at?: string
-          direction: string
+          custom_fields?: Json | null
           id?: string
-          media_url?: string | null
+          is_deleted?: boolean
+          kommo_created_at?: string | null
+          kommo_id: string
+          kommo_updated_at?: string | null
+          last_status_change_at?: string | null
+          loss_reason_id?: string | null
+          name?: string | null
+          pipeline_id?: string | null
+          price?: number | null
+          responsible_user_id?: string | null
+          source?: string | null
+          status?: string | null
+          status_id?: string | null
+          updated_at?: string
+          workspace_id: string
         }
         Update: {
-          content?: string
-          conversation_id?: string
+          closed_at?: string | null
+          contact_email?: string | null
+          contact_id?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
           created_at?: string
-          direction?: string
+          custom_fields?: Json | null
           id?: string
-          media_url?: string | null
+          is_deleted?: boolean
+          kommo_created_at?: string | null
+          kommo_id?: string
+          kommo_updated_at?: string | null
+          last_status_change_at?: string | null
+          loss_reason_id?: string | null
+          name?: string | null
+          pipeline_id?: string | null
+          price?: number | null
+          responsible_user_id?: string | null
+          source?: string | null
+          status?: string | null
+          status_id?: string | null
+          updated_at?: string
+          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "messages_conversation_id_fkey"
-            columns: ["conversation_id"]
+            foreignKeyName: "leads_workspace_id_fkey"
+            columns: ["workspace_id"]
             isOneToOne: false
-            referencedRelation: "conversations"
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      loss_reasons: {
+        Row: {
+          created_at: string
+          id: string
+          kommo_id: string
+          name: string
+          sort: number | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kommo_id: string
+          name: string
+          sort?: number | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kommo_id?: string
+          name?: string
+          sort?: number | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "loss_reasons_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pipelines: {
+        Row: {
+          created_at: string
+          id: string
+          is_archive: boolean
+          is_main: boolean
+          kommo_id: string
+          name: string
+          sort: number | null
+          statuses: Json
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_archive?: boolean
+          is_main?: boolean
+          kommo_id: string
+          name: string
+          sort?: number | null
+          statuses?: Json
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_archive?: boolean
+          is_main?: boolean
+          kommo_id?: string
+          name?: string
+          sort?: number | null
+          statuses?: Json
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pipelines_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -944,120 +442,90 @@ export type Database = {
         }
         Relationships: []
       }
-      suggestions: {
+      sync_status: {
         Row: {
-          action_data: Json
-          ai_provider: string | null
-          conversation_id: string | null
           created_at: string
-          description: string | null
-          ghl_conversation_id: string | null
-          id: string
-          status: string
-          title: string
-          type: string
+          is_running: boolean
+          last_sync_at: string | null
+          last_sync_duration_ms: number | null
+          last_sync_error: string | null
+          last_sync_status: string | null
+          leads_count: number | null
           updated_at: string
-          user_id: string
-          workspace_id: string | null
+          workspace_id: string
         }
         Insert: {
-          action_data?: Json
-          ai_provider?: string | null
-          conversation_id?: string | null
           created_at?: string
-          description?: string | null
-          ghl_conversation_id?: string | null
-          id?: string
-          status?: string
-          title: string
-          type: string
+          is_running?: boolean
+          last_sync_at?: string | null
+          last_sync_duration_ms?: number | null
+          last_sync_error?: string | null
+          last_sync_status?: string | null
+          leads_count?: number | null
           updated_at?: string
-          user_id: string
-          workspace_id?: string | null
+          workspace_id: string
         }
         Update: {
-          action_data?: Json
-          ai_provider?: string | null
-          conversation_id?: string | null
           created_at?: string
-          description?: string | null
-          ghl_conversation_id?: string | null
-          id?: string
-          status?: string
-          title?: string
-          type?: string
+          is_running?: boolean
+          last_sync_at?: string | null
+          last_sync_duration_ms?: number | null
+          last_sync_error?: string | null
+          last_sync_status?: string | null
+          leads_count?: number | null
           updated_at?: string
-          user_id?: string
-          workspace_id?: string | null
+          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "suggestions_conversation_id_fkey"
-            columns: ["conversation_id"]
-            isOneToOne: false
-            referencedRelation: "conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "suggestions_ghl_conversation_id_fkey"
-            columns: ["ghl_conversation_id"]
-            isOneToOne: false
-            referencedRelation: "ghl_conversations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "suggestions_workspace_id_fkey"
+            foreignKeyName: "sync_status_workspace_id_fkey"
             columns: ["workspace_id"]
-            isOneToOne: false
+            isOneToOne: true
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
       }
-      system_logs: {
+      sync_watermarks: {
         Row: {
-          context: Json
           created_at: string
-          env: string | null
-          id: string
-          level: string
-          message: string
-          source: string
-          stack: string | null
-          url: string | null
-          user_agent: string | null
-          user_id: string | null
-          workspace_id: string | null
+          last_run_at: string | null
+          last_run_count: number | null
+          last_run_error: string | null
+          last_run_status: string | null
+          leads_last_seen_at: string | null
+          updated_at: string
+          workspace_id: string
         }
         Insert: {
-          context?: Json
           created_at?: string
-          env?: string | null
-          id?: string
-          level: string
-          message: string
-          source: string
-          stack?: string | null
-          url?: string | null
-          user_agent?: string | null
-          user_id?: string | null
-          workspace_id?: string | null
+          last_run_at?: string | null
+          last_run_count?: number | null
+          last_run_error?: string | null
+          last_run_status?: string | null
+          leads_last_seen_at?: string | null
+          updated_at?: string
+          workspace_id: string
         }
         Update: {
-          context?: Json
           created_at?: string
-          env?: string | null
-          id?: string
-          level?: string
-          message?: string
-          source?: string
-          stack?: string | null
-          url?: string | null
-          user_agent?: string | null
-          user_id?: string | null
-          workspace_id?: string | null
+          last_run_at?: string | null
+          last_run_count?: number | null
+          last_run_error?: string | null
+          last_run_status?: string | null
+          leads_last_seen_at?: string | null
+          updated_at?: string
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "sync_watermarks_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       user_permissions: {
         Row: {
@@ -1089,20 +557,64 @@ export type Database = {
       user_roles: {
         Row: {
           id: string
-          role: Database["public"]["Enums"]["app_role"]
+          role: Database["kommo"]["Enums"]["app_role"]
           user_id: string
         }
         Insert: {
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          role?: Database["kommo"]["Enums"]["app_role"]
           user_id: string
         }
         Update: {
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          role?: Database["kommo"]["Enums"]["app_role"]
           user_id?: string
         }
         Relationships: []
+      }
+      users: {
+        Row: {
+          created_at: string
+          email: string | null
+          id: string
+          is_active: boolean
+          is_admin: boolean
+          kommo_id: string
+          name: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          is_admin?: boolean
+          kommo_id: string
+          name: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          id?: string
+          is_active?: boolean
+          is_admin?: boolean
+          kommo_id?: string
+          name?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "users_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workspace_members: {
         Row: {
@@ -1179,8 +691,14 @@ export type Database = {
         Args: { _workspace_id: string }
         Returns: boolean
       }
-      cleanup_old_system_logs: { Args: never; Returns: undefined }
-      create_workspace: { Args: { _name: string }; Returns: string }
+      create_workspace: {
+        Args: { _name: string }
+        Returns: string
+      }
+      get_integration_token: {
+        Args: { p_integration_id: string }
+        Returns: string
+      }
       get_my_permissions: {
         Args: never
         Returns: {
@@ -1192,7 +710,7 @@ export type Database = {
       }
       has_role: {
         Args: {
-          _role: Database["public"]["Enums"]["app_role"]
+          _role: Database["kommo"]["Enums"]["app_role"]
           _user_id: string
         }
         Returns: boolean
@@ -1215,7 +733,10 @@ export type Database = {
         Args: { _user_id: string; _workspace_id: string }
         Returns: undefined
       }
-      trigger_ghl_sync_all: { Args: never; Returns: undefined }
+      set_integration_token: {
+        Args: { p_integration_id: string; p_token: string }
+        Returns: string
+      }
     }
     Enums: {
       app_role: "admin" | "user"
@@ -1344,7 +865,7 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  public: {
+  kommo: {
     Enums: {
       app_role: ["admin", "user"],
     },

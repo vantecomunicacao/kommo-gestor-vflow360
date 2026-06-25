@@ -365,7 +365,6 @@ serve(async (req) => {
         const { aiKey, aiModel } = await resolveAiKey(
           supabase,
           ws.owner_id ?? null,
-          Deno.env.get("OPENAI_API_KEY") || "",
         );
         if (aiKey) {
           const r = await enrichPending(supabase, {

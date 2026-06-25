@@ -29,7 +29,6 @@ serve(async (req) => {
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
   const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
   const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-  const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
   let workspaceIdForStatus: string | null = null;
@@ -96,8 +95,8 @@ serve(async (req) => {
       );
     }
 
-    const { aiKey, aiModel } = await resolveAiKey(supabase, ws.owner_id ?? null, OPENAI_API_KEY);
-    if (!aiKey) throw new Error("Sem OPENAI_API_KEY configurada");
+    const { aiKey, aiModel } = await resolveAiKey(supabase, ws.owner_id ?? null);
+    if (!aiKey) throw new Error("Nenhuma chave de IA configurada para esta conta. Configure sua chave de OpenAI em Configurações › IA.");
 
     // Marco de corte: nao enriquece midia anterior a entrada da conta no 2.0.
     const { data: wm } = await supabase

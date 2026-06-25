@@ -3,7 +3,7 @@ export interface FieldOption {
   instruction: string;
 }
 
-export interface GhlCustomField {
+export interface KommoCustomField {
   id: string;
   name: string;
   fieldKey: string;
@@ -13,7 +13,7 @@ export interface GhlCustomField {
   options?: FieldOption[];
 }
 
-export interface GhlPipelineStage {
+export interface KommoPipelineStage {
   id: string;
   name: string;
   pipelineId: string;
@@ -22,7 +22,13 @@ export interface GhlPipelineStage {
   description: string;
 }
 
-export interface GhlUserOption {
+export interface KommoUserOption {
   ghl_id: string;
   name: string;
+}
+
+export interface KommoSync {
+  last_sync_at?: string | null;
+  last_sync_status?: string | null;
+  leads_count?: number | null;
 }

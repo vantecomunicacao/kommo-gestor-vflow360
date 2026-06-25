@@ -8,7 +8,11 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+// VFlow360 Kommo: schema padrão `kommo`. Todo .from()/.rpc() resolve em kommo.*
+// (workspaces, permissões, dados do CRM). Os types em ./types.ts são gerados do
+// schema `kommo` (`supabase gen types typescript --schema kommo`); manter em sincronia.
+export const supabase = createClient<Database, "kommo">(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  db: { schema: "kommo" },
   auth: {
     storage: localStorage,
     persistSession: true,

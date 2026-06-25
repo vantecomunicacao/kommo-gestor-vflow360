@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FunnelStage, ConversionRates, StageLead } from "@/hooks/useGhlData";
+import { FunnelStage, ConversionRates, StageLead } from "@/hooks/useKommoData";
 import { TrendingUp, ArrowDown, XCircle } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";

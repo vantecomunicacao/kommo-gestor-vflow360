@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { LossReason } from "@/hooks/useGhlData";
+import { LossReason } from "@/hooks/useKommoData";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import { XCircle, CheckCircle2, AlertCircle } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
@@ -68,7 +68,12 @@ export function LossReasons({ lossReasons, totalLost }: LossReasonsProps) {
         </div>
       ) : (
         <div className="flex flex-col items-center gap-4">
-          <div className="w-full h-56" role="img" aria-label={chartDescription}>
+          <div className="relative w-full h-56" role="img" aria-label={chartDescription}>
+            {/* Total no centro — ANTES do chart p/ o tooltip ficar por cima */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-2xl font-bold tabular-nums text-foreground leading-none">{totalLost}</span>
+              <span className="text-[11px] text-muted-foreground mt-0.5">perdidos</span>
+            </div>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie

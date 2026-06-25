@@ -1,6 +1,25 @@
 project_id = "xcrfbpyhyznyufijrdry"
 
+# PostgREST só serve schemas expostos. O app Kommo vive no schema dedicado `kommo`.
+# NOTA: isto afeta o stack LOCAL (supabase start). No projeto HOSPEDADO é preciso
+# adicionar `kommo` em Dashboard → Settings → API → Exposed schemas.
+[api]
+schemas = ["public", "graphql_public", "kommo"]
+extra_search_path = ["public", "extensions", "kommo"]
+
 [functions.ghl-sync]
+verify_jwt = false
+
+# Kommo (M2): sem verify_jwt para o teste de sync. Endurecer auth no M4 (connect/Vault).
+[functions.kommo-sync]
+verify_jwt = false
+
+# Kommo (M3): dashboard agrega kommo.leads. Faz checagem de membership internamente.
+[functions.kommo-dashboard]
+verify_jwt = false
+
+# Kommo (M4): conexão (connect/status/disconnect). Exige usuário autenticado internamente.
+[functions.kommo-manage]
 verify_jwt = false
 
 [functions.log-event]

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Snowflake, Clock, Flame, AlertTriangle, CheckCircle2, User } from "lucide-react";
-import { CoolingLeads, CoolingLead } from "@/hooks/useGhlData";
+import { CoolingLeads, CoolingLead } from "@/hooks/useKommoData";
 import { SectionTooltip } from "./SectionTooltip";
 import { cn } from "@/lib/utils";
 import {

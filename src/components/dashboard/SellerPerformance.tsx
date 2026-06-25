@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Seller } from "@/hooks/useGhlData";
+import { Seller } from "@/hooks/useKommoData";
 import { Users, Trophy, Medal, Search } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 import { Input } from "@/components/ui/input";

@@ -138,6 +138,7 @@ interface UseGhlDataOptions {
 interface UseGhlDataReturn {
   data: DashboardData | null;
   isLoading: boolean;
+  isFetching: boolean;
   error: string | null;
   refetch: (forceRefresh?: boolean) => Promise<void>;
   cachedAt: string | null;
@@ -145,14 +146,14 @@ interface UseGhlDataReturn {
 
 const COOLDOWN_MS = 2 * 60 * 1000;
 
-export function useGhlData(filters: DashboardFilters, options: UseGhlDataOptions = {}): UseGhlDataReturn {
+export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptions = {}): UseGhlDataReturn {
   const { enabled = true } = options;
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
   const queryKey = useMemo(
     () => [
-      "ghl-dashboard",
+      "kommo-dashboard",
       filters.workspaceId,
       filters.startDate.getTime(),
       filters.endDate.getTime(),
@@ -181,7 +182,7 @@ export function useGhlData(filters: DashboardFilters, options: UseGhlDataOptions
   const query = useQuery<DashboardData, Error>({
     queryKey,
     queryFn: async () => {
-      const { data: responseData, error: functionError } = await supabase.functions.invoke("ghl-dashboard", {
+      const { data: responseData, error: functionError } = await supabase.functions.invoke("kommo-dashboard", {
         body: {
           workspace_id: filters.workspaceId,
           startDate: filters.startDate.toISOString(),
@@ -217,7 +218,7 @@ export function useGhlData(filters: DashboardFilters, options: UseGhlDataOptions
   const syncMutation = useMutation<void, Error, void>({
     mutationFn: async () => {
       if (!filters.workspaceId) throw new Error("Sem workspace ativo");
-      const ckey = `ghl-sync-last:${filters.workspaceId}`;
+      const ckey = `kommo-sync-last:${filters.workspaceId}`;
       const lastStr = localStorage.getItem(ckey);
       const last = lastStr ? Number(lastStr) : 0;
       const elapsed = Date.now() - last;
@@ -227,7 +228,7 @@ export function useGhlData(filters: DashboardFilters, options: UseGhlDataOptions
       }
       localStorage.setItem(ckey, String(Date.now()));
 
-      const { data: syncData, error: syncError } = await supabase.functions.invoke("ghl-sync", {
+      const { data: syncData, error: syncError } = await supabase.functions.invoke("kommo-sync", {
         body: { workspace_id: filters.workspaceId },
       });
       const syncErrMsg = (syncData as { error?: string } | null)?.error;
@@ -237,7 +238,7 @@ export function useGhlData(filters: DashboardFilters, options: UseGhlDataOptions
       }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["ghl-dashboard", filters.workspaceId] });
+      queryClient.invalidateQueries({ queryKey: ["kommo-dashboard", filters.workspaceId] });
     },
     onError: (err) => {
       if (err.message.startsWith("COOLDOWN:")) {
@@ -270,6 +271,7 @@ export function useGhlData(filters: DashboardFilters, options: UseGhlDataOptions
   return {
     data: query.data ?? null,
     isLoading: query.isLoading || syncMutation.isPending,
+    isFetching: query.isFetching || syncMutation.isPending,
     error: query.error ? query.error.message : null,
     refetch,
     cachedAt: query.data?.cachedAt ?? null,

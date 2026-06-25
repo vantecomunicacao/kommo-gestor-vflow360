@@ -94,7 +94,6 @@ serve(async (req) => {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -227,7 +226,7 @@ Regras:
 - Se a pergunta não puder ser respondida com os dados disponíveis, diga isso com franqueza.`;
 
     // --- Loop de tool-calling ---
-    const resolved = await resolveAiProvider(supabase, ownerId, OPENAI_API_KEY);
+    const resolved = await resolveAiProvider(supabase, ownerId);
     const messages: any[] = [
       { role: "system", content: systemPrompt },
       ...((prior || []) as Array<any>).map((m) => ({ role: m.role, content: m.content })),

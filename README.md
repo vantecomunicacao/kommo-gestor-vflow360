@@ -20,6 +20,9 @@ npx tsc --noEmit     # type-check
 
 ## Deploy
 
-Use a skill `/deploy-vflow360` (definida em [`.claude/skills/deploy-vflow360/`](.claude/skills/deploy-vflow360/)). Cobre edge functions e frontend (Coolify), com diagnose, type-check, e verify integrados.
+> ⚠️ A skill antiga `/deploy-vflow360` foi **removida** deste repositório: ela
+> apontava para os recursos do sistema GHL/produção e **não pode ser usada aqui**.
+> Um novo fluxo de deploy, próprio deste sistema, será criado pelo responsável.
 
-Produção: <https://gestor.vflow360.com.br>
+Enquanto o novo caminho de deploy não existir, o deploy deve ser feito manualmente
+pelo responsável (Supabase migrations + edge functions e o frontend).

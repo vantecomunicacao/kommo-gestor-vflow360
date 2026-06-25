@@ -81,7 +81,7 @@ export default function Admin() {
     payload: Record<string, unknown> = {},
   ): Promise<T> => {
     const { data, error } = await supabase.functions.invoke<T & { error?: string }>(
-      "admin-users",
+      "kommo-admin-users",
       { body: { action, ...payload } },
     );
     if (error) {
@@ -144,7 +144,7 @@ export default function Admin() {
       const { data, error } = await supabase.functions.invoke<{
         error?: string;
         promoted?: boolean;
-      }>("admin-bootstrap");
+      }>("kommo-admin-bootstrap");
       if (error) throw new Error(error.message);
       if (data?.error) throw new Error(data.error);
       if (data?.promoted) {

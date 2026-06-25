@@ -1,3 +1,4 @@
+// @ts-nocheck — "futuramente": depende de tabelas/funcs do schema antigo (public/GHL) ainda não migradas para kommo. Página não priorizada nesta fase.
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Filter, Loader2 } from "lucide-react";

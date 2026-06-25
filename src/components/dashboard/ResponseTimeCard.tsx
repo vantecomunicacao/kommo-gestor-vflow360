@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Clock, TrendingDown, TrendingUp, MessageCircleReply, User, ChevronRight } from "lucide-react";
-import { ResponseTime as RT } from "@/hooks/useGhlData";
+import { ResponseTime as RT } from "@/hooks/useKommoData";
 import { SectionTooltip } from "./SectionTooltip";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";

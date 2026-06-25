@@ -1,6 +1,6 @@
 // Resolucao do provider/modelo/chave de IA por workspace.
 //
-// Extraido de ai-analyze-v2 (provider config do owner + fallback OPENAI_API_KEY).
+// Provider config do owner do workspace; sem fallback de token global do sistema.
 // Regra do projeto: trabalho comum vive em _shared/ e e INLINED (import direto),
 // nunca chamado via HTTP edge->edge.
 //
@@ -25,11 +25,11 @@ const OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 const DEFAULT_MODEL = "gpt-4o-mini";
 
 // Le ai_provider_config do owner do workspace e resolve a chave/modelo a usar.
-// Lanca se nao houver nenhuma chave (nem do workspace nem global).
+// Cada conta DEVE ter sua propria chave (sem fallback de token global do sistema),
+// para que o custo de IA seja atribuido a cada conta. Lanca se a conta nao tiver chave.
 export async function resolveAiProvider(
   supabase: any,
   ownerUserId: string,
-  globalApiKey?: string | null,
 ): Promise<ResolvedAiProvider> {
   const { data: providerConfig } = await supabase
     .from("ai_provider_config")
@@ -38,21 +38,19 @@ export async function resolveAiProvider(
     .maybeSingle();
 
   const cfg = (providerConfig || null) as AiProviderConfigRow | null;
-  const useOpenAI = cfg?.provider === "openai" && !!cfg?.api_key;
-  const model = (useOpenAI ? cfg?.model : null) || DEFAULT_MODEL;
-  const apiKey = (useOpenAI ? cfg!.api_key : globalApiKey) || "";
+  const hasKey = cfg?.provider === "openai" && !!cfg?.api_key;
 
-  if (!apiKey) {
+  if (!hasKey) {
     throw new Error(
-      "No OpenAI API key configured. Set OPENAI_API_KEY or configure a provider in Settings.",
+      "Nenhuma chave de IA configurada para esta conta. Configure sua chave de OpenAI em Configurações › IA.",
     );
   }
 
   return {
-    useOpenAI: !!useOpenAI,
-    model,
+    useOpenAI: true,
+    model: cfg!.model || DEFAULT_MODEL,
     providerLabel: "openai",
-    apiKey,
+    apiKey: cfg!.api_key!,
     endpoint: OPENAI_ENDPOINT,
   };
 }

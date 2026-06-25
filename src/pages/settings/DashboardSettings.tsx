@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { Loader2, Save, RefreshCw } from "lucide-react";
@@ -14,15 +14,15 @@ import { ptBR } from "date-fns/locale";
 import { FUNNEL_BUCKETS, DATE_TYPES } from "@/lib/dashboard-funnel";
 
 interface Stage { id: string; name: string; }
-interface Pipeline { id: string; ghl_id: string; name: string; stages: Stage[]; }
-interface CustomField { id: string; ghl_id: string; name: string; field_key: string | null; data_type?: string | null; model?: string | null; }
+interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
+interface CustomField { id: string; kommo_id: string; name: string; code: string | null; field_type?: string | null; entity_type?: string | null; }
 
 export default function DashboardSettings() {
   const { activeWorkspace } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<{ last_sync_at: string | null; last_sync_status: string | null; opportunities_count: number | null } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<{ last_sync_at: string | null; last_sync_status: string | null; leads_count: number | null } | null>(null);
   const [pipelines, setPipelines] = useState<Pipeline[]>([]);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
 
@@ -33,6 +33,7 @@ export default function DashboardSettings() {
   const [utmCampaignField, setUtmCampaignField] = useState<string>("");
   const [utmContentField, setUtmContentField] = useState<string>("");
   const [utmTermField, setUtmTermField] = useState<string>("");
+  const [originFieldName, setOriginFieldName] = useState<string>("");
   const [additionalDateField, setAdditionalDateField] = useState<string>("");
   const [visibleFields, setVisibleFields] = useState<string[]>([]);
   const [chartFields, setChartFields] = useState<string[]>([]);
@@ -50,19 +51,21 @@ export default function DashboardSettings() {
     if (!activeWorkspace?.id) return;
     setLoading(true);
     try {
-      const [{ data: pipes }, { data: fields }, { data: settings }, { data: status }] = await Promise.all([
-        supabase.from("ghl_pipelines").select("*").eq("workspace_id", activeWorkspace.id),
-        supabase.from("ghl_custom_fields").select("id,ghl_id,name,field_key,data_type,model").eq("workspace_id", activeWorkspace.id),
-        supabase.from("ghl_dashboard_settings").select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
-        supabase.from("ghl_sync_status").select("last_sync_at,last_sync_status,opportunities_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),
+      const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }] = await Promise.all([
+        supabase.from("pipelines" as any).select("*").eq("workspace_id", activeWorkspace.id),
+        supabase.from("custom_fields" as any).select("id,kommo_id,name,code,field_type,entity_type").eq("workspace_id", activeWorkspace.id),
+        supabase.from("dashboard_settings" as any).select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
+        supabase.from("sync_status" as any).select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),
       ]);
       setSyncStatus(status as any);
+      // Kommo: etapas vivem em `statuses` (jsonb) dentro de cada pipeline.
       const ps = (pipes || []).map((p: any) => ({
-        id: p.id, ghl_id: p.ghl_id, name: p.name,
-        stages: Array.isArray(p.stages) ? p.stages : [],
+        id: p.id, kommo_id: p.kommo_id, name: p.name,
+        stages: (Array.isArray(p.statuses) ? p.statuses : []).map((s: any) => ({ id: String(s.id), name: s.name })),
       }));
       setPipelines(ps);
       setCustomFields((fields || []) as any);
+      const settings = settingsRow as any;
       if (settings) {
         setDefaultPipelines(settings.default_pipeline_ids || []);
         setStageMapping((settings.funnel_stage_mapping as any) || {});
@@ -72,8 +75,9 @@ export default function DashboardSettings() {
         setUtmContentField((settings as any).utm_content_field_id || "");
         setUtmTermField((settings as any).utm_term_field_id || "");
         setAdditionalDateField(settings.additional_date_field || "");
+        setOriginFieldName(settings.origin_field_name || "");
         setVisibleFields(settings.visible_custom_fields || []);
-        setChartFields((settings as any).chart_custom_fields || []);
+        setChartFields(settings.chart_custom_fields || []);
         setBusinessStart((settings as any).business_hours_start || "09:00");
         setBusinessEnd((settings as any).business_hours_end || "18:00");
         setWonStageKeys(settings.won_stage_keys || ["venda_ganha"]);
@@ -99,14 +103,15 @@ export default function DashboardSettings() {
         utm_content_field_id: utmContentField || null,
         utm_term_field_id: utmTermField || null,
         additional_date_field: additionalDateField || null,
+        origin_field_name: originFieldName || null,
         visible_custom_fields: visibleFields,
-        chart_custom_fields: chartFields.filter((id) => visibleFields.includes(id)),
+        chart_custom_fields: chartFields,
         business_hours_start: businessStart || "09:00",
         business_hours_end: businessEnd || "18:00",
         won_stage_keys: wonStageKeys,
       };
       const { error } = await supabase
-        .from("ghl_dashboard_settings")
+        .from("dashboard_settings" as any)
         .upsert(payload as any, { onConflict: "workspace_id" });
       if (error) throw error;
       toast.success("Configurações salvas");
@@ -121,7 +126,7 @@ export default function DashboardSettings() {
     if (!activeWorkspace?.id) return;
 
     // Cooldown client-side de 2min por workspace
-    const ckey = `ghl-sync-last:${activeWorkspace.id}`;
+    const ckey = `kommo-sync-last:${activeWorkspace.id}`;
     const lastStr = localStorage.getItem(ckey);
     const last = lastStr ? Number(lastStr) : 0;
     const elapsed = Date.now() - last;
@@ -137,7 +142,7 @@ export default function DashboardSettings() {
 
     setSyncing(true);
     try {
-      const { data, error } = await supabase.functions.invoke("ghl-sync", {
+      const { data, error } = await supabase.functions.invoke("kommo-sync", {
         body: { workspace_id: activeWorkspace.id },
       });
       if (error) throw error;
@@ -145,7 +150,7 @@ export default function DashboardSettings() {
       if (errMsg) {
         toast.warning("Sincronização", { description: errMsg });
       } else {
-        toast.success("Sincronização concluída", { description: "Pipelines, campos, usuários e oportunidades atualizados." });
+        toast.success("Sincronização concluída", { description: "Pipelines, campos, usuários e leads atualizados." });
       }
       await loadAll();
     } catch (e) {
@@ -155,26 +160,27 @@ export default function DashboardSettings() {
     }
   };
 
-  const togglePipeline = (ghl_id: string) => {
+  const togglePipeline = (kommo_id: string) => {
     setDefaultPipelines((prev) =>
-      prev.includes(ghl_id) ? prev.filter((p) => p !== ghl_id) : [...prev, ghl_id]
+      prev.includes(kommo_id) ? prev.filter((p) => p !== kommo_id) : [...prev, kommo_id]
     );
   };
 
-  const toggleField = (ghl_id: string) => {
+  const toggleField = (kommo_id: string) => {
     setVisibleFields((prev) => {
-      const next = prev.includes(ghl_id) ? prev.filter((p) => p !== ghl_id) : [...prev, ghl_id];
-      // se removeu o campo, remove também do gráfico
-      if (!next.includes(ghl_id)) {
-        setChartFields((cp) => cp.filter((p) => p !== ghl_id));
+      const willRemove = prev.includes(kommo_id);
+      if (willRemove) {
+        // Campo não visível não pode ter pizza: tira do chart também.
+        setChartFields((cf) => cf.filter((p) => p !== kommo_id));
+        return prev.filter((p) => p !== kommo_id);
       }
-      return next;
+      return [...prev, kommo_id];
     });
   };
 
-  const toggleChartField = (ghl_id: string) => {
+  const toggleChartField = (kommo_id: string) => {
     setChartFields((prev) =>
-      prev.includes(ghl_id) ? prev.filter((p) => p !== ghl_id) : [...prev, ghl_id]
+      prev.includes(kommo_id) ? prev.filter((p) => p !== kommo_id) : [...prev, kommo_id]
     );
   };
 
@@ -186,8 +192,6 @@ export default function DashboardSettings() {
     return <p className="text-muted-foreground">Selecione uma conta primeiro.</p>;
   }
 
-  const allStages = pipelines.flatMap((p) => p.stages.map((s) => ({ ...s, pipelineName: p.name })));
-
   return (
     <div className="space-y-6 max-w-5xl">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -198,7 +202,7 @@ export default function DashboardSettings() {
             <p className="text-xs text-muted-foreground mt-1">
               Última sincronização:{" "}
               {formatDistanceToNow(new Date(syncStatus.last_sync_at), { addSuffix: true, locale: ptBR })}
-              {typeof syncStatus.opportunities_count === "number" && ` · ${syncStatus.opportunities_count} oportunidades`}
+              {typeof syncStatus.leads_count === "number" && ` · ${syncStatus.leads_count} leads`}
               {syncStatus.last_sync_status === "error" && " · ⚠️ erro"}
             </p>
           )}
@@ -228,8 +232,8 @@ export default function DashboardSettings() {
                 type="radio"
                 name="defaultPipeline"
                 className="accent-primary"
-                checked={defaultPipelines[0] === p.ghl_id}
-                onChange={() => setDefaultPipelines([p.ghl_id])}
+                checked={defaultPipelines[0] === p.kommo_id}
+                onChange={() => setDefaultPipelines([p.kommo_id])}
               />
               <span>{p.name}</span>
               <span className="text-xs text-muted-foreground">({p.stages.length} etapas)</span>
@@ -259,35 +263,40 @@ export default function DashboardSettings() {
             Associe cada etapa do CRM a uma das 4 fases do funil analítico. Etapas sem mapeamento são ignoradas.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {allStages.map((s) => (
-            <div key={s.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
-              <div className="text-sm">
-                <div>{s.name}</div>
-                <div className="text-xs text-muted-foreground">{(s as any).pipelineName}</div>
-              </div>
-              <Select
-                value={stageMapping[s.id] || "__none__"}
-                onValueChange={(v) =>
-                  setStageMapping((prev) => {
-                    const next = { ...prev };
-                    if (v === "__none__") delete next[s.id];
-                    else next[s.id] = v;
-                    return next;
-                  })
-                }
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Ignorar</SelectItem>
-                  {FUNNEL_BUCKETS.map((b) => (
-                    <SelectItem key={b.key} value={b.key}>{b.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <CardContent className="space-y-6">
+          {pipelines.map((p) => (
+            <div key={p.id} className="space-y-2">
+              <h4 className="text-sm font-semibold text-foreground border-b pb-1">
+                {p.name}
+                <span className="ml-2 text-xs font-normal text-muted-foreground">({p.stages.length} etapas)</span>
+              </h4>
+              {p.stages.map((s) => (
+                <div key={s.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center pl-1">
+                  <div className="text-sm">{s.name}</div>
+                  <Select
+                    value={stageMapping[s.id] || "__none__"}
+                    onValueChange={(v) =>
+                      setStageMapping((prev) => {
+                        const next = { ...prev };
+                        if (v === "__none__") delete next[s.id];
+                        else next[s.id] = v;
+                        return next;
+                      })
+                    }
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Ignorar</SelectItem>
+                      {FUNNEL_BUCKETS.map((b) => (
+                        <SelectItem key={b.key} value={b.key}>{b.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
             </div>
           ))}
-          {allStages.length === 0 && <p className="text-sm text-muted-foreground">Sincronize pipelines primeiro.</p>}
+          {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Sincronize pipelines primeiro.</p>}
         </CardContent>
       </Card>
 
@@ -314,12 +323,36 @@ export default function DashboardSettings() {
         </CardContent>
       </Card>
 
+      {/* Origem do lead */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Origem do lead (opcional)</CardTitle>
+          <CardDescription>
+            Campo personalizado que indica a origem do lead. Quando configurado, ele tem prioridade sobre o UTM Source
+            nos gráficos "Origem dos leads" e "Origem das vendas". Se não configurar, a origem cai no UTM Source.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Select value={originFieldName || "__none__"} onValueChange={(v) => setOriginFieldName(v === "__none__" ? "" : v)}>
+            <SelectTrigger><SelectValue placeholder="— não configurado —" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">— não configurado —</SelectItem>
+              {customFields
+                .filter((f) => (f.entity_type || "").toLowerCase() === "leads")
+                .map((f) => (
+                  <SelectItem key={f.id} value={f.code || f.kommo_id}>{f.name}</SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
       {/* Campos UTM */}
       <Card>
         <CardHeader>
           <CardTitle>Campos UTM</CardTitle>
           <CardDescription>
-            Mapeie quais custom fields do GHL correspondem aos parâmetros UTM. Source e Campaign alimentam os pies "Origem dos leads" e "Origem das vendas" no dashboard. Medium é usado como filtro. Content e Term ficam disponíveis para análises detalhadas.
+            Mapeie quais campos personalizados do Kommo correspondem aos parâmetros UTM. Source e Campaign alimentam os pies "Origem dos leads" e "Origem das vendas" no dashboard. Medium é usado como filtro. Content e Term ficam disponíveis para análises detalhadas.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -341,9 +374,9 @@ export default function DashboardSettings() {
                   <SelectContent>
                     <SelectItem value="__none__">— não configurado —</SelectItem>
                     {customFields
-                      .filter((f) => (f.model || "").toLowerCase() === "opportunity")
+                      .filter((f) => (f.entity_type || "").toLowerCase() === "leads")
                       .map((f) => (
-                        <SelectItem key={f.id} value={f.ghl_id}>{f.name}</SelectItem>
+                        <SelectItem key={f.id} value={f.code || f.kommo_id}>{f.name}</SelectItem>
                       ))}
                   </SelectContent>
                 </Select>
@@ -358,36 +391,39 @@ export default function DashboardSettings() {
         <CardHeader>
           <CardTitle>Campos customizados visíveis</CardTitle>
           <CardDescription>
-            Quais campos contam na seção de Qualidade dos Dados. Apenas campos de <strong>Oportunidade</strong> são exibidos
-            — campos de Contato não são salvos nas oportunidades do CRM e apareceriam sempre como 0% preenchidos.
+            Quais campos contam na seção de Qualidade dos Dados. Apenas campos de <strong>Lead</strong> são exibidos
+            — campos de Contato não são salvos nos leads do CRM e apareceriam sempre como 0% preenchidos.
+            Marque <strong>"Gráfico de pizza"</strong> em um campo visível para também exibir a distribuição dos seus
+            valores como um gráfico de pizza no dashboard.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 max-h-96 overflow-y-auto">
           {(() => {
-            const oppFields = customFields.filter((f) => (f.model || "").toLowerCase() === "opportunity");
-            if (oppFields.length === 0) {
-              return <p className="text-sm text-muted-foreground">Nenhum campo customizado de oportunidade sincronizado.</p>;
+            const leadFields = customFields.filter((f) => (f.entity_type || "").toLowerCase() === "leads");
+            if (leadFields.length === 0) {
+              return <p className="text-sm text-muted-foreground">Nenhum campo personalizado de lead sincronizado.</p>;
             }
-            return oppFields.map((f) => {
-              const isVisible = visibleFields.includes(f.ghl_id);
+            return leadFields.map((f) => {
+              const isVisible = visibleFields.includes(f.kommo_id);
+              const hasChart = chartFields.includes(f.kommo_id);
               return (
                 <div key={f.id} className="flex items-center justify-between gap-4 py-1">
                   <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
                     <Checkbox
                       checked={isVisible}
-                      onCheckedChange={() => toggleField(f.ghl_id)}
+                      onCheckedChange={() => toggleField(f.kommo_id)}
                     />
                     <span className="truncate">{f.name}</span>
-                    {f.field_key && <span className="text-xs text-muted-foreground hidden sm:inline">({f.field_key})</span>}
-                    {f.data_type && <span className="text-xs text-muted-foreground hidden sm:inline">[{f.data_type}]</span>}
+                    {f.code && <span className="text-xs text-muted-foreground hidden sm:inline">({f.code})</span>}
+                    {f.field_type && <span className="text-xs text-muted-foreground hidden sm:inline">[{f.field_type}]</span>}
                   </label>
                   {isVisible && (
-                    <label className="flex items-center gap-2 cursor-pointer text-xs text-muted-foreground shrink-0">
+                    <label className="flex items-center gap-2 cursor-pointer shrink-0 text-xs text-muted-foreground">
                       <Checkbox
-                        checked={chartFields.includes(f.ghl_id)}
-                        onCheckedChange={() => toggleChartField(f.ghl_id)}
+                        checked={hasChart}
+                        onCheckedChange={() => toggleChartField(f.kommo_id)}
                       />
-                      <span>Mostrar gráfico no dashboard</span>
+                      <span>Gráfico de pizza</span>
                     </label>
                   )}
                 </div>
@@ -395,11 +431,11 @@ export default function DashboardSettings() {
             });
           })()}
           {visibleFields.some((id) => {
-            const f = customFields.find((c) => c.ghl_id === id);
-            return f && (f.model || "").toLowerCase() !== "opportunity";
+            const f = customFields.find((c) => c.kommo_id === id);
+            return f && (f.entity_type || "").toLowerCase() !== "leads";
           }) && (
             <p className="text-xs text-warning-ink mt-3">
-              ⚠ Há campos de Contato selecionados nas suas configurações antigas. Eles aparecerão sempre como 0%. Remova-os e selecione campos de Oportunidade.
+              ⚠ Há campos de Contato selecionados nas suas configurações antigas. Eles aparecerão sempre como 0%. Remova-os e selecione campos de Lead.
             </p>
           )}
         </CardContent>
@@ -448,18 +484,16 @@ export default function DashboardSettings() {
         <CardHeader>
           <CardTitle>Campo de data adicional (opcional)</CardTitle>
           <CardDescription>
-            Quando configurado, o dashboard ganha um segundo filtro de período baseado nesse campo (ex: data de fechamento).
-            Apenas campos do tipo data do CRM são listados.
+            Quando configurado, o dashboard ganha um segundo filtro de período (somado ao período principal).
+            Recomendado: <strong>Data da venda (fechamento ganho)</strong> — usa a data nativa do Kommo, sem
+            precisar de campo personalizado nem preenchimento manual.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {(() => {
             const dateFields = customFields.filter((f) =>
-              f.data_type ? DATE_TYPES.includes(f.data_type) : false
+              f.field_type ? DATE_TYPES.includes(f.field_type) : false
             );
-            if (dateFields.length === 0) {
-              return <p className="text-sm text-muted-foreground">Nenhum campo de data sincronizado do CRM.</p>;
-            }
             return (
               <Select
                 value={additionalDateField || "__none__"}
@@ -468,9 +502,17 @@ export default function DashboardSettings() {
                 <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__none__">Nenhum</SelectItem>
-                  {dateFields.map((f) => (
-                    <SelectItem key={f.id} value={f.ghl_id}>{f.name}</SelectItem>
-                  ))}
+                  {/* Nativos do Kommo (closed_at) — não exigem campo personalizado */}
+                  <SelectItem value="__closed_won__">Data da venda (fechamento ganho)</SelectItem>
+                  <SelectItem value="__closed_lost__">Data da perda (fechamento perdido)</SelectItem>
+                  {dateFields.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Campos personalizados (data)</SelectLabel>
+                      {dateFields.map((f) => (
+                        <SelectItem key={f.id} value={f.kommo_id}>{f.name}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
             );

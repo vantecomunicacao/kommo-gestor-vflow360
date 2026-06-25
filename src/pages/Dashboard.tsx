@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
-import { useGhlData, DashboardFilters } from "@/hooks/useGhlData";
+import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
 import { supabase } from "@/integrations/supabase/client";
 import { Header } from "@/components/dashboard/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -20,16 +20,13 @@ import { groupTopN } from "@/lib/group-top-n";
 import { buildPieColorMap } from "@/lib/pie-palette";
 import { FunnelCycles } from "@/components/dashboard/FunnelCycles";
 import { DataQuality } from "@/components/dashboard/DataQuality";
-import { ResponseTimeCard } from "@/components/dashboard/ResponseTimeCard";
 import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
 import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
-import { AIInsights } from "@/components/dashboard/AIInsights";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
-import { AIUsageCard } from "@/components/dashboard/AIUsageCard";
 
 type SavedFilters = {
   from?: string;
@@ -52,8 +49,8 @@ export default function Dashboard() {
   const { permissions } = usePermissions();
   const [hydrated, setHydrated] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
-    from: subDays(new Date(), 6),
-    to: new Date(),
+    from: subDays(new Date(), 7),
+    to: subDays(new Date(), 1),
   });
   const [additionalDateRange, setAdditionalDateRange] = useState<DateRange | undefined>(undefined);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
@@ -69,7 +66,17 @@ export default function Dashboard() {
     let cancelled = false;
 
     (async () => {
-      // 1) Tentar restaurar filtros salvos (inclusive período)
+      // 0) Funil padrão do workspace — sempre tem prioridade na abertura do dashboard.
+      const { data: settings } = await supabase
+        .from("dashboard_settings")
+        .select("default_pipeline_ids")
+        .eq("workspace_id", activeWorkspace.id)
+        .maybeSingle();
+      if (cancelled) return;
+      const defaultPipeline = (settings?.default_pipeline_ids || [])[0] ?? null;
+
+      // 1) Restaurar filtros salvos (período, vendedores, UTM…)
+      let restoredPipeline: string | null = null;
       let restored = false;
       try {
         const raw = localStorage.getItem(filtersStorageKey(activeWorkspace.id));
@@ -78,14 +85,14 @@ export default function Dashboard() {
           setDateRange(
             saved.from
               ? { from: new Date(saved.from), to: saved.to ? new Date(saved.to) : undefined }
-              : { from: subDays(new Date(), 6), to: new Date() }
+              : { from: subDays(new Date(), 7), to: subDays(new Date(), 1) }
           );
           setAdditionalDateRange(
             saved.addFrom
               ? { from: new Date(saved.addFrom), to: saved.addTo ? new Date(saved.addTo) : undefined }
               : undefined
           );
-          setSelectedPipelineId(saved.pipelineId ?? null);
+          restoredPipeline = saved.pipelineId ?? null;
           setSelectedStageIds(saved.stageIds ?? (saved.stageId ? [saved.stageId] : []));
           setSelectedSellerIds(saved.sellerIds ?? (saved.sellerId ? [saved.sellerId] : []));
           setSelectedUtmMedium(saved.utmMedium ?? null);
@@ -98,23 +105,21 @@ export default function Dashboard() {
 
       if (!restored) {
         // Reset padrão
-        setDateRange({ from: subDays(new Date(), 6), to: new Date() });
+        setDateRange({ from: subDays(new Date(), 7), to: subDays(new Date(), 1) });
         setAdditionalDateRange(undefined);
         setSelectedSellerIds([]);
         setSelectedUtmMedium(null);
         setSelectedUtmCampaign(null);
         setSelectedStageIds([]);
-        setSelectedPipelineId(null);
+      }
 
-        // Aplicar pipeline padrão do workspace
-        const { data } = await supabase
-          .from("ghl_dashboard_settings")
-          .select("default_pipeline_ids")
-          .eq("workspace_id", activeWorkspace.id)
-          .maybeSingle();
-        if (cancelled) return;
-        const def = (data?.default_pipeline_ids || [])[0];
-        if (def) setSelectedPipelineId(def);
+      // 2) Pipeline: o funil padrão configurado vence na abertura. Se as etapas salvas
+      //    eram de outro funil, limpa (etapas são específicas de cada funil).
+      if (defaultPipeline) {
+        setSelectedPipelineId(defaultPipeline);
+        if (restored && restoredPipeline !== defaultPipeline) setSelectedStageIds([]);
+      } else {
+        setSelectedPipelineId(restored ? restoredPipeline : null);
       }
 
       if (!cancelled) setHydrated(true);
@@ -145,8 +150,8 @@ export default function Dashboard() {
   }, [hydrated, activeWorkspace?.id, dateRange, additionalDateRange, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign]);
 
 
-  const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 6)), [dateRange?.from]);
-  const endDate = useMemo(() => endOfDay(dateRange?.to || dateRange?.from || new Date()), [dateRange?.to, dateRange?.from]);
+  const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 7)), [dateRange?.from]);
+  const endDate = useMemo(() => endOfDay(dateRange?.to || dateRange?.from || subDays(new Date(), 1)), [dateRange?.to, dateRange?.from]);
 
   const additionalStartDate = useMemo(
     () => (additionalDateRange?.from ? startOfDay(additionalDateRange.from) : null),
@@ -180,8 +185,8 @@ export default function Dashboard() {
     additionalEndDate: null,
   }), [filters, startDate, periodDays]);
 
-  const { data, isLoading, error, refetch, cachedAt } = useGhlData(filters);
-  const { data: prevData } = useGhlData(prevFilters, { enabled: !!data });
+  const { data, isLoading, isFetching, error, refetch, cachedAt } = useKommoData(filters);
+  const { data: prevData } = useKommoData(prevFilters, { enabled: !!data });
 
   // Mapa nome→cor compartilhado entre os cards de origem (leads e vendas), para
   // que a MESMA origem apareça na MESMA cor nos dois gráficos. Usa o mesmo
@@ -234,6 +239,12 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      {/* Barra de carregamento indeterminada: feedback ao trocar filtros/datas */}
+      {isFetching && (
+        <div className="fixed top-0 left-0 right-0 z-50 h-1 overflow-hidden bg-primary/15" role="status" aria-label="Carregando dados">
+          <div className="h-full w-1/3 bg-primary animate-dashboard-loading rounded-full" />
+        </div>
+      )}
       <Header
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
@@ -259,6 +270,7 @@ export default function Dashboard() {
         additionalDateLabel={data.additionalDateFieldName || null}
       />
 
+      <div className={cn("space-y-5 sm:space-y-6 transition-opacity duration-300", isFetching && "opacity-50 pointer-events-none")} aria-busy={isFetching}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
@@ -302,35 +314,30 @@ export default function Dashboard() {
       </div>
 
       <AnimatedSection className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
-        <MetricCard title="Total de Oportunidades" value={data.totalLeads} icon={Users} variant="default" tooltip="Quantidade total de oportunidades criadas no período filtrado." trend={leadsTrend} />
-        <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Oportunidades que chegaram à etapa de venda ganha no período." trend={wonTrend} />
+        <MetricCard title="Total de Leads" value={data.totalLeads} icon={Users} variant="default" tooltip="Quantidade total de leads criados no período filtrado." trend={leadsTrend} />
+        <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Leads que chegaram à etapa de venda ganha no período." trend={wonTrend} />
         <MetricCard title="Taxa de Conversão" value={formatPercentage(data.conversionRates.overallConversion)} icon={TrendingUp} variant="accent" tooltip="Percentual da primeira etapa até venda ganha." trend={convTrend} />
-        <MetricCard title="Receita Ganha" value={formatBRL(wonRevenue)} icon={Banknote} variant="success" tooltip="Soma dos valores monetários das oportunidades marcadas como Venda Ganha no período." trend={revenueTrend} />
-        <MetricCard title="Em Negociação" value={formatBRL(negotiatingRevenue)} icon={HandCoins} variant="accent" tooltip="Soma dos valores monetários das oportunidades nas etapas Proposta Enviada e Fechamento — receita potencial em jogo no pipeline." trend={negotiatingTrend} />
+        <MetricCard title="Receita Ganha" value={formatBRL(wonRevenue)} icon={Banknote} variant="success" tooltip="Soma dos valores dos leads marcados como Venda Ganha no período." trend={revenueTrend} />
+        <MetricCard title="Em Negociação" value={formatBRL(negotiatingRevenue)} icon={HandCoins} variant="accent" tooltip="Soma dos valores dos leads nas etapas Proposta Enviada e Fechamento — receita potencial em jogo no pipeline." trend={negotiatingTrend} />
         <MetricCard title="Ticket Médio" value={formatBRL(ticketAvg)} icon={Receipt} variant="default" tooltip="Receita ganha dividida pela quantidade de vendas ganhas no período." trend={ticketTrend} />
       </AnimatedSection>
 
 
-      <AnimatedSection className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:gap-6" delay={0.05}>
-        <div className="lg:col-span-1">
-          <FunnelVisualization
-            funnelStages={data.funnelStages}
-            conversionRates={data.conversionRates}
-            lostLeads={data.lostLeads || 0}
-            lostLeadsDetail={data.lostLeadsDetail || []}
-            belowLostCard={
-              <FunnelCycles
-                cycleToWonDays={data.cycleToWonDays ?? 0}
-                cycleToWonSample={data.cycleToWonSample ?? 0}
-                cycleToLostDays={data.cycleToLostDays ?? 0}
-                cycleToLostSample={data.cycleToLostSample ?? 0}
-              />
-            }
-          />
-        </div>
-        <div className="lg:col-span-1 lg:relative">
-          <AIInsights />
-        </div>
+      <AnimatedSection delay={0.05}>
+        <FunnelVisualization
+          funnelStages={data.funnelStages}
+          conversionRates={data.conversionRates}
+          lostLeads={data.lostLeads || 0}
+          lostLeadsDetail={data.lostLeadsDetail || []}
+          belowLostCard={
+            <FunnelCycles
+              cycleToWonDays={data.cycleToWonDays ?? 0}
+              cycleToWonSample={data.cycleToWonSample ?? 0}
+              cycleToLostDays={data.cycleToLostDays ?? 0}
+              cycleToLostSample={data.cycleToLostSample ?? 0}
+            />
+          }
+        />
       </AnimatedSection>
 
       <AnimatedSection className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6" delay={0.05}>
@@ -338,6 +345,7 @@ export default function Dashboard() {
           mode="leads"
           distribution={data.leadsOriginDistribution || []}
           fillRate={data.leadsOriginFillRate || 0}
+          total={data.totalLeads}
           configured={data.utmConfigured?.source || false}
           colorMap={originColorMap}
         />
@@ -345,6 +353,7 @@ export default function Dashboard() {
           mode="wins"
           distribution={data.wonOriginDistribution || []}
           fillRate={data.wonOriginFillRate || 0}
+          total={currentWon}
           configured={data.utmConfigured?.source || false}
           colorMap={originColorMap}
         />
@@ -357,11 +366,8 @@ export default function Dashboard() {
         </AnimatedSection>
       )}
 
-      <AnimatedSection className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6" delay={0.05}>
-        <div className="lg:col-span-2">
-          <DataQuality customFields={data.customFields} overallFillRate={data.overallFillRate} />
-        </div>
-        <ResponseTimeCard responseTime={data.responseTime} prevResponseTime={prevData?.responseTime} />
+      <AnimatedSection delay={0.05}>
+        <DataQuality customFields={data.customFields} overallFillRate={data.overallFillRate} />
       </AnimatedSection>
 
       <AnimatedSection delay={0.05}>
@@ -384,10 +390,7 @@ export default function Dashboard() {
       <AnimatedSection delay={0.05}>
         <TimePerStage averageTimePerStage={data.averageTimePerStage} />
       </AnimatedSection>
-
-      <AnimatedSection delay={0.05}>
-        <AIUsageCard startDate={startDate} endDate={endDate} />
-      </AnimatedSection>
+      </div>
     </div>
   );
 }

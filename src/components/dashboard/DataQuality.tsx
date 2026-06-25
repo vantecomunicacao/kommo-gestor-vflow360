@@ -1,4 +1,4 @@
-import { CustomField } from "@/hooks/useGhlData";
+import { CustomField } from "@/hooks/useKommoData";
 import { ClipboardCheck, AlertCircle, CheckCircle2 } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 import { cn } from "@/lib/utils";

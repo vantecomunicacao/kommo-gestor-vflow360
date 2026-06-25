@@ -8,7 +8,7 @@ const STORAGE_KEY = "vflow-theme";
 const EVENT = "vflow-theme-change";
 
 function isDarkNow(): boolean {
-  if (typeof document === "undefined") return true;
+  if (typeof document === "undefined") return false;
   return document.documentElement.classList.contains("dark");
 }
 

@@ -15,7 +15,7 @@ export default {
     extend: {
       fontFamily: {
         sans: [
-          "Satoshi",
+          "Inter",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",
@@ -23,7 +23,7 @@ export default {
           "Roboto",
           "sans-serif",
         ],
-        display: ["Satoshi", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
         border: "hsl(var(--border))",
@@ -121,10 +121,15 @@ export default {
             height: "0",
           },
         },
+        "dashboard-loading": {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(400%)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "dashboard-loading": "dashboard-loading 1.1s ease-in-out infinite",
       },
     },
   },

@@ -1,5 +1,5 @@
-/* Satoshi via Fontshare — fonte oficial do DS Vante */
-@import url('https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap');
+/* Inter via Google Fonts — fonte do clone Kommo (light/flat) */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -38,44 +38,46 @@
     --neutro-900:  0 0% 5%;
 
     /* ============================================================
-       TEMA CLARO — aliases shadcn → tokens Vante
+       TEMA CLARO (PADRÃO) — aliases shadcn → paleta "clone Kommo"
+       Light, flat e denso: superfícies brancas sobre board cinza-claro,
+       bordas hairline e primário azul/teal.
        ============================================================ */
-    --background: var(--neutro-50);   /* #FAFAFA — off-white do DS, contrasta com cards brancos */
-    --foreground: var(--neutro-900);
-    --card: var(--neutro-0);
-    --card-foreground: var(--neutro-900);
-    --popover: var(--neutro-0);
-    --popover-foreground: var(--neutro-900);
+    --background: 220 13% 95%;        /* #F1F2F4 — board cinza-claro Kommo */
+    --foreground: 215 25% 17%;        /* #1F2937 — texto primário */
+    --card: 0 0% 100%;                /* branco — superfícies */
+    --card-foreground: 215 25% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 17%;
 
-    /* Marca (superfícies) — usa laranja-700 puro */
-    --primary: var(--laranja-700);
-    --primary-foreground: var(--neutro-900);
-    /* Texto/ícone laranja sobre fundo neutro — laranja-800 (AA no claro) */
-    --primary-ink: var(--laranja-800);
+    /* Primário (CTA cheio) — azul/teal Kommo #2D9CDB */
+    --primary: 201 71% 52%;
+    --primary-foreground: 0 0% 100%;
+    /* Azul p/ texto/ícone sobre fundo claro (AA) */
+    --primary-ink: 201 71% 42%;
 
-    --secondary: var(--neutro-100);
-    --secondary-foreground: var(--neutro-900);
-    --muted: var(--neutro-100);
-    --muted-foreground: 0 0% 42%;
-    /* Tint quente p/ hover/seleção (acento-fraco do DS) */
-    --accent: var(--laranja-50);
-    --accent-foreground: var(--laranja-900);
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 215 25% 17%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;   /* #6B7280 — texto secundário */
+    /* Tint azul claro p/ hover/seleção */
+    --accent: 202 70% 95%;
+    --accent-foreground: 201 71% 35%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: var(--neutro-200);
-    --input: var(--neutro-200);
-    --ring: var(--laranja-700);
-    --radius: 0.625rem;          /* 10px = --raio-md Vante */
+    --border: 220 13% 91%;            /* #E5E7EB — hairline */
+    --input: 220 13% 91%;
+    --ring: 201 71% 52%;
+    --radius: 0.5rem;                 /* 8px = --raio-md Kommo */
 
-    /* Sidebar — preta em ambos os temas (DS Vante: --neutro-900) */
-    --sidebar-background: var(--neutro-900);    /* #0D0D0D — preto da marca */
-    --sidebar-foreground: 0 0% 70%;              /* rgba(255,255,255,0.7) */
-    --sidebar-primary: var(--laranja-700);
+    /* Sidebar — branca, estilo Kommo */
+    --sidebar-background: 0 0% 100%;             /* branca */
+    --sidebar-foreground: 220 9% 40%;            /* cinza */
+    --sidebar-primary: 201 71% 52%;              /* azul */
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 14%;                  /* hover sutil — item ativo usa gradient via classe gradient-primary */
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 14%;
-    --sidebar-ring: var(--laranja-700);
+    --sidebar-accent: 220 14% 96%;               /* hover cinza-claro */
+    --sidebar-accent-foreground: 215 25% 17%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 201 71% 52%;
 
     /* Semânticas (DS Vante) */
     --success: 142 76% 36%;
@@ -86,43 +88,43 @@
     --info: 221 83% 53%;
     --info-foreground: 0 0% 100%;
 
-    /* Funil — progressão laranja → vermelho da marca */
-    --funnel-1: var(--laranja-300);
-    --funnel-2: var(--laranja-600);
-    --funnel-3: var(--laranja-500);
-    --funnel-4: var(--laranja-700);
-    /* Inks p/ texto sobre tints (acessível em ambos os temas) */
-    --funnel-1-ink: var(--laranja-800);
-    --funnel-2-ink: var(--laranja-800);
-    --funnel-3-ink: var(--laranja-800);
-    --funnel-4-ink: var(--laranja-900);
+    /* Funil — progressão azul → teal Kommo */
+    --funnel-1: 201 80% 70%;     /* azul claro */
+    --funnel-2: 201 71% 52%;     /* azul Kommo */
+    --funnel-3: 192 70% 45%;     /* teal */
+    --funnel-4: 200 60% 35%;     /* azul profundo */
+    /* Inks p/ texto sobre tints (acessível) */
+    --funnel-1-ink: 201 71% 35%;
+    --funnel-2-ink: 201 71% 30%;
+    --funnel-3-ink: 192 70% 28%;
+    --funnel-4-ink: 200 60% 25%;
 
-    /* Gráficos — marca + cores de apoio do DS */
-    --chart-1: var(--laranja-700);
-    --chart-2: var(--laranja-500);
-    --chart-3: 45 93% 47%;       /* âmbar (aviso-base) */
-    --chart-4: 221 83% 53%;      /* info-base */
-    --chart-5: 142 76% 36%;      /* sucesso-base */
+    /* Gráficos — azul/teal Kommo + apoios */
+    --chart-1: 201 71% 52%;      /* azul Kommo */
+    --chart-2: 192 70% 45%;      /* teal */
+    --chart-3: 45 93% 47%;       /* âmbar */
+    --chart-4: 221 83% 53%;      /* info/azul link */
+    --chart-5: 142 76% 36%;      /* sucesso */
 
-    /* Gradientes do DS */
-    --gradient-primary: linear-gradient(90deg, #FF5347 0%, #FD8A02 100%);
-    --gradient-primary-135: linear-gradient(135deg, #FF5347 0%, #FD8A02 100%);
-    --gradient-card: linear-gradient(180deg, hsl(var(--neutro-0)), hsl(var(--neutro-50)));
+    /* Gradientes — azul Kommo chapado/sutil */
+    --gradient-primary: linear-gradient(90deg, #2D9CDB 0%, #1E88C7 100%);
+    --gradient-primary-135: linear-gradient(135deg, #2D9CDB 0%, #1E88C7 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%), hsl(220 14% 98%));
 
-    /* Sombras (DS Vante) */
-    --shadow-1: 0 1px 2px rgba(13, 13, 13, 0.06);
-    --shadow-2: 0 2px 6px rgba(13, 13, 13, 0.08), 0 1px 2px rgba(13, 13, 13, 0.04);
-    --shadow-3: 0 8px 24px rgba(13, 13, 13, 0.10), 0 2px 6px rgba(13, 13, 13, 0.04);
-    --shadow-4: 0 20px 48px rgba(13, 13, 13, 0.18), 0 4px 12px rgba(13, 13, 13, 0.06);
-    --shadow-brand: 0 8px 24px rgba(253, 142, 6, 0.28);
+    /* Sombras (planas, estilo Kommo) */
+    --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-2: 0 1px 3px rgba(16, 24, 40, 0.06), 0 1px 2px rgba(16, 24, 40, 0.04);
+    --shadow-3: 0 4px 12px rgba(16, 24, 40, 0.08);
+    --shadow-4: 0 12px 32px rgba(16, 24, 40, 0.12);
+    --shadow-brand: 0 4px 12px rgba(45, 156, 219, 0.25);
 
-    /* Raios (DS Vante) */
-    --raio-xs: 4px;
-    --raio-sm: 6px;
-    --raio-md: 10px;
-    --raio-lg: 14px;
-    --raio-xl: 20px;
-    --raio-2xl: 28px;
+    /* Raios (encolhidos p/ Kommo) */
+    --raio-xs: 3px;
+    --raio-sm: 5px;
+    --raio-md: 8px;
+    --raio-lg: 10px;
+    --raio-xl: 14px;
+    --raio-2xl: 20px;
   }
 
   .dark {
@@ -136,32 +138,32 @@
     --popover: 0 0% 9%;              /* #161616 — --fundo-elevado */
     --popover-foreground: 0 0% 96%;
 
-    /* Marca (superfícies) — mantém laranja-700; bg-primary mantém a marca */
-    --primary: var(--laranja-700);
-    --primary-foreground: var(--neutro-900);
-    /* Texto/ícone laranja sobre fundo escuro — laranja-300 (AA no escuro) */
-    --primary-ink: var(--laranja-300);
+    /* Primário — azul/teal Kommo (mantém o clone também no dark) */
+    --primary: 201 71% 52%;          /* #2D9CDB */
+    --primary-foreground: 0 0% 100%;
+    /* Azul clareado p/ texto/ícone sobre fundo escuro (AA) */
+    --primary-ink: 201 80% 70%;
 
     --secondary: 0 0% 11%;           /* #1C1C1C — --superficie-2 */
     --secondary-foreground: 0 0% 96%;
     --muted: 0 0% 11%;
     --muted-foreground: 0 0% 54%;    /* #8A8A8A — --texto-3 */
-    --accent: 18 55% 14%;            /* tint quente escuro */
+    --accent: 201 50% 16%;           /* tint azul escuro */
     --accent-foreground: 0 0% 96%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
     --border: 0 0% 16%;              /* #2A2A2A — --borda */
     --input: 0 0% 16%;
-    --ring: var(--laranja-700);
+    --ring: 201 71% 52%;
 
     --sidebar-background: 0 0% 4%;
     --sidebar-foreground: 0 0% 62%;
-    --sidebar-primary: var(--laranja-700);
-    --sidebar-primary-foreground: 0 0% 10%;
+    --sidebar-primary: 201 71% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 0% 11%;
     --sidebar-accent-foreground: 0 0% 96%;
     --sidebar-border: 0 0% 14%;
-    --sidebar-ring: var(--laranja-700);
+    --sidebar-ring: 201 71% 52%;
 
     --success: 142 65% 42%;
     --success-foreground: 0 0% 100%;
@@ -171,31 +173,31 @@
     --info: 221 83% 60%;
     --info-foreground: 0 0% 100%;
 
-    /* Funil dark — usa mesma escala, com inks clareados */
-    --funnel-1: var(--laranja-300);
-    --funnel-2: var(--laranja-600);
-    --funnel-3: var(--laranja-500);
-    --funnel-4: var(--laranja-700);
-    --funnel-1-ink: var(--laranja-200);
-    --funnel-2-ink: var(--laranja-300);
-    --funnel-3-ink: var(--laranja-300);
-    --funnel-4-ink: var(--laranja-300);
+    /* Funil dark — progressão azul → teal, inks clareados */
+    --funnel-1: 201 80% 70%;
+    --funnel-2: 201 71% 52%;
+    --funnel-3: 192 70% 45%;
+    --funnel-4: 200 60% 40%;
+    --funnel-1-ink: 201 85% 78%;
+    --funnel-2-ink: 201 80% 70%;
+    --funnel-3-ink: 192 75% 60%;
+    --funnel-4-ink: 201 80% 70%;
 
-    --chart-1: var(--laranja-700);
-    --chart-2: var(--laranja-500);
+    --chart-1: 201 71% 55%;
+    --chart-2: 192 70% 50%;
     --chart-3: 45 93% 55%;
     --chart-4: 221 83% 62%;
     --chart-5: 142 65% 50%;
 
-    --gradient-primary: linear-gradient(90deg, #FF5347 0%, #FD8A02 100%);
-    --gradient-primary-135: linear-gradient(135deg, #FF5347 0%, #FD8A02 100%);
+    --gradient-primary: linear-gradient(90deg, #2D9CDB 0%, #1E88C7 100%);
+    --gradient-primary-135: linear-gradient(135deg, #2D9CDB 0%, #1E88C7 100%);
     --gradient-card: linear-gradient(180deg, hsl(0 0% 9%), hsl(0 0% 7%));
 
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow-3: 0 8px 24px rgba(0, 0, 0, 0.6), 0 2px 6px rgba(0, 0, 0, 0.4);
     --shadow-4: 0 20px 48px rgba(0, 0, 0, 0.7), 0 4px 12px rgba(0, 0, 0, 0.5);
-    --shadow-brand: 0 8px 24px rgba(253, 37, 22, 0.35);
+    --shadow-brand: 0 4px 16px rgba(45, 156, 219, 0.35);
   }
 }
 

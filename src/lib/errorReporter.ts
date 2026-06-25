@@ -6,7 +6,7 @@ const WEBHOOK_URL =
   "https://n8n-webhook.boliqf.easypanel.host/webhook/erro-lovable";
 const LOG_EVENT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/log-event`;
 const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const PROJECT = "VFlowGHL";
+const PROJECT = "VFlowKommo";
 
 const CHUNK_LOAD_PATTERNS = [
   /failed to fetch dynamically imported module/i,

@@ -10,7 +10,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth, subMonths, startOfYear } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
-import { Pipeline, User } from "@/hooks/useGhlData";
+import { Pipeline, User } from "@/hooks/useKommoData";
 import { cn } from "@/lib/utils";
 
 interface HeaderProps {
@@ -41,13 +41,25 @@ interface HeaderProps {
 const datePresets = [
   { label: "Hoje", getValue: () => ({ from: startOfDay(new Date()), to: endOfDay(new Date()) }) },
   { label: "Ontem", getValue: () => ({ from: startOfDay(subDays(new Date(), 1)), to: endOfDay(subDays(new Date(), 1)) }) },
-  { label: "Últimos 7 dias", getValue: () => ({ from: subDays(new Date(), 7), to: new Date() }) },
-  { label: "Últimos 30 dias", getValue: () => ({ from: subDays(new Date(), 30), to: new Date() }) },
-  { label: "Últimos 90 dias", getValue: () => ({ from: subDays(new Date(), 90), to: new Date() }) },
+  { label: "Últimos 7 dias", getValue: () => ({ from: subDays(new Date(), 7), to: subDays(new Date(), 1) }) },
+  { label: "Últimos 30 dias", getValue: () => ({ from: subDays(new Date(), 30), to: subDays(new Date(), 1) }) },
+  { label: "Últimos 90 dias", getValue: () => ({ from: subDays(new Date(), 90), to: subDays(new Date(), 1) }) },
   { label: "Este mês", getValue: () => ({ from: startOfMonth(new Date()), to: new Date() }) },
   { label: "Mês passado", getValue: () => ({ from: startOfMonth(subMonths(new Date(), 1)), to: endOfMonth(subMonths(new Date(), 1)) }) },
   { label: "Este ano", getValue: () => ({ from: startOfYear(new Date()), to: new Date() }) },
 ];
+
+// Se o período atual corresponde exatamente a um atalho, devolve o rótulo dele.
+function matchingPresetLabel(range: DateRange | undefined): string | null {
+  if (!range?.from || !range?.to) return null;
+  const sameDay = (a?: Date, b?: Date) =>
+    !!a && !!b && format(a, "yyyy-MM-dd") === format(b, "yyyy-MM-dd");
+  const match = datePresets.find((p) => {
+    const v = p.getValue();
+    return sameDay(v.from, range.from) && sameDay(v.to, range.to);
+  });
+  return match?.label ?? null;
+}
 
 function formatRangeLabel(range: DateRange | undefined) {
   if (!range?.from) return null;
@@ -80,7 +92,7 @@ function DateRangePicker({
     }
   };
 
-  const labelText = formatRangeLabel(dateRange);
+  const labelText = matchingPresetLabel(dateRange) ?? formatRangeLabel(dateRange);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -132,19 +144,30 @@ function DateRangePicker({
       </PopoverTrigger>
       <PopoverContent style={{ width: "fit-content" }} className="p-0 rounded-xl" align="start">
         <div className="flex">
-          <div className="border-r border-border p-1.5 pr-3 space-y-0.5 w-[120px]">
+          <div className="border-r border-border p-1.5 pr-3 space-y-0.5 w-[140px]">
             <p className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground px-2 py-1.5">Atalhos</p>
-            {datePresets.map((p) => (
-              <Button
-                key={p.label}
-                variant="ghost"
-                size="sm"
-                className="w-full justify-start text-xs h-7 px-2 rounded-md font-normal"
-                onClick={() => { const v = p.getValue(); setLocalRange(v); onDateRangeChange(v); setOpen(false); }}
-              >
-                {p.label}
-              </Button>
-            ))}
+            {datePresets.map((p) => {
+              const v = p.getValue();
+              const sameDay = (a?: Date, b?: Date) =>
+                !!a && !!b && format(a, "yyyy-MM-dd") === format(b, "yyyy-MM-dd");
+              const active = sameDay(v.from, dateRange?.from) && sameDay(v.to, dateRange?.to);
+              return (
+                <Button
+                  key={p.label}
+                  variant="ghost"
+                  size="sm"
+                  aria-pressed={active}
+                  className={cn(
+                    "w-full justify-start text-xs h-7 px-2 rounded-md font-normal gap-1.5",
+                    active && "bg-primary/10 text-primary font-semibold hover:bg-primary/15",
+                  )}
+                  onClick={() => { setLocalRange(v); onDateRangeChange(v); setOpen(false); }}
+                >
+                  <Check className={cn("w-3 h-3 shrink-0", active ? "opacity-100" : "opacity-0")} />
+                  {p.label}
+                </Button>
+              );
+            })}
           </div>
           <div className="flex flex-col">
             <Calendar

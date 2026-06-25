@@ -179,7 +179,6 @@ serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY") || "";
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     const body = await req.json();
@@ -232,7 +231,7 @@ serve(async (req) => {
 
     // Resolve AI provider for this user
     let aiEndpoint = "https://api.openai.com/v1/chat/completions";
-    let aiKey = OPENAI_API_KEY;
+    let aiKey = "";
     let aiModel = "gpt-4o-mini";
 
     if (user_id) {

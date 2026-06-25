@@ -1,4 +1,4 @@
-import { DailyLead } from "@/hooks/useGhlData";
+import { DailyLead } from "@/hooks/useKommoData";
 import { BarChart3, TrendingUp, Calendar, ArrowUp } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 import { ComposedChart, Bar, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";

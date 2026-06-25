@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR" class="dark">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
@@ -8,9 +8,10 @@
     <meta name="author" content="Vante Comunicação" />
     <link rel="icon" type="image/png" href="/favicon-gestor.png" />
 
-    <!-- Satoshi — fonte oficial do Design System Vante -->
-    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
-    <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=satoshi@300,400,500,700,900&display=swap" />
+    <!-- Inter — fonte do clone Kommo -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" />
 
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://gestor.vflow360.com.br" />
@@ -25,10 +26,10 @@
   <body>
     <div id="root"></div>
     <script>
-      // Aplica o tema salvo antes da pintura (evita flash). Default: escuro.
+      // Aplica o tema salvo antes da pintura (evita flash). Default: claro (Kommo).
       try {
         var t = localStorage.getItem("vflow-theme");
-        document.documentElement.classList.toggle("dark", t !== "light");
+        document.documentElement.classList.toggle("dark", t === "dark");
       } catch (e) {}
     </script>
     <script type="module" src="/src/main.tsx"></script>

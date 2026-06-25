@@ -15,9 +15,7 @@ import SettingsLayout from "./components/SettingsLayout";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   DashboardSkeleton,
-  SuggestionsSkeleton,
   IntegrationsSkeleton,
-  ConversationsSkeleton,
   GenericPageSkeleton,
 } from "@/components/skeletons/RouteSkeletons";
 
@@ -32,11 +30,10 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
+import ComingSoon from "./pages/ComingSoon";
 
 // Lazy: rotas pesadas (recharts, listas, integrações, etc.)
 const Dashboard = lazy(() => import("./pages/Dashboard"));
-const Assistant = lazy(() => import("./pages/Assistant"));
-const Suggestions = lazy(() => import("./pages/Suggestions"));
 const CoolingLeads = lazy(() => import("./pages/CoolingLeads"));
 const Integrations = lazy(() => import("./pages/Integrations"));
 const AccountSettings = lazy(() => import("./pages/settings/AccountSettings"));
@@ -44,10 +41,8 @@ const AiSettings = lazy(() => import("./pages/settings/AiSettings"));
 const DashboardSettings = lazy(() => import("./pages/settings/DashboardSettings"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Admin = lazy(() => import("./pages/Admin"));
-const SystemLogs = lazy(() => import("./pages/SystemLogs"));
-const SystemHub = lazy(() => import("./pages/SystemHub"));
-const Conversations2 = lazy(() => import("./pages/Conversations2"));
-const Documentation = lazy(() => import("./pages/Documentation"));
+// SystemLogs/SystemHub: adiados ("futuramente") — leem tabelas do schema antigo
+// ainda não migradas pro kommo. Roteados para ComingSoon até a migração.
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,11 +71,11 @@ const App = () => (
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<GestorGuard>{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</GestorGuard>} />
-                <Route path="/assistant" element={<GestorGuard>{lazyRoute(<Assistant />, <GenericPageSkeleton />)}</GestorGuard>} />
-                <Route path="/conversations" element={<GestorGuard>{lazyRoute(<Conversations2 />, <ConversationsSkeleton />)}</GestorGuard>} />
+                <Route path="/assistant" element={<GestorGuard><ComingSoon title="Analista IA" /></GestorGuard>} />
+                <Route path="/conversations" element={<GestorGuard><ComingSoon title="Conversas" /></GestorGuard>} />
                 <Route
                   path="/suggestions"
-                  element={<PermissionGuard require="viewSuggestions">{lazyRoute(<Suggestions />, <SuggestionsSkeleton />)}</PermissionGuard>}
+                  element={<PermissionGuard require="viewSuggestions"><ComingSoon title="Sugestões IA" /></PermissionGuard>}
                 />
                 <Route
                   path="/cooling-leads"
@@ -102,9 +97,8 @@ const App = () => (
                 </Route>
                 <Route path="/workspaces" element={<Navigate to="/settings/workspace" replace />} />
                 <Route path="/admin" element={<GestorGuard>{lazyRoute(<Admin />, <GenericPageSkeleton />)}</GestorGuard>} />
-                <Route path="/admin/logs" element={<GestorGuard>{lazyRoute(<SystemLogs />, <GenericPageSkeleton />)}</GestorGuard>} />
-                <Route path="/admin/system" element={<GestorGuard>{lazyRoute(<SystemHub />, <GenericPageSkeleton />)}</GestorGuard>} />
-                <Route path="/docs" element={<GestorGuard>{lazyRoute(<Documentation />, <GenericPageSkeleton />)}</GestorGuard>} />
+                <Route path="/admin/logs" element={<GestorGuard><ComingSoon title="Logs do Sistema" /></GestorGuard>} />
+                <Route path="/admin/system" element={<GestorGuard><ComingSoon title="Painel do Sistema" /></GestorGuard>} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>

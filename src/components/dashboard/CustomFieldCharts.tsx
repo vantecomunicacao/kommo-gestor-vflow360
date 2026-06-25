@@ -1,6 +1,6 @@
 import { PieChart as PieIcon } from "lucide-react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
-import { CustomFieldDistribution } from "@/hooks/useGhlData";
+import { CustomFieldDistribution } from "@/hooks/useKommoData";
 import { SectionTooltip } from "./SectionTooltip";
 
 interface CustomFieldChartsProps {

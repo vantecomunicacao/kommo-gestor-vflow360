@@ -2,21 +2,29 @@ import { motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
-import { GhlSection } from "@/components/integrations/GhlSection";
-import { AiPipelineFilter } from "@/components/integrations/AiPipelineFilter";
-import { AiAnalystConfig } from "@/components/integrations/AiAnalystConfig";
-import { callEdge } from "@/lib/edgeClient";
-import { GHL_STANDARD_FIELDS } from "@/lib/ghl-standard-fields";
-import { FieldOption, GhlCustomField, GhlPipelineStage } from "@/components/integrations/types";
+import { KommoSection } from "@/components/integrations/KommoSection";
+import { supabase } from "@/integrations/supabase/client";
+import { FieldOption, KommoCustomField, KommoPipelineStage, KommoSync } from "@/components/integrations/types";
+import { AI_COPILOT } from "@/lib/features";
+
+/** Chama kommo-manage e devolve o JSON cru (envelope no nível de cima). */
+async function callKommo(body: Record<string, unknown>): Promise<any> {
+  const { data, error } = await supabase.functions.invoke<any>("kommo-manage", { body });
+  if (error) throw new Error(error.message || "Falha ao chamar kommo-manage");
+  if (!data) throw new Error("kommo-manage não retornou resposta");
+  if (!data.success) throw new Error(data.error || "Erro desconhecido");
+  return data;
+}
 
 const Integrations = () => {
-  const [ghlConnected, setGhlConnected] = useState(false);
-  const [ghlLocationName, setGhlLocationName] = useState("");
-  const [loadingGhl, setLoadingGhl] = useState(false);
-  const [ghlApiKey, setGhlApiKey] = useState("");
-  const [ghlLocationId, setGhlLocationId] = useState("");
-  const [ghlFields, setGhlFields] = useState<GhlCustomField[]>([]);
-  const [ghlStages, setGhlStages] = useState<GhlPipelineStage[]>([]);
+  const [connected, setConnected] = useState(false);
+  const [accountName, setAccountName] = useState("");
+  const [sync, setSync] = useState<KommoSync | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [subdomain, setSubdomain] = useState("");
+  const [token, setToken] = useState("");
+  const [fields, setFields] = useState<KommoCustomField[]>([]);
+  const [stages, setStages] = useState<KommoPipelineStage[]>([]);
   const [loadingFields, setLoadingFields] = useState(false);
   const [loadingStages, setLoadingStages] = useState(false);
   const [aiPrompt, setAiPrompt] = useState(
@@ -25,151 +33,130 @@ const Integrations = () => {
   const { toast } = useToast();
   const { activeWorkspace } = useWorkspace();
 
-  const resetGhlState = useCallback(() => {
-    setGhlConnected(false);
-    setGhlLocationName("");
-    setGhlFields([]);
-    setGhlStages([]);
+  const resetState = useCallback(() => {
+    setConnected(false);
+    setAccountName("");
+    setSync(null);
+    setFields([]);
+    setStages([]);
   }, []);
 
-  const callGhl = useCallback(
+  const callKommoWs = useCallback(
     (action: string, extra?: Record<string, unknown>) =>
-      callEdge<any>("ghl-manage", { action, workspace_id: activeWorkspace?.id, ...extra }),
+      callKommo({ action, workspace_id: activeWorkspace?.id, ...extra }),
     [activeWorkspace],
   );
 
-  const fetchGhlFieldsAndStages = useCallback(async () => {
+  const fetchFieldsAndStages = useCallback(async () => {
+    if (!activeWorkspace) return;
     setLoadingFields(true);
     setLoadingStages(true);
-    setGhlFields([]);
-    setGhlStages([]);
+    setFields([]);
+    setStages([]);
 
     let savedFields: any[] = [];
     let savedStages: any[] = [];
     let savedPrompt = "";
     try {
-      const mappingsData = await callGhl("get_mappings");
-      savedFields = mappingsData?.selectedFields || [];
-      savedStages = mappingsData?.selectedStages || [];
-      savedPrompt = mappingsData?.aiPrompt || "";
+      const mappings = await callKommoWs("get_mappings");
+      savedFields = mappings?.data?.selectedFields || [];
+      savedStages = mappings?.data?.selectedStages || [];
+      savedPrompt = mappings?.data?.aiPrompt || "";
       if (savedPrompt) setAiPrompt(savedPrompt);
     } catch {
       /* ignore */
     }
 
     try {
-      const fieldsData = await callGhl("custom_fields");
-      const customFields: GhlCustomField[] = (fieldsData?.customFields || fieldsData || []).map((f: any) => {
-        const fieldOptions: FieldOption[] = [];
-        const rawOptions = f.picklistOptions || f.options || [];
-        if (Array.isArray(rawOptions)) {
-          for (const opt of rawOptions) {
-            if (typeof opt === "string") fieldOptions.push({ value: opt, instruction: "" });
-            else if (opt?.value) fieldOptions.push({ value: opt.value, instruction: "" });
-            else if (opt?.name) fieldOptions.push({ value: opt.name, instruction: "" });
-          }
+      const res = await callKommoWs("custom_fields");
+      const customFields: KommoCustomField[] = (res?.data?.customFields || []).map((f: any) => {
+        const saved = savedFields.find((sf: any) => sf.id === f.id);
+        let mergedOptions: FieldOption[] | undefined = f.options;
+        if (f.options && saved?.options) {
+          mergedOptions = f.options.map((opt: FieldOption) => {
+            const savedOpt = saved.options?.find((so: any) => (typeof so === "string" ? so : so.value) === opt.value);
+            return savedOpt && typeof savedOpt === "object"
+              ? { ...opt, instruction: savedOpt.instruction || "" }
+              : opt;
+          });
         }
         return {
           id: f.id,
-          name: f.name || f.fieldKey || f.id,
-          fieldKey: f.fieldKey || f.key || f.id,
-          dataType: f.dataType || f.type || "text",
-          selected: false,
-          description: "",
-          options: fieldOptions.length > 0 ? fieldOptions : undefined,
+          name: f.name,
+          fieldKey: f.fieldKey,
+          dataType: f.dataType || "text",
+          selected: !!saved,
+          description: saved?.description || "",
+          options: mergedOptions,
         };
       });
-
-      const allFields = [...GHL_STANDARD_FIELDS, ...customFields].map((f) => {
-        const saved = savedFields.find((sf: any) => sf.id === f.id);
-        if (saved) {
-          let mergedOptions = f.options;
-          if (f.options && saved.options) {
-            mergedOptions = f.options.map((opt: FieldOption) => {
-              const savedOpt = saved.options?.find((so: any) => (typeof so === "string" ? so : so.value) === opt.value);
-              return savedOpt && typeof savedOpt === "object"
-                ? { ...opt, instruction: savedOpt.instruction || "" }
-                : opt;
-            });
-          }
-          return { ...f, selected: true, description: saved.description || "", options: mergedOptions || saved.options };
-        }
-        return f;
-      });
-      setGhlFields(allFields);
+      setFields(customFields);
     } catch (error) {
-      console.error("Error fetching GHL fields:", error);
-      const allFields = GHL_STANDARD_FIELDS.map((f) => {
-        const saved = savedFields.find((sf: any) => sf.id === f.id);
-        return saved ? { ...f, selected: true, description: saved.description || "" } : f;
-      });
-      setGhlFields(allFields);
+      console.error("Error fetching Kommo fields:", error);
+      setFields([]);
     } finally {
       setLoadingFields(false);
     }
 
     try {
-      const pipelinesData = await callGhl("pipelines");
-      const stages: GhlPipelineStage[] = [];
-      const pipelines = pipelinesData?.pipelines || pipelinesData || [];
-      for (const pipeline of pipelines) {
-        const pStages = pipeline.stages || [];
-        for (const stage of pStages) {
+      const res = await callKommoWs("pipelines");
+      const flat: KommoPipelineStage[] = [];
+      for (const pipeline of res?.data?.pipelines || []) {
+        for (const stage of pipeline.stages || []) {
           const saved = savedStages.find((ss: any) => ss.id === stage.id);
-          stages.push({
+          flat.push({
             id: stage.id,
             name: stage.name,
             pipelineId: pipeline.id,
             pipelineName: pipeline.name,
-            selected: saved ? true : false,
+            selected: !!saved,
             description: saved?.description || "",
           });
         }
       }
-      setGhlStages(stages);
+      setStages(flat);
     } catch (error) {
-      console.error("Error fetching GHL pipelines:", error);
-      setGhlStages([]);
+      console.error("Error fetching Kommo pipelines:", error);
+      setStages([]);
     } finally {
       setLoadingStages(false);
     }
-  }, [callGhl]);
+  }, [activeWorkspace, callKommoWs]);
 
-  // Check GHL connection status on mount
+  // Check connection status on mount / workspace change
   useEffect(() => {
     if (!activeWorkspace) return;
     const checkStatus = async () => {
       try {
-        const data = await callGhl("status", { workspace_id: activeWorkspace.id });
-        if (data?.status === "connected") {
-          setGhlConnected(true);
-          setGhlLocationName(data.locationName || "");
+        const data = await callKommoWs("status");
+        if (data?.connected) {
+          setConnected(true);
+          setAccountName(data.subdomain || "");
+          setSync(data.sync || null);
         } else {
-          resetGhlState();
+          resetState();
         }
       } catch {
         /* silent */
       }
     };
     checkStatus();
-  }, [activeWorkspace, callGhl, resetGhlState]);
+  }, [activeWorkspace, callKommoWs, resetState]);
 
   useEffect(() => {
-    if (ghlConnected) {
-      fetchGhlFieldsAndStages();
-    }
-  }, [ghlConnected, fetchGhlFieldsAndStages]);
+    if (connected && AI_COPILOT) fetchFieldsAndStages();
+  }, [connected, fetchFieldsAndStages]);
 
   const toggleField = (id: string) => {
-    setGhlFields((prev) => prev.map((f) => (f.id === id ? { ...f, selected: !f.selected } : f)));
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, selected: !f.selected } : f)));
   };
 
   const updateFieldDescription = (id: string, description: string) => {
-    setGhlFields((prev) => prev.map((f) => (f.id === id ? { ...f, description } : f)));
+    setFields((prev) => prev.map((f) => (f.id === id ? { ...f, description } : f)));
   };
 
   const updateOptionInstruction = (fieldId: string, optionValue: string, instruction: string) => {
-    setGhlFields((prev) =>
+    setFields((prev) =>
       prev.map((f) => {
         if (f.id !== fieldId || !f.options) return f;
         return {
@@ -181,15 +168,15 @@ const Integrations = () => {
   };
 
   const toggleStage = (id: string) => {
-    setGhlStages((prev) => prev.map((s) => (s.id === id ? { ...s, selected: !s.selected } : s)));
+    setStages((prev) => prev.map((s) => (s.id === id ? { ...s, selected: !s.selected } : s)));
   };
 
   const updateStageDescription = (id: string, description: string) => {
-    setGhlStages((prev) => prev.map((s) => (s.id === id ? { ...s, description } : s)));
+    setStages((prev) => prev.map((s) => (s.id === id ? { ...s, description } : s)));
   };
 
   const handleSaveMappings = async () => {
-    const selectedFields = ghlFields
+    const selectedFields = fields
       .filter((f) => f.selected)
       .map((f) => ({
         id: f.id,
@@ -199,7 +186,7 @@ const Integrations = () => {
         description: f.description,
         options: f.options || undefined,
       }));
-    const selectedStages = ghlStages
+    const selectedStages = stages
       .filter((s) => s.selected)
       .map((s) => ({
         id: s.id,
@@ -209,7 +196,7 @@ const Integrations = () => {
         description: s.description,
       }));
     try {
-      await callGhl("save_mappings", { selectedFields, selectedStages, aiPrompt });
+      await callKommoWs("save_mappings", { selectedFields, selectedStages, aiPrompt });
       toast({
         title: "Mapeamento salvo!",
         description: `${selectedFields.length} campos e ${selectedStages.length} etapas selecionados.`,
@@ -223,37 +210,36 @@ const Integrations = () => {
     }
   };
 
-  const handleConnectGhl = async () => {
-    if (!ghlApiKey || !ghlLocationId) {
-      toast({ title: "Erro", description: "Preencha a API Key e o Location ID.", variant: "destructive" });
+  const handleConnect = async () => {
+    if (!subdomain || !token) {
+      toast({ title: "Erro", description: "Preencha o subdomínio e o token.", variant: "destructive" });
       return;
     }
-    setLoadingGhl(true);
+    setLoading(true);
     try {
-      const data = await callGhl("connect", { apiKey: ghlApiKey, locationId: ghlLocationId });
-      setGhlConnected(true);
-      setGhlLocationName(data.locationName || "");
-      setGhlApiKey("");
-      setGhlLocationId("");
-      toast({ title: "CRM conectado!", description: `Location: ${data.locationName || ghlLocationId}` });
+      const data = await callKommo({ action: "connect", subdomain, token, workspace_id: activeWorkspace?.id });
+      setConnected(true);
+      setAccountName(data.account?.name || subdomain);
+      setToken("");
+      toast({ title: "Kommo conectado!", description: `Conta: ${data.account?.name || subdomain}` });
     } catch (error) {
-      resetGhlState();
+      resetState();
       toast({
         title: "Erro ao conectar",
         description: error instanceof Error ? error.message : "Verifique suas credenciais",
         variant: "destructive",
       });
     } finally {
-      setLoadingGhl(false);
+      setLoading(false);
     }
   };
 
-  const handleDisconnectGhl = async () => {
-    setLoadingGhl(true);
+  const handleDisconnect = async () => {
+    setLoading(true);
     try {
-      await callGhl("disconnect");
-      resetGhlState();
-      toast({ title: "CRM desconectado" });
+      await callKommoWs("disconnect");
+      resetState();
+      toast({ title: "Kommo desconectado" });
     } catch (error) {
       toast({
         title: "Erro",
@@ -261,7 +247,7 @@ const Integrations = () => {
         variant: "destructive",
       });
     } finally {
-      setLoadingGhl(false);
+      setLoading(false);
     }
   };
 
@@ -269,25 +255,26 @@ const Integrations = () => {
     <div className="space-y-6 max-w-3xl">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Integrações</h1>
-        <p className="text-muted-foreground">Gerencie a conexão com seu CRM</p>
+        <p className="text-muted-foreground">Gerencie a conexão com o Kommo CRM</p>
       </div>
 
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-        <GhlSection
-          ghlConnected={ghlConnected}
-          ghlLocationName={ghlLocationName}
-          loadingGhl={loadingGhl}
-          ghlApiKey={ghlApiKey}
-          ghlLocationId={ghlLocationId}
-          setGhlApiKey={setGhlApiKey}
-          setGhlLocationId={setGhlLocationId}
-          onConnect={handleConnectGhl}
-          onDisconnect={handleDisconnectGhl}
-          onReload={fetchGhlFieldsAndStages}
+        <KommoSection
+          connected={connected}
+          accountName={accountName}
+          sync={sync}
+          loading={loading}
+          subdomain={subdomain}
+          token={token}
+          setSubdomain={setSubdomain}
+          setToken={setToken}
+          onConnect={handleConnect}
+          onDisconnect={handleDisconnect}
+          onReload={fetchFieldsAndStages}
           loadingFields={loadingFields}
           loadingStages={loadingStages}
-          ghlFields={ghlFields}
-          ghlStages={ghlStages}
+          fields={fields}
+          stages={stages}
           toggleField={toggleField}
           updateFieldDescription={updateFieldDescription}
           updateOptionInstruction={updateOptionInstruction}
@@ -298,9 +285,6 @@ const Integrations = () => {
           onSaveMappings={handleSaveMappings}
         />
       </motion.div>
-
-      {ghlConnected && <AiPipelineFilter />}
-      {ghlConnected && <AiAnalystConfig />}
     </div>
   );
 };
