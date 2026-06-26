@@ -35,6 +35,21 @@ https://github.com/vantecomunicacao/kommo-gestor-vflow360
 - **Nunca** adicionar, trocar ou criar outro remote de destino.
 - Se o `origin` apontar para qualquer outro endereço: **pare e avise**, não envie.
 
+### 3. Coolify — SÓ o projeto `Kommo-Gestor-Vflow360`
+
+O Coolify (`http://72.60.248.166:8000`) é **compartilhado** com a produção do GHL.
+
+- A **única** coisa que pode ser criada, alterada, deployada, reiniciada ou parada é
+  o projeto **`Kommo-Gestor-Vflow360`** (e os recursos dentro dele).
+- **Em hipótese alguma** alterar, deployar, reiniciar, parar ou excluir qualquer
+  outro projeto/app/serviço/banco no Coolify — mesmo que o token enxergue.
+  Isso inclui (mas não se limita a) o projeto/app do **GHL** (ex.: `VFlow360-Gestor-prod`).
+- Operações de **leitura** (listar/inspecionar) são permitidas para identificar recursos.
+- Antes de **qualquer** ação de escrita (deploy/restart/stop/update/delete), **mostrar
+  o nome + UUID do recurso** que será tocado e **pedir confirmação**. Se o alvo resolver
+  para um UUID/slug que **não** seja do `Kommo-Gestor-Vflow360`: **parar e avisar**, nunca
+  "tentar o que parece certo".
+
 ## Onde ficam as tabelas (schemas do Supabase)
 
 O Supabase é compartilhado, mas dividido em "andares" (schemas):
