@@ -242,6 +242,89 @@ serve(async (req) => {
       return null;
     };
 
+    // ===== Tempo por etapa (a partir do histórico de eventos) =====
+    // Para cada lead, reconstrói os trechos (status, entrada, saída) usando created_at
+    // + eventos de mudança de etapa, e tira a média de dias por balde do funil.
+    const { data: stageEvRows } = await db.from("lead_stage_events")
+      .select("lead_id,pipeline_id,before_status_id,after_status_id,changed_at")
+      .eq("workspace_id", workspaceId).limit(50000);
+    const eventsByLead = new Map<string, Array<{ before: string | null; after: string | null; t: number }>>();
+    for (const e of (stageEvRows || []) as any[]) {
+      const t = e.changed_at ? new Date(e.changed_at).getTime() : NaN;
+      if (!e.lead_id || isNaN(t)) continue;
+      const arr = eventsByLead.get(String(e.lead_id)) || [];
+      arr.push({ before: e.before_status_id ?? null, after: e.after_status_id ?? null, t });
+      eventsByLead.set(String(e.lead_id), arr);
+    }
+    const computeTimePerStage = () => {
+      const acc: Record<Exclude<Bucket, "venda_ganha">, { sum: number; n: number }> = {
+        contato_inicial: { sum: 0, n: 0 }, proposta_enviada: { sum: 0, n: 0 }, fechamento: { sum: 0, n: 0 },
+      };
+      const now = Date.now();
+      for (const l of leads) {
+        const evs = (eventsByLead.get(String(l.kommo_id)) || []).slice().sort((a, b) => a.t - b.t);
+        const created = l.kommo_created_at ? new Date(l.kommo_created_at as string).getTime() : null;
+        const segs: Array<[string | null, number, number]> = [];
+        if (evs.length === 0) {
+          if (created != null) segs.push([l.status_id, created, now]);
+        } else {
+          if (created != null && evs[0].before) segs.push([evs[0].before, created, evs[0].t]);
+          for (let i = 0; i < evs.length; i++) {
+            segs.push([evs[i].after, evs[i].t, i + 1 < evs.length ? evs[i + 1].t : now]);
+          }
+        }
+        for (const [status, enter, exit] of segs) {
+          if (!status || exit < enter || status === "143") continue;
+          const b = stageBucket(status);
+          if (b && b !== "venda_ganha") { acc[b].sum += (exit - enter); acc[b].n++; }
+        }
+      }
+      // O componente do front formata em HORAS (depois converte para "Xd Yh").
+      const toHours = (o: { sum: number; n: number }) => (o.n ? Math.round(o.sum / o.n / 3_600_000) : 0);
+      return {
+        contatoInicial: toHours(acc.contato_inicial),
+        propostaEnviada: toHours(acc.proposta_enviada),
+        fechamento: toHours(acc.fechamento),
+      };
+    };
+    const averageTimePerStage = computeTimePerStage();
+
+    // ===== Velocidade do funil (movimentação no período selecionado) =====
+    const sortByStatus = new Map<string, number>();
+    for (const p of allPipelines) {
+      for (const s of (Array.isArray(p.statuses) ? p.statuses : []) as KommoStatus[]) {
+        if (s && s.id != null && typeof s.sort === "number") sortByStatus.set(String(s.id), s.sort);
+      }
+    }
+    const velFrom = startDate ? new Date(startDate).getTime() : -Infinity;
+    const velTo = endDate ? new Date(endDate).getTime() : Infinity;
+    const pipeOk = (pid: string | null) =>
+      filterPipelineId ? pid === filterPipelineId : (activePipelineIds.size === 0 || !pid || activePipelineIds.has(pid));
+    const movedLeads = new Set<string>();
+    const advancedLeads = new Set<string>();
+    let movimentacoes = 0, velGanhos = 0, velPerdidos = 0;
+    for (const e of (stageEvRows || []) as any[]) {
+      const t = e.changed_at ? new Date(e.changed_at).getTime() : NaN;
+      if (isNaN(t) || t < velFrom || t > velTo) continue;
+      if (!pipeOk(e.pipeline_id ?? null)) continue;
+      movimentacoes++;
+      movedLeads.add(String(e.lead_id));
+      const after = String(e.after_status_id ?? "");
+      const before = String(e.before_status_id ?? "");
+      if (after === "142") velGanhos++;
+      if (after === "143") velPerdidos++;
+      const sa = sortByStatus.get(after); const sb = sortByStatus.get(before);
+      const forward = after === "142" || (sa != null && sb != null && sa > sb);
+      if (forward && after !== "143") advancedLeads.add(String(e.lead_id));
+    }
+    const funnelVelocity = {
+      movimentacoes,
+      leadsMovidos: movedLeads.size,
+      avancaram: advancedLeads.size,
+      ganhos: velGanhos,
+      perdidos: velPerdidos,
+    };
+
     const totalLeads = leads.length;
     const wonOpps = leads.filter((l) => l.status === "won" || wonStageIds.has(l.status_id));
     const lostOpps = leads.filter((l) => l.status === "lost");
@@ -448,7 +531,8 @@ serve(async (req) => {
       wonOriginDistribution: wonOrigem.distribution, wonOriginFillRate: wonOrigem.fillRate,
       utmConfigured: { source: true, medium: true, campaign: true, content: true, term: true },
       customFields, customFieldDistributions,
-      averageTimePerStage: { contatoInicial: 0, propostaEnviada: 0, fechamento: 0 },
+      averageTimePerStage,
+      funnelVelocity,
       cycleToWonDays: cycleToWon.days, cycleToWonSample: cycleToWon.sampleSize,
       cycleToLostDays: cycleToLost.days, cycleToLostSample: cycleToLost.sampleSize,
       dailyLeads,

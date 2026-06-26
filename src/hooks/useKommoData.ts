@@ -34,6 +34,13 @@ export interface AverageTimePerStage {
   propostaEnviada: number;
   fechamento: number;
 }
+export interface FunnelVelocity {
+  movimentacoes: number;
+  leadsMovidos: number;
+  avancaram: number;
+  ganhos: number;
+  perdidos: number;
+}
 export interface PipelineStage { id: string; name: string; }
 export interface Pipeline { id: string; name: string; stages?: PipelineStage[]; }
 export interface User { id: string; name: string; }
@@ -97,6 +104,7 @@ export interface DashboardData {
   customFields: CustomField[];
   customFieldDistributions?: CustomFieldDistribution[];
   averageTimePerStage: AverageTimePerStage;
+  funnelVelocity?: FunnelVelocity;
   cycleToWonDays?: number;
   cycleToWonSample?: number;
   cycleToLostDays?: number;

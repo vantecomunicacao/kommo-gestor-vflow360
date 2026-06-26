@@ -75,6 +75,7 @@ serve(async (req) => {
     );
 
     const counts: Record<string, number> = {};
+    let stageEventsError: string | null = null;
 
     // === 1. Pipelines (+ statuses embutidos) ===
     const pipelines = await kommoFetchAll(creds, "/leads/pipelines", "pipelines", { maxPages: 5 });
@@ -186,6 +187,37 @@ serve(async (req) => {
     }
     counts.leads = leads.length;
 
+    // === 7. Eventos de mudança de etapa (histórico → tempo por etapa / velocidade) ===
+    // Resiliente: se falhar, NÃO derruba o sync (leads já foram gravados). Limitado
+    // para não estourar o tempo da função (incremental fica como melhoria futura).
+    try {
+      const stageEvents = await kommoFetchAll(
+        creds, "/events?limit=100&filter[type]=lead_status_changed&filter[entity]=lead", "events", { maxPages: 15 },
+      );
+      if (stageEvents.length) {
+        const evRows = stageEvents.map((e: any) => {
+          const after = e?.value_after?.[0]?.lead_status ?? {};
+          const before = e?.value_before?.[0]?.lead_status ?? {};
+          return {
+            workspace_id: workspaceId,
+            event_id: String(e.id),
+            lead_id: e.entity_id != null ? String(e.entity_id) : "",
+            pipeline_id: after.pipeline_id != null ? String(after.pipeline_id)
+              : (before.pipeline_id != null ? String(before.pipeline_id) : null),
+            before_status_id: before.id != null ? String(before.id) : null,
+            after_status_id: after.id != null ? String(after.id) : null,
+            changed_at: unixToIso(e.created_at),
+          };
+        }).filter((r: any) => r.event_id && r.lead_id && r.changed_at);
+        if (evRows.length) await upsertChunked(db, "lead_stage_events", evRows, "workspace_id,event_id");
+        counts.stage_events = evRows.length;
+      } else {
+        counts.stage_events = 0;
+      }
+    } catch (evErr) {
+      stageEventsError = serializeErr(evErr).slice(0, 300);
+    }
+
     // === status final ===
     await db.from("sync_status").upsert({
       workspace_id: workspaceId,
@@ -198,7 +230,7 @@ serve(async (req) => {
     }, { onConflict: "workspace_id" });
 
     return new Response(
-      JSON.stringify({ success: true, workspace_id: workspaceId, counts, duration_ms: Date.now() - startTs }),
+      JSON.stringify({ success: true, workspace_id: workspaceId, counts, stage_events_error: stageEventsError, duration_ms: Date.now() - startTs }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {

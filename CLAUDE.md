@@ -88,6 +88,7 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.sync_status` | Status de sincronização |
 | `kommo.sync_watermarks` | Marcos de sincronização (incremental) |
 | `kommo.dashboard_settings` | Configurações do dashboard |
+| `kommo.lead_stage_events` | Histórico de mudança de etapa dos leads (tempo por etapa) |
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
@@ -102,6 +103,10 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-06-26 (`20260626120000_kommo_lead_stage_events.sql`): **nova tabela**
+  `kommo.lead_stage_events` — histórico de mudança de etapa (Kommo /events) para
+  calcular "Tempo por etapa" e velocidade do funil. _(ainda não deployada/aplicada
+  em prod — em validação local)._
 - 2026-06-25 (`20260625130000_kommo_dashboard_chart_fields.sql`): adicionada coluna
   `kommo.dashboard_settings.chart_custom_fields text[]` (restaura a feature nativa de
   escolher quais campos personalizados viram gráfico de pizza no dashboard).

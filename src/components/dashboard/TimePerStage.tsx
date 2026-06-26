@@ -25,7 +25,7 @@ export function TimePerStage({ averageTimePerStage }: TimePerStageProps) {
       <h2 className="section-title">
         <Clock className="w-5 h-5 text-primary-ink" />
         Tempo Médio por Etapa
-        <SectionTooltip text="Tempo médio (em horas) que oportunidades estão na etapa atual. Identifica gargalos no funil." />
+        <SectionTooltip text="Tempo médio que as oportunidades permaneceram em cada fase do funil, calculado pelo histórico real de mudanças de etapa do CRM. Identifica gargalos." />
       </h2>
 
       <div className="space-y-5">
@@ -53,8 +53,8 @@ export function TimePerStage({ averageTimePerStage }: TimePerStageProps) {
 
       <div className="mt-7 p-4 bg-secondary/50 rounded-2xl">
         <p className="text-xs text-muted-foreground">
-          <strong className="text-foreground">Nota:</strong> Estimativa baseada em <code>last_status_change_at</code> da oportunidade.
-          Para cálculo preciso por etapa, é necessário histórico completo de mudanças de etapa do CRM.
+          <strong className="text-foreground">Nota:</strong> Calculado pelo histórico real de mudanças de etapa
+          (eventos do CRM): para cada lead, o tempo entre entrar e sair de cada fase, somado por balde do funil.
         </p>
       </div>
     </div>

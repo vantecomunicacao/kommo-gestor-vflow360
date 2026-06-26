@@ -23,6 +23,7 @@ import { DataQuality } from "@/components/dashboard/DataQuality";
 import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
+import { FunnelVelocity } from "@/components/dashboard/FunnelVelocity";
 import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
@@ -381,6 +382,10 @@ export default function Dashboard() {
 
       <AnimatedSection delay={0.05}>
         <CoolingLeadsCard data={data.coolingLeads} />
+      </AnimatedSection>
+
+      <AnimatedSection delay={0.05}>
+        <FunnelVelocity velocity={data.funnelVelocity} />
       </AnimatedSection>
 
       <AnimatedSection delay={0.05}>
