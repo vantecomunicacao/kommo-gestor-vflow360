@@ -125,5 +125,7 @@ export async function loginAs(page: Page, role: Role) {
   await page.getByLabel("Email").fill(`${role}@vflow360.test`);
   await page.getByLabel("Senha").fill("senha-de-teste");
   await page.getByRole("button", { name: /entrar/i }).click();
-  await page.waitForURL(role === "vendedor" ? "**/suggestions" : "**/dashboard");
+  // Fase 1 (Kommo): Sugestões saiu do produto; o vendedor ("só sugestões") cai em
+  // /cooling-leads. Ver docs/ROADMAP_FASE2_COPILOTO.md.
+  await page.waitForURL(role === "vendedor" ? "**/cooling-leads" : "**/dashboard");
 }

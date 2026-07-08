@@ -12,6 +12,22 @@ Formato de cada entrada: `## AAAA-MM-DD — Título` · **O quê** · **Por quê
 
 ---
 
+## 2026-07-07 — Fase 1 = analytics Kommo; copiloto de IA vira Fase 2
+- **O quê:** definido que o produto Kommo entrega, na Fase 1, um **painel de gestão/
+  analytics** coerente e completo. O **copiloto de IA** (Sugestões, Conversas, Analista)
+  e a observabilidade (Logs/Sistema) saem do produto e viram **Fase 2**. Removidas do
+  menu/rotas essas páginas; `cooling-leads` reescrita para ler `kommo.leads` (sem GHL);
+  `kommo-sync` ganhou **sync incremental** por `sync_watermarks`
+  (`20260707120000_kommo_sync_watermarks_incremental.sql`); docs marcadas como
+  "estado atual Kommo" vs. "histórico GHL".
+- **Por quê:** decisão de produto — o valor no Kommo é o painel de gestão, não o
+  copiloto; e a IA por conversa depende de matéria-prima (mensagens) que o schema
+  `kommo` **não tem** hoje. Fechar a migração com honestidade > deixar metade das rotas
+  em "Em breve" e uma rota viva (`/cooling-leads`) apontando para tabelas GHL.
+- **Impacto:** app Kommo sem pontas soltas nem dependência de `public.*`/`ghl_*`. A
+  Fase 2 (copiloto) fica gated por validar a API de conversas do Kommo — ver
+  `ROADMAP_FASE2_COPILOTO.md`. Sem pressa: prioridade é fazer certo.
+
 ## 2026-06-07 — C1: versionamento do prompt das sugestões (AI_DECISIONS #2)
 - **O quê:** coluna `suggestions.prompt_version` + constante `PROMPT_VERSION` em `ai-analyze-v2`, gravada em cada sugestão.
 - **Por quê:** sem saber qual versão de prompt gerou cada sugestão, não dá pra medir offline se uma mudança melhorou ou piorou a qualidade.

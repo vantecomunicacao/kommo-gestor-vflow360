@@ -97,12 +97,27 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 - `20260625120000_kommo_workspace_functions.sql` — RPCs de workspace/membros no
   schema `kommo` (`create_workspace`, `can_manage_workspace`,
   `list_workspace_members`, `add_workspace_member`, `remove_workspace_member`)
+- `20260627120000_kommo_funnel_stage_labels.sql` — adiciona coluna
+  `kommo.dashboard_settings.funnel_stage_labels jsonb` (rótulos customizados das 4
+  fases do funil; override aplicado no frontend, sem redeploy da edge function)
+- `20260707120000_kommo_sync_watermarks_incremental.sql` — adiciona colunas
+  `kommo.sync_watermarks.contacts_last_seen_at / tasks_last_seen_at / events_last_seen_at`
+  (marco por entidade p/ o sync incremental do `kommo-sync`; NULL = full-scan)
 
 #### Histórico de mudanças nas tabelas (changelog)
 
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-07 (`20260707120000_kommo_sync_watermarks_incremental.sql`): adicionadas
+  colunas `contacts_last_seen_at`, `tasks_last_seen_at`, `events_last_seen_at` em
+  `kommo.sync_watermarks` — habilitam o sync incremental por entidade no `kommo-sync`
+  (puxa só o que mudou via `filter[updated_at|created_at][from]`; NULL = full-scan).
+  _(ainda não aplicada em prod — em validação local)._
+- 2026-06-27 (`20260627120000_kommo_funnel_stage_labels.sql`): adicionada coluna
+  `kommo.dashboard_settings.funnel_stage_labels jsonb` — rótulos customizados das 4
+  fases do funil (Configurações → "Nomes das etapas do funil"). _(ainda não
+  aplicada em prod — em validação local)._
 - 2026-06-26 (`20260626120000_kommo_lead_stage_events.sql`): **nova tabela**
   `kommo.lead_stage_events` — histórico de mudança de etapa (Kommo /events) para
   calcular "Tempo por etapa" e velocidade do funil. _(ainda não deployada/aplicada

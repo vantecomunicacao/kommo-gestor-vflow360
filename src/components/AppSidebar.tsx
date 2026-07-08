@@ -1,4 +1,4 @@
-import { LayoutDashboard, MessageSquare, Sparkles, Plug, Settings, LogOut, ShieldCheck, ScrollText, Gauge, Brain, Snowflake } from "lucide-react";
+import { LayoutDashboard, Plug, Settings, LogOut, ShieldCheck, Snowflake } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
@@ -36,16 +36,14 @@ export function AppSidebar() {
     navigate("/login", { replace: true });
   };
 
+  // Fase 1 (produto de analytics Kommo): copiloto de IA (Analista/Conversas/
+  // Sugestões) e observabilidade (Sistema/Logs) ficam fora do menu até a Fase 2.
+  // Ver docs/ROADMAP_FASE2_COPILOTO.md.
   const navItems: { title: string; url: string; icon: typeof LayoutDashboard; show: boolean; end?: boolean }[] = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: gestor },
-    { title: "Analista IA", url: "/assistant", icon: Brain, show: gestor },
-    { title: "Conversas", url: "/conversations", icon: MessageSquare, show: gestor },
-    { title: "Sugestões IA", url: "/suggestions", icon: Sparkles, show: viewSuggestions },
     { title: "Leads esfriando", url: "/cooling-leads", icon: Snowflake, show: viewSuggestions },
     { title: "Integrações", url: "/integrations", icon: Plug, show: viewIntegrations },
     { title: "Admin", url: "/admin", icon: ShieldCheck, show: isAdmin },
-    { title: "Sistema", url: "/admin/system", icon: Gauge, show: isAdmin },
-    { title: "Logs", url: "/admin/logs", icon: ScrollText, show: isAdmin },
   ].filter((i) => i.show);
 
   return (

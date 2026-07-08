@@ -1,11 +1,32 @@
 # Catálogo de Capacidades
 
-> O que o sistema **sabe fazer**, capacidade por capacidade. Para cada uma: o que
-> dispara, o que entra/sai, efeitos colaterais, custo (chama LLM? chama API
-> externa?) e se é **determinística** (regra fixa) ou **IA** (LLM decide).
->
-> Regra de leitura: capacidade IA mora onde há ambiguidade real; o resto é cron
-> determinístico. Atualizado em 2026-06-03.
+> O que o sistema **sabe fazer**, capacidade por capacidade.
+
+---
+
+## 0. ESTADO ATUAL — Fase 1 (Kommo) · atualizado 2026-07-07
+
+> **Leia primeiro.** O catálogo A–G abaixo é da **geração GHL** (copiloto de IA por
+> conversa). É **histórico/roadmap**. As capacidades **vivas no produto Kommo** são:
+
+| # | Capacidade (Kommo, Fase 1) | Tipo | Function |
+|---|---|---|---|
+| K1 | Conectar/validar integração Kommo (token no Vault) | Determinística | `kommo-manage` |
+| K2 | Snapshot do CRM → schema `kommo` (incremental) | Determinística | `kommo-sync` |
+| K3 | Dashboard de funil/velocidade/ciclos/origens/follow-up | Determinística | `kommo-dashboard` |
+| K4 | Leads esfriando (inatividade por `kommo_updated_at`) | Determinística | `cooling-leads` |
+| K5 | Bootstrap/gestão de usuários e workspace/membros | Determinística | `kommo-admin-*` |
+
+**Nenhuma capacidade de IA está viva na Fase 1.** O copiloto (gerar sugestões, analisar
+conversa, analista do conjunto) é **Fase 2**, condicionada a validar a API de conversas
+do Kommo — ver `ROADMAP_FASE2_COPILOTO.md`. O schema `kommo` não tem conversas/mensagens.
+
+---
+
+# HISTÓRICO — capacidades da geração GHL (base da Fase 2)
+
+> O catálogo A–G a seguir descreve o copiloto GHL/Evolution/Stevo. Mantido como
+> referência e insumo da Fase 2. **Não** reflete o produto Kommo atual.
 
 ---
 

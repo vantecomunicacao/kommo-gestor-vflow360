@@ -1,11 +1,17 @@
-// VFlowGHL — cooling-leads
-// Calcula APENAS os "leads esfriando" (oportunidades abertas sem atividade há
-// X dias), isolando os dados sensíveis do dashboard do gestor. Para vendedores
-// (com vínculo em user_ghl_links) o escopo é FORÇADO ao ghl_user_id dele.
+// VFlow360 Kommo — cooling-leads
+// Calcula APENAS os "leads esfriando" (negócios abertos sem atividade há X dias),
+// isolando esse dado sensível do dashboard do gestor. Schema `kommo`, isolado —
+// NÃO toca em public.*/ghl_*.
 //
-// Atividade = o mais recente entre a última mudança de etapa
-// (last_status_change_at, fallback ghl_created_at) e a última mensagem trocada.
-// Faixas não-sobrepostas: 7–9 / 10–13 / 14+.
+// Atividade = última movimentação do lead (kommo_updated_at, fallback
+// kommo_created_at). Fase 1 NÃO usa mensagens (o schema kommo não tem conversas);
+// quando a Fase 2 trouxer ingestão de conversa, o "esfriamento" pode considerar a
+// última mensagem trocada. Mesma regra do cooling embutido no kommo-dashboard.
+// Faixas não-sobrepostas: 7–9 (warning) / 10–13 (alert) / 14+ (critical).
+//
+// Escopo: sempre "workspace". No Kommo não há login de vendedor (gestor-only), então
+// o escopo-por-vendedor do mundo GHL (user_ghl_links) não se aplica. O campo `scope`
+// é mantido para compatibilidade com o frontend.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -18,8 +24,6 @@ const corsHeaders = {
 
 const DAY = 86_400_000;
 const COOLING_THRESHOLDS = { warning: 7, alert: 10, critical: 14 };
-
-const normalizePhone = (p: string | null | undefined) => (p || "").replace(/\D+/g, "");
 const isWonName = (n: string) => /(ganho|ganha|won|venda)/.test((n || "").toLowerCase());
 
 serve(async (req) => {
@@ -28,8 +32,9 @@ serve(async (req) => {
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-    const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
+    const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
+    // Client com schema padrão `kommo`: todo .from() resolve em kommo.*
+    const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) throw new Error("Missing authorization");
@@ -47,151 +52,62 @@ serve(async (req) => {
     if (!workspaceId) throw new Error("workspace_id is required");
     const filterPipelineId: string | null = payload.pipelineId || null;
 
-    const { data: isMember } = await supabase.rpc("is_workspace_member", {
+    const { data: isMember } = await db.rpc("is_workspace_member", {
       _user_id: userId, _workspace_id: workspaceId,
     });
     if (!isMember) throw new Error("Forbidden");
 
-    // Escopo do vendedor: se houver vínculo em user_ghl_links, FORÇA o filtro
-    // ao ghl_user_id dele (ignora qualquer sellerId vindo do cliente).
-    let forcedSellerId: string | null = null;
-    const { data: linkRow } = await supabase
-      .from("user_ghl_links")
-      .select("ghl_user_id")
-      .eq("user_id", userId)
-      .eq("workspace_id", workspaceId)
-      .maybeSingle();
-    if (linkRow?.ghl_user_id) forcedSellerId = linkRow.ghl_user_id as string;
-
-    // Stages "ganhas" para excluir do "aberto" (por nome + won_stage_keys).
-    const [{ data: pipelinesRows }, { data: settingsRow }, { data: usersRows }] = await Promise.all([
-      supabase.from("ghl_pipelines").select("ghl_id,name,stages").eq("workspace_id", workspaceId),
-      supabase.from("ghl_dashboard_settings").select("won_stage_keys").eq("workspace_id", workspaceId).maybeSingle(),
-      supabase.from("ghl_users").select("ghl_id,name").eq("workspace_id", workspaceId),
+    // Stages "ganhas" para excluir do "aberto" (por nome + status_id 142 do Kommo).
+    const [{ data: pipelinesRows }, { data: usersRows }] = await Promise.all([
+      db.from("pipelines").select("kommo_id,statuses").eq("workspace_id", workspaceId),
+      db.from("users").select("kommo_id,name").eq("workspace_id", workspaceId),
     ]);
 
-    const wonStageIds = new Set<string>();
+    const wonStageIds = new Set<string>(["142"]); // 142 = "Venda ganha" (status de sistema Kommo)
     for (const p of (pipelinesRows || []) as any[]) {
-      const stages = Array.isArray(p.stages) ? p.stages : [];
+      const stages = Array.isArray(p.statuses) ? p.statuses : [];
       for (const s of stages) {
-        if (isWonName(s.name)) wonStageIds.add(s.id);
+        if (isWonName(s.name)) wonStageIds.add(String(s.id));
       }
     }
-    const wonKeys: string[] = Array.isArray((settingsRow as any)?.won_stage_keys) ? (settingsRow as any).won_stage_keys : [];
-    for (const k of wonKeys) if (k && k !== "venda_ganha") wonStageIds.add(k);
 
     const sellerNameById = new Map<string, string>();
-    for (const u of (usersRows || []) as any[]) sellerNameById.set(u.ghl_id, u.name);
+    for (const u of (usersRows || []) as any[]) sellerNameById.set(u.kommo_id, u.name);
 
-    // Oportunidades (sem filtro de data; aplica pipeline e escopo de vendedor).
-    let q = supabase
-      .from("ghl_opportunities")
-      .select("ghl_id,name,stage_id,status,assigned_to,ghl_created_at,last_status_change_at,contact_phone")
+    // Leads abertos (sem filtro de data; aplica pipeline opcional). Exclui deletados.
+    let q = db
+      .from("leads")
+      .select("kommo_id,name,status,status_id,responsible_user_id,kommo_updated_at,kommo_created_at")
       .eq("workspace_id", workspaceId)
+      .neq("is_deleted", true)
       .limit(10000);
     if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
-    if (forcedSellerId) q = q.eq("assigned_to", forcedSellerId);
-    const { data: openRows, error: oppErr } = await q;
-    if (oppErr) throw oppErr;
+    const { data: leadRows, error: leadErr } = await q;
+    if (leadErr) throw leadErr;
 
     const nowMs = Date.now();
-    const isOpen = (o: any) => {
-      const st = (o.status || "").toLowerCase();
+    const isOpen = (l: any) => {
+      const st = (l.status || "").toLowerCase();
       if (st === "lost" || st === "won") return false;
-      if (o.stage_id && wonStageIds.has(o.stage_id)) return false;
+      if (l.status_id && wonStageIds.has(String(l.status_id))) return false;
       return true;
     };
-
-    // Candidatos: abertas paradas (por etapa/criação) há >= warning dias.
-    const candidates: Array<{ phone: string; baseMs: number; name: string; seller: string | null }> = [];
-    for (const o of (openRows || [])) {
-      if (!isOpen(o)) continue;
-      const baseStr = o.last_status_change_at || o.ghl_created_at;
-      if (!baseStr) continue;
-      const baseMs = new Date(baseStr).getTime();
-      if (isNaN(baseMs)) continue;
-      if ((nowMs - baseMs) / DAY < COOLING_THRESHOLDS.warning) continue;
-      candidates.push({
-        phone: normalizePhone(o.contact_phone),
-        baseMs,
-        name: o.name || `Oportunidade ${String(o.ghl_id).slice(0, 6)}`,
-        seller: o.assigned_to ? (sellerNameById.get(o.assigned_to) || null) : null,
-      });
-    }
-
-    // Última mensagem por telefone dos candidatos (janela de 90 dias).
-    const candPhones = new Set(candidates.map((c) => c.phone).filter(Boolean));
-    const lastMsgByPhone = new Map<string, number>();
-    if (candPhones.size > 0) {
-      const convIdToPhone = new Map<string, string>();
-      const coolConvIds: string[] = [];
-      const PAGE = 1000;
-      let from = 0;
-      while (true) {
-        const { data: convsRows, error: convErr } = await supabase
-          .from("ghl_conversations")
-          .select("ghl_conversation_id,contact_phone")
-          .eq("workspace_id", workspaceId)
-          .range(from, from + PAGE - 1);
-        if (convErr) { console.error("[cooling] ghl_conversations error", convErr); break; }
-        const rows = convsRows || [];
-        for (const c of rows) {
-          const phone = normalizePhone((c as any).contact_phone);
-          if (!candPhones.has(phone)) continue;
-          const id = (c as any).ghl_conversation_id as string;
-          if (convIdToPhone.has(id)) continue;
-          convIdToPhone.set(id, phone);
-          coolConvIds.push(id);
-        }
-        if (rows.length < PAGE) break;
-        from += PAGE;
-        if (from > 50000) break; // safety
-      }
-
-      if (coolConvIds.length > 0) {
-        const sinceIso = new Date(nowMs - 90 * DAY).toISOString();
-        const ID_CHUNK = 200;
-        const MSG_PAGE = 1000;
-        for (let i = 0; i < coolConvIds.length; i += ID_CHUNK) {
-          const chunk = coolConvIds.slice(i, i + ID_CHUNK);
-          let mFrom = 0;
-          while (true) {
-            const { data: msgsRows, error: msgErr } = await supabase
-              .from("ghl_messages")
-              .select("ghl_conversation_id,date_added")
-              .eq("workspace_id", workspaceId)
-              .in("ghl_conversation_id", chunk)
-              .gte("date_added", sinceIso)
-              .order("date_added", { ascending: false })
-              .range(mFrom, mFrom + MSG_PAGE - 1);
-            if (msgErr) { console.error("[cooling] ghl_messages error", msgErr); break; }
-            const rows = (msgsRows || []) as any[];
-            for (const m of rows) {
-              const phone = convIdToPhone.get(m.ghl_conversation_id);
-              if (!phone) continue;
-              const t = new Date(m.date_added).getTime();
-              if (isNaN(t)) continue;
-              if (t > (lastMsgByPhone.get(phone) || 0)) lastMsgByPhone.set(phone, t);
-            }
-            if (rows.length < MSG_PAGE) break;
-            mFrom += MSG_PAGE;
-            if (mFrom > 100000) break; // safety
-          }
-        }
-      }
-    }
 
     type CoolingLead = { name: string; seller: string | null; days: number };
     const result = {
       warning: 0, alert: 0, critical: 0, total: 0,
       thresholds: COOLING_THRESHOLDS,
       leads: { warning: [] as CoolingLead[], alert: [] as CoolingLead[], critical: [] as CoolingLead[] },
-      scope: forcedSellerId ? "seller" : "workspace",
+      scope: "workspace" as const,
     };
 
-    for (const c of candidates) {
-      const effMs = Math.max(c.baseMs, c.phone ? (lastMsgByPhone.get(c.phone) || 0) : 0);
-      const days = (nowMs - effMs) / DAY;
+    for (const l of (leadRows || [])) {
+      if (!isOpen(l)) continue;
+      const baseStr = (l as any).kommo_updated_at || (l as any).kommo_created_at;
+      if (!baseStr) continue;
+      const baseMs = new Date(baseStr).getTime();
+      if (isNaN(baseMs)) continue;
+      const days = (nowMs - baseMs) / DAY;
       if (days < COOLING_THRESHOLDS.warning) continue;
       result.total++;
       const bucket: "warning" | "alert" | "critical" =
@@ -199,7 +115,11 @@ serve(async (req) => {
         : days >= COOLING_THRESHOLDS.alert ? "alert"
         : "warning";
       result[bucket]++;
-      result.leads[bucket].push({ name: c.name, seller: c.seller, days: Math.floor(days) });
+      result.leads[bucket].push({
+        name: (l as any).name || `Lead ${String((l as any).kommo_id).slice(0, 6)}`,
+        seller: (l as any).responsible_user_id ? (sellerNameById.get((l as any).responsible_user_id) || null) : null,
+        days: Math.floor(days),
+      });
     }
     for (const k of ["warning", "alert", "critical"] as const) {
       result.leads[k].sort((a, b) => b.days - a.days);

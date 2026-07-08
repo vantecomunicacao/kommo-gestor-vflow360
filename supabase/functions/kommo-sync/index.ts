@@ -69,6 +69,26 @@ serve(async (req) => {
     if (!subdomain || !token) throw new Error("Credenciais Kommo ausentes (integração sem subdomínio/token no Vault)");
     const creds: KommoCreds = { subdomain, token };
 
+    // --- Sync incremental: lê os watermarks por entidade. NULL → full-scan
+    // (1ª sync ou pós-troca de conta, quando kommo-manage limpa a linha). ---
+    const OVERLAP_MS = 2 * 60_000; // sobreposição p/ não perder linhas alteradas durante a rodada
+    const { data: wm } = await db.from("sync_watermarks")
+      .select("leads_last_seen_at,contacts_last_seen_at,tasks_last_seen_at,events_last_seen_at")
+      .eq("workspace_id", workspaceId).maybeSingle();
+    // Fragmento `&filter[campo][from]=<unix seg>` p/ acrescentar na URL, ou "" (full-scan).
+    const sinceParam = (iso: string | null | undefined, field: "updated_at" | "created_at") => {
+      if (!iso) return "";
+      const sec = Math.floor(new Date(iso).getTime() / 1000);
+      return Number.isFinite(sec) ? `&filter[${field}][from]=${sec}` : "";
+    };
+    // `full: true` no body força um re-sync completo (ignora watermarks) — útil p/ operação.
+    const forceFull = body.full === true;
+    const leadsSince    = forceFull ? "" : sinceParam(wm?.leads_last_seen_at,    "updated_at");
+    const contactsSince = forceFull ? "" : sinceParam(wm?.contacts_last_seen_at, "updated_at");
+    const tasksSince    = forceFull ? "" : sinceParam(wm?.tasks_last_seen_at,    "updated_at");
+    const eventsSince   = forceFull ? "" : sinceParam(wm?.events_last_seen_at,   "created_at");
+    const newWatermark  = new Date(startTs - OVERLAP_MS).toISOString();
+
     await db.from("sync_status").upsert(
       { workspace_id: workspaceId, is_running: true, last_sync_status: "running", last_sync_error: null },
       { onConflict: "workspace_id" },
@@ -76,6 +96,7 @@ serve(async (req) => {
 
     const counts: Record<string, number> = {};
     let stageEventsError: string | null = null;
+    let tasksError: string | null = null;
 
     // === 1. Pipelines (+ statuses embutidos) ===
     const pipelines = await kommoFetchAll(creds, "/leads/pipelines", "pipelines", { maxPages: 5 });
@@ -140,7 +161,7 @@ serve(async (req) => {
     counts.custom_fields = cfRows.length;
 
     // === 5. Contacts (com phone/email extraídos dos custom fields) ===
-    const contacts = await kommoFetchAll(creds, "/contacts?limit=250", "contacts", { maxPages: 40 });
+    const contacts = await kommoFetchAll(creds, `/contacts?limit=250${contactsSince}`, "contacts", { maxPages: 40 });
     if (contacts.length) {
       const rows = contacts.map((c: any) => {
         const { phone, email } = extractContactPhoneEmail(c.custom_fields_values);
@@ -160,7 +181,7 @@ serve(async (req) => {
     counts.contacts = contacts.length;
 
     // === 6. Leads (entidade central do dashboard) ===
-    const leads = await kommoFetchAll(creds, "/leads?limit=250&with=contacts", "leads", { maxPages: 60 });
+    const leads = await kommoFetchAll(creds, `/leads?limit=250&with=contacts${leadsSince}`, "leads", { maxPages: 60 });
     if (leads.length) {
       const rows = leads.map((l: any) => {
         const mainContactId = l?._embedded?.contacts?.[0]?.id ?? null;
@@ -181,6 +202,7 @@ serve(async (req) => {
           kommo_created_at: unixToIso(l.created_at),
           kommo_updated_at: unixToIso(l.updated_at),
           closed_at: unixToIso(l.closed_at),
+          closest_task_at: unixToIso(l.closest_task_at),
         };
       });
       await upsertChunked(db, "leads", rows, "workspace_id,kommo_id");
@@ -192,7 +214,7 @@ serve(async (req) => {
     // para não estourar o tempo da função (incremental fica como melhoria futura).
     try {
       const stageEvents = await kommoFetchAll(
-        creds, "/events?limit=100&filter[type]=lead_status_changed&filter[entity]=lead", "events", { maxPages: 15 },
+        creds, `/events?limit=100&filter[type]=lead_status_changed&filter[entity]=lead${eventsSince}`, "events", { maxPages: 15 },
       );
       if (stageEvents.length) {
         const evRows = stageEvents.map((e: any) => {
@@ -218,7 +240,37 @@ serve(async (req) => {
       stageEventsError = serializeErr(evErr).slice(0, 300);
     }
 
+    // === 8. Tarefas (follow-up: atrasadas + leads sem próxima ação) ===
+    try {
+      const tasks = await kommoFetchAll(creds, `/tasks?limit=250${tasksSince}`, "tasks", { maxPages: 20 });
+      const taskRows = tasks
+        .filter((t: any) => t.entity_type === "leads")
+        .map((t: any) => ({
+          workspace_id: workspaceId,
+          kommo_id: String(t.id),
+          lead_id: t.entity_id != null ? String(t.entity_id) : null,
+          responsible_user_id: t.responsible_user_id != null ? String(t.responsible_user_id) : null,
+          complete_till: unixToIso(t.complete_till),
+          is_completed: !!t.is_completed,
+          task_type_id: t.task_type_id != null ? String(t.task_type_id) : null,
+          text: typeof t.text === "string" ? t.text.slice(0, 500) : null,
+          kommo_created_at: unixToIso(t.created_at),
+          kommo_updated_at: unixToIso(t.updated_at),
+        }))
+        .filter((r: any) => r.kommo_id);
+      if (taskRows.length) await upsertChunked(db, "tasks", taskRows, "workspace_id,kommo_id");
+      counts.tasks = taskRows.length;
+    } catch (tErr) {
+      tasksError = serializeErr(tErr).slice(0, 300);
+    }
+
     // === status final ===
+    // Numa rodada incremental `counts.leads` é só o delta; o total exibido vem de um
+    // COUNT real na tabela (não-deletados), correto tanto no full-scan quanto no delta.
+    const { count: totalLeadsCount } = await db.from("leads")
+      .select("kommo_id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId).neq("is_deleted", true);
+
     await db.from("sync_status").upsert({
       workspace_id: workspaceId,
       is_running: false,
@@ -226,11 +278,27 @@ serve(async (req) => {
       last_sync_error: null,
       last_sync_at: new Date().toISOString(),
       last_sync_duration_ms: Date.now() - startTs,
-      leads_count: counts.leads ?? 0,
+      leads_count: totalLeadsCount ?? counts.leads ?? 0,
     }, { onConflict: "workspace_id" });
 
+    // Avança os watermarks — só das entidades que concluíram sem erro (senão pularíamos
+    // linhas para sempre). Leads/contacts lançam em erro (cairia no catch), então aqui
+    // já concluíram; events/tasks são resilientes, condicionados ao seu *Error.
+    const wmUpdate: Record<string, unknown> = {
+      workspace_id: workspaceId,
+      leads_last_seen_at: newWatermark,
+      contacts_last_seen_at: newWatermark,
+      last_run_at: new Date().toISOString(),
+      last_run_status: "success",
+      last_run_error: null,
+      last_run_count: counts.leads ?? 0,
+    };
+    if (!stageEventsError) wmUpdate.events_last_seen_at = newWatermark;
+    if (!tasksError) wmUpdate.tasks_last_seen_at = newWatermark;
+    await db.from("sync_watermarks").upsert(wmUpdate, { onConflict: "workspace_id" });
+
     return new Response(
-      JSON.stringify({ success: true, workspace_id: workspaceId, counts, stage_events_error: stageEventsError, duration_ms: Date.now() - startTs }),
+      JSON.stringify({ success: true, workspace_id: workspaceId, counts, stage_events_error: stageEventsError, tasks_error: tasksError, duration_ms: Date.now() - startTs }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {

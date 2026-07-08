@@ -30,7 +30,6 @@ import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
-import ComingSoon from "./pages/ComingSoon";
 
 // Lazy: rotas pesadas (recharts, listas, integrações, etc.)
 const Dashboard = lazy(() => import("./pages/Dashboard"));
@@ -41,8 +40,9 @@ const AiSettings = lazy(() => import("./pages/settings/AiSettings"));
 const DashboardSettings = lazy(() => import("./pages/settings/DashboardSettings"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Admin = lazy(() => import("./pages/Admin"));
-// SystemLogs/SystemHub: adiados ("futuramente") — leem tabelas do schema antigo
-// ainda não migradas pro kommo. Roteados para ComingSoon até a migração.
+// Rotas do copiloto de IA (Sugestões, Conversas, Analista) e de observabilidade
+// (Logs, Sistema) foram removidas do produto na Fase 1: dependem de ingestão de
+// conversa/schema antigo ainda não migrados. Ver docs/ROADMAP_FASE2_COPILOTO.md.
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,12 +71,6 @@ const App = () => (
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<GestorGuard>{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</GestorGuard>} />
-                <Route path="/assistant" element={<GestorGuard><ComingSoon title="Analista IA" /></GestorGuard>} />
-                <Route path="/conversations" element={<GestorGuard><ComingSoon title="Conversas" /></GestorGuard>} />
-                <Route
-                  path="/suggestions"
-                  element={<PermissionGuard require="viewSuggestions"><ComingSoon title="Sugestões IA" /></PermissionGuard>}
-                />
                 <Route
                   path="/cooling-leads"
                   element={<PermissionGuard require="viewSuggestions">{lazyRoute(<CoolingLeads />, <GenericPageSkeleton />)}</PermissionGuard>}
@@ -97,8 +91,6 @@ const App = () => (
                 </Route>
                 <Route path="/workspaces" element={<Navigate to="/settings/workspace" replace />} />
                 <Route path="/admin" element={<GestorGuard>{lazyRoute(<Admin />, <GenericPageSkeleton />)}</GestorGuard>} />
-                <Route path="/admin/logs" element={<GestorGuard><ComingSoon title="Logs do Sistema" /></GestorGuard>} />
-                <Route path="/admin/system" element={<GestorGuard><ComingSoon title="Painel do Sistema" /></GestorGuard>} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>

@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
+import { resolveFunnelLabel } from "@/lib/dashboard-funnel";
 import { supabase } from "@/integrations/supabase/client";
 import { Header } from "@/components/dashboard/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -24,6 +25,7 @@ import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
 import { FunnelVelocity } from "@/components/dashboard/FunnelVelocity";
+import { FollowUpCard } from "@/components/dashboard/FollowUpCard";
 import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
@@ -59,6 +61,7 @@ export default function Dashboard() {
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
   const [selectedUtmMedium, setSelectedUtmMedium] = useState<string | null>(null);
   const [selectedUtmCampaign, setSelectedUtmCampaign] = useState<string | null>(null);
+  const [stageLabels, setStageLabels] = useState<Record<string, string>>({});
 
   // Hidratar filtros salvos por workspace (ou aplicar pipeline padrão)
   useEffect(() => {
@@ -70,11 +73,12 @@ export default function Dashboard() {
       // 0) Funil padrão do workspace — sempre tem prioridade na abertura do dashboard.
       const { data: settings } = await supabase
         .from("dashboard_settings")
-        .select("default_pipeline_ids")
+        .select("default_pipeline_ids, funnel_stage_labels")
         .eq("workspace_id", activeWorkspace.id)
         .maybeSingle();
       if (cancelled) return;
       const defaultPipeline = (settings?.default_pipeline_ids || [])[0] ?? null;
+      setStageLabels(((settings as any)?.funnel_stage_labels as Record<string, string>) || {});
 
       // 1) Restaurar filtros salvos (período, vendedores, UTM…)
       let restoredPipeline: string | null = null;
@@ -221,6 +225,12 @@ export default function Dashboard() {
     return { value: Math.round(Math.abs(ch) * 10) / 10, isPositive: ch > 0 };
   };
 
+  // Aplica os rótulos customizados das etapas (Configurações → Nomes das etapas do funil).
+  const funnelStagesLabeled = data.funnelStages.map((s) => ({
+    ...s,
+    name: resolveFunnelLabel(s.id, stageLabels),
+  }));
+
   const currentWon = data.funnelStages.find((s) => s.id === "venda_ganha")?.count || 0;
   const prevWon = prevData?.funnelStages.find((s) => s.id === "venda_ganha")?.count || 0;
 
@@ -326,7 +336,7 @@ export default function Dashboard() {
 
       <AnimatedSection delay={0.05}>
         <FunnelVisualization
-          funnelStages={data.funnelStages}
+          funnelStages={funnelStagesLabeled}
           conversionRates={data.conversionRates}
           lostLeads={data.lostLeads || 0}
           lostLeadsDetail={data.lostLeadsDetail || []}
@@ -386,6 +396,10 @@ export default function Dashboard() {
 
       <AnimatedSection delay={0.05}>
         <FunnelVelocity velocity={data.funnelVelocity} />
+      </AnimatedSection>
+
+      <AnimatedSection delay={0.05}>
+        <FollowUpCard data={data.followUp} />
       </AnimatedSection>
 
       <AnimatedSection delay={0.05}>

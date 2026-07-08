@@ -6,14 +6,13 @@ import { installSupabaseMocks, loginAs } from "./helpers/supabaseMock";
 // tanto a corrida de permissões do reload (page.goto em rota protegida) quanto
 // a instabilidade de encadear muitos cliques sobre chunks lazy numa só sessão.
 
+// Fase 1 (Kommo, analytics): menu enxuto. Copiloto de IA (Conversas/Sugestões/
+// Analista) e observabilidade (Logs/Sistema) saíram do produto — ver
+// docs/ROADMAP_FASE2_COPILOTO.md.
 const routes: { link: string; exact?: boolean; url: RegExp }[] = [
-  { link: "Conversas", exact: true, url: /\/conversations$/ },
-  { link: "Conversas 2.0", url: /\/conversations-v2$/ },
-  { link: "Sugestões IA", url: /\/suggestions$/ },
+  { link: "Leads esfriando", url: /\/cooling-leads$/ },
   { link: "Integrações", url: /\/integrations$/ },
-  { link: "Documentação", url: /\/docs$/ },
   { link: "Admin", exact: true, url: /\/admin$/ },
-  { link: "Logs", url: /\/admin\/logs$/ },
   { link: "Configurações", url: /\/settings\/account$/ },
 ];
 

@@ -130,6 +130,7 @@ export type Database = {
           chart_custom_fields: string[]
           created_at: string
           default_pipeline_ids: string[] | null
+          funnel_stage_labels: Json
           funnel_stage_mapping: Json | null
           origin_field_name: string | null
           updated_at: string
@@ -151,6 +152,7 @@ export type Database = {
           chart_custom_fields?: string[]
           created_at?: string
           default_pipeline_ids?: string[] | null
+          funnel_stage_labels?: Json
           funnel_stage_mapping?: Json | null
           origin_field_name?: string | null
           updated_at?: string
@@ -172,6 +174,7 @@ export type Database = {
           chart_custom_fields?: string[]
           created_at?: string
           default_pipeline_ids?: string[] | null
+          funnel_stage_labels?: Json
           funnel_stage_mapping?: Json | null
           origin_field_name?: string | null
           updated_at?: string

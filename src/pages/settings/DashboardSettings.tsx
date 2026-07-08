@@ -4,6 +4,7 @@ import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { Button } from "@/components/ui/button";
 
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -40,6 +41,7 @@ export default function DashboardSettings() {
   const [businessStart, setBusinessStart] = useState<string>("09:00");
   const [businessEnd, setBusinessEnd] = useState<string>("18:00");
   const [wonStageKeys, setWonStageKeys] = useState<string[]>(["venda_ganha"]);
+  const [stageLabels, setStageLabels] = useState<Record<string, string>>({}); // bucket key -> rótulo customizado
 
   useEffect(() => {
     if (!activeWorkspace?.id) return;
@@ -81,6 +83,7 @@ export default function DashboardSettings() {
         setBusinessStart((settings as any).business_hours_start || "09:00");
         setBusinessEnd((settings as any).business_hours_end || "18:00");
         setWonStageKeys(settings.won_stage_keys || ["venda_ganha"]);
+        setStageLabels((settings.funnel_stage_labels as any) || {});
       }
     } catch (e) {
       toast.error("Erro ao carregar", { description: (e as Error).message });
@@ -109,6 +112,7 @@ export default function DashboardSettings() {
         business_hours_start: businessStart || "09:00",
         business_hours_end: businessEnd || "18:00",
         won_stage_keys: wonStageKeys,
+        funnel_stage_labels: stageLabels,
       };
       const { error } = await supabase
         .from("dashboard_settings" as any)
@@ -252,6 +256,39 @@ export default function DashboardSettings() {
             </label>
           )}
           {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Nenhum pipeline sincronizado.</p>}
+        </CardContent>
+      </Card>
+
+      {/* Nomes das etapas do funil */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Nomes das etapas do funil</CardTitle>
+          <CardDescription>
+            Personalize como cada uma das 4 fases aparece no card "Visão Geral - Funil de Passagem"
+            do Dashboard. Deixe em branco para usar o nome padrão.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {FUNNEL_BUCKETS.map((b) => (
+            <div key={b.key} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
+              <Label className="text-sm font-medium text-muted-foreground">{b.label}</Label>
+              <div className="md:col-span-2">
+                <Input
+                  value={stageLabels[b.key] ?? ""}
+                  placeholder={b.label}
+                  onChange={(e) =>
+                    setStageLabels((prev) => {
+                      const next = { ...prev };
+                      const v = e.target.value;
+                      if (v.trim()) next[b.key] = v;
+                      else delete next[b.key];
+                      return next;
+                    })
+                  }
+                />
+              </div>
+            </div>
+          ))}
         </CardContent>
       </Card>
 

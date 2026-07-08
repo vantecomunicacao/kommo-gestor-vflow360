@@ -20,32 +20,35 @@ test.describe("Autenticação e guards de papel", () => {
     await expect(page.getByRole("link", { name: "Admin" })).toBeVisible();
   });
 
-  test("login do vendedor cai em /suggestions e esconde rotas de gestor", async ({ page }) => {
+  // Fase 1 (Kommo, analytics): a página de Sugestões saiu do produto. O perfil
+  // "só sugestões" (vendedor) agora cai em /cooling-leads (Leads esfriando), a única
+  // página que ele enxerga. Ver docs/ROADMAP_FASE2_COPILOTO.md.
+  test("login do vendedor cai em /cooling-leads e esconde rotas de gestor", async ({ page }) => {
     await installSupabaseMocks(page, { role: "vendedor" });
     await loginAs(page, "vendedor");
 
-    await expect(page).toHaveURL(/\/suggestions$/);
-    await expect(page.getByRole("link", { name: "Sugestões IA" })).toBeVisible();
+    await expect(page).toHaveURL(/\/cooling-leads$/);
+    await expect(page.getByRole("link", { name: "Leads esfriando" })).toBeVisible();
     // Itens de gestor NÃO aparecem para vendedor
     await expect(page.getByRole("link", { name: "Dashboard" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Integrações" })).toHaveCount(0);
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
   });
 
-  test("vendedor é bloqueado em /dashboard (GestorGuard) e volta para /suggestions", async ({ page }) => {
+  test("vendedor é bloqueado em /dashboard (GestorGuard) e volta para /cooling-leads", async ({ page }) => {
     await installSupabaseMocks(page, { role: "vendedor" });
     await loginAs(page, "vendedor");
 
     await page.goto("/dashboard");
-    await expect(page).toHaveURL(/\/suggestions$/);
+    await expect(page).toHaveURL(/\/cooling-leads$/);
   });
 
-  test("vendedor é bloqueado em /integrations (PermissionGuard) e volta para /suggestions", async ({ page }) => {
+  test("vendedor é bloqueado em /integrations (PermissionGuard) e volta para /cooling-leads", async ({ page }) => {
     await installSupabaseMocks(page, { role: "vendedor" });
     await loginAs(page, "vendedor");
 
     await page.goto("/integrations");
-    await expect(page).toHaveURL(/\/suggestions$/);
+    await expect(page).toHaveURL(/\/cooling-leads$/);
   });
 
   test("credenciais inválidas mostram toast de erro e permanecem no /login", async ({ page }) => {
@@ -70,13 +73,13 @@ test.describe("Autenticação e guards de papel", () => {
     await expect(page.getByRole("heading", { name: /integrações/i })).toBeVisible();
   });
 
-  test("reload do vendedor em /suggestions permanece em /suggestions", async ({ page }) => {
+  test("reload do vendedor em /cooling-leads permanece em /cooling-leads", async ({ page }) => {
     await installSupabaseMocks(page, { role: "vendedor" });
     await loginAs(page, "vendedor");
 
-    await page.goto("/suggestions");
-    await expect(page).toHaveURL(/\/suggestions$/);
-    await expect(page.getByRole("link", { name: "Sugestões IA" })).toBeVisible();
+    await page.goto("/cooling-leads");
+    await expect(page).toHaveURL(/\/cooling-leads$/);
+    await expect(page.getByRole("link", { name: "Leads esfriando" })).toBeVisible();
   });
 
   test("logout retorna para a tela de login", async ({ page }) => {

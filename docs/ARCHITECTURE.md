@@ -3,9 +3,39 @@
 > Mapa do território. Visão transversal que **não** existe em nenhum outro lugar do
 > repo (a regra de negócio detalhada vive nos comentários das migrations e das
 > functions; aqui é o "você está aqui").
->
-> Atualizado em 2026-06-03. Se mudar a topologia (function nova, cron novo, tabela
-> nova que dispara comportamento), atualize este arquivo.
+
+---
+
+## 0. ESTADO ATUAL — Fase 1 (Kommo, produto de analytics) · atualizado 2026-07-07
+
+> **Leia isto primeiro.** As seções 1–8 abaixo descrevem a **geração GHL** do sistema
+> (Evolution/Stevo/GHL, copiloto de IA por conversa). Elas são **histórico/roadmap** —
+> úteis como referência, mas **não** são o que roda no produto Kommo de hoje.
+
+O sistema está **migrado para o Kommo** e opera como um **painel de gestão/analytics**:
+
+- **Fonte de dados:** CRM Kommo (`/api/v4`) → snapshot local no schema **`kommo`** via
+  `kommo-sync` (incremental por `sync_watermarks`; full-scan como fallback).
+- **O que existe (Fase 1):** Dashboard de funil, velocidade, tempo por etapa, ciclos,
+  origens/UTMs, qualidade de campos, follow-up (tarefas atrasadas), **Leads esfriando**
+  (inatividade por `kommo_updated_at`), gestão de workspace/membros, integração Kommo.
+- **Edge functions vivas (schema `kommo`):** `kommo-sync`, `kommo-manage`,
+  `kommo-dashboard`, `cooling-leads`, `kommo-admin-bootstrap`, `kommo-admin-users`.
+- **Fora do produto (Fase 2, ver `ROADMAP_FASE2_COPILOTO.md`):** o **copiloto de IA**
+  (Sugestões, Conversas, Analista) e a observabilidade (Logs/Sistema). O schema `kommo`
+  **não tem** conversations/messages/suggestions/ai_config — a IA por conversa depende
+  de validar se a API do Kommo expõe o texto das conversas.
+- **Stack:** React 18 + Vite + TS + shadcn/ui + Tailwind + React Query · Supabase
+  (Postgres + RLS + Edge Functions Deno) · pg_cron (sync) · Coolify.
+- **Isolamento:** o app aponta para `db.schema = "kommo"`; nada toca `public.*`/`ghl_*`
+  (regra do `../CLAUDE.md`).
+
+---
+
+# HISTÓRICO — geração GHL (referência / base da Fase 2)
+
+> As seções a seguir descrevem a topologia GHL/Evolution/Stevo original. Mantidas como
+> registro e insumo para a Fase 2. **Não** refletem o produto Kommo atual.
 
 ---
 

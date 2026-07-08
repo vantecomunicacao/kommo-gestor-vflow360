@@ -41,6 +41,12 @@ export interface FunnelVelocity {
   ganhos: number;
   perdidos: number;
 }
+export interface FollowUp {
+  tarefasAtrasadas: number;
+  tarefasHoje: number;
+  leadsSemProximaAcao: number;
+  porVendedor: { name: string; atrasadas: number }[];
+}
 export interface PipelineStage { id: string; name: string; }
 export interface Pipeline { id: string; name: string; stages?: PipelineStage[]; }
 export interface User { id: string; name: string; }
@@ -105,6 +111,7 @@ export interface DashboardData {
   customFieldDistributions?: CustomFieldDistribution[];
   averageTimePerStage: AverageTimePerStage;
   funnelVelocity?: FunnelVelocity;
+  followUp?: FollowUp;
   cycleToWonDays?: number;
   cycleToWonSample?: number;
   cycleToLostDays?: number;

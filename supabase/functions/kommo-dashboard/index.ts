@@ -184,7 +184,7 @@ serve(async (req) => {
 
     // ===== Query leads =====
     let q = db.from("leads")
-      .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at")
+      .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at")
       .eq("workspace_id", workspaceId).eq("is_deleted", false).limit(10000);
     if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
     if (filterStageIds.length === 1) q = q.eq("status_id", filterStageIds[0]);
@@ -323,6 +323,40 @@ serve(async (req) => {
       avancaram: advancedLeads.size,
       ganhos: velGanhos,
       perdidos: velPerdidos,
+    };
+
+    // ===== Follow-up / Tarefas =====
+    const leadIdSet = new Set(leads.map((l) => String(l.kommo_id)));
+    const openLeads = leads.filter((l) => l.status !== "won" && l.status !== "lost" && !wonStageIds.has(l.status_id));
+    const leadsSemProximaAcao = openLeads.filter((l) => !l.closest_task_at).length;
+
+    const { data: taskRows } = await db.from("tasks")
+      .select("lead_id,responsible_user_id,complete_till,is_completed")
+      .eq("workspace_id", workspaceId).eq("is_completed", false).limit(50000);
+    const fuNow = Date.now();
+    const fuToday = brtDate(new Date());
+    const sellerNameMap = new Map(usersList.map((u) => [u.kommo_id, u.name]));
+    let tarefasAtrasadas = 0, tarefasHoje = 0;
+    const overdueBySeller = new Map<string, number>();
+    for (const t of (taskRows || []) as any[]) {
+      if (!t.lead_id || !leadIdSet.has(String(t.lead_id))) continue; // respeita filtros (leads no escopo)
+      const due = t.complete_till ? new Date(t.complete_till).getTime() : null;
+      if (due == null) continue;
+      if (due < fuNow) {
+        tarefasAtrasadas++;
+        const nm = (t.responsible_user_id && sellerNameMap.get(String(t.responsible_user_id))) || "Sem responsável";
+        overdueBySeller.set(nm, (overdueBySeller.get(nm) || 0) + 1);
+      } else if (brtDate(new Date(t.complete_till)) === fuToday) {
+        tarefasHoje++;
+      }
+    }
+    const followUp = {
+      tarefasAtrasadas,
+      tarefasHoje,
+      leadsSemProximaAcao,
+      porVendedor: Array.from(overdueBySeller.entries())
+        .map(([name, atrasadas]) => ({ name, atrasadas }))
+        .sort((a, b) => b.atrasadas - a.atrasadas).slice(0, 8),
     };
 
     const totalLeads = leads.length;
@@ -533,6 +567,7 @@ serve(async (req) => {
       customFields, customFieldDistributions,
       averageTimePerStage,
       funnelVelocity,
+      followUp,
       cycleToWonDays: cycleToWon.days, cycleToWonSample: cycleToWon.sampleSize,
       cycleToLostDays: cycleToLost.days, cycleToLostSample: cycleToLost.sampleSize,
       dailyLeads,
