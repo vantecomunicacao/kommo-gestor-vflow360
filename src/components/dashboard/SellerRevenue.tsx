@@ -1,18 +1,12 @@
 import { useMemo } from "react";
 import { HandCoins } from "lucide-react";
 import { Seller } from "@/hooks/useKommoData";
+import { formatBRL } from "@/lib/format";
 import { SectionTooltip } from "./SectionTooltip";
 
 interface SellerRevenueProps {
   sellers: Seller[];
 }
-
-const formatBRL = (v: number) => {
-  if (v >= 100_000) {
-    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 }).format(v);
-  }
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v);
-};
 
 export function SellerRevenue({ sellers }: SellerRevenueProps) {
   const ranked = useMemo(

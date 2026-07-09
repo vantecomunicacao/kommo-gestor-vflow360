@@ -6,13 +6,14 @@ import { Link } from "react-router-dom";
 import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { formatBRL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FilterSelect, MultiFilterSelect } from "@/components/dashboard/Header";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AxisTabs } from "@/components/AxisTabs";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useReportSnapshots, DateBasis, ReportMonth, ReportMetrics } from "@/hooks/useReportSnapshots";
@@ -59,11 +60,6 @@ const DEFAULT_VISIBLE: Record<DateBasis, string[]> = {
   criacao: ["leads", "won", "wonRevenue", "ticket", "convGeral"],
   fechamento: ["won", "lost", "wonRevenue", "lostRevenue", "ticket"],
 };
-
-const formatBRL = (v: number) =>
-  v >= 100_000
-    ? new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 }).format(v)
-    : new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v);
 
 const fmtValue = (v: number, fmt: Fmt) =>
   fmt === "brl" ? formatBRL(v) : fmt === "pct" ? `${v.toFixed(1)}%` : new Intl.NumberFormat("pt-BR").format(v);
@@ -428,12 +424,7 @@ export default function Reports() {
                 : "resultados por fechamento"} (fotos mensais)
             </p>
           </div>
-          <Tabs value={dateBasis} onValueChange={onAxisChange}>
-            <TabsList className="h-11 gap-1 p-1.5">
-              <TabsTrigger value="criacao" className="px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">Comercial</TabsTrigger>
-              <TabsTrigger value="fechamento" className="px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md">Financeiro</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <AxisTabs value={dateBasis} onChange={onAxisChange} />
         </div>
         <div className="flex items-center gap-2 justify-end">
           {/* Ações principais visíveis; secundárias no menu, pra desafogar o topo. */}

@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-export type DateBasis = "criacao" | "fechamento";
+export type { DateBasis } from "@/lib/report-axis";
+import type { DateBasis } from "@/lib/report-axis";
 
 export interface ReachStage { id: string; label: string; count: number }
 

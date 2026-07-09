@@ -5,8 +5,10 @@ import { DateRange } from "react-day-picker";
 import { Link } from "react-router-dom";
 import { Users, TrendingUp, TrendingDown, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { AxisTabs } from "@/components/AxisTabs";
 import { cn } from "@/lib/utils";
+import { formatBRL } from "@/lib/format";
+import { DateBasis } from "@/lib/report-axis";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
@@ -32,8 +34,6 @@ import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
-
-type DateBasis = "criacao" | "fechamento";
 
 type SavedFilters = {
   from?: string;
@@ -196,12 +196,6 @@ export default function Dashboard() {
   if (!data) return <ErrorState error="Sem dados. Clique em Atualizar agora para sincronizar com o VFlow360." onRetry={() => refetch(true)} />;
 
   const formatPercentage = (v: number) => `${v.toFixed(1)}%`;
-  const formatBRL = (v: number) => {
-    if (v >= 100_000) {
-      return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 }).format(v);
-    }
-    return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 }).format(v);
-  };
   const calcTrend = (cur: number, prev: number) => {
     if (prev === 0) return cur > 0 ? { value: 100, isPositive: true } : undefined;
     const ch = ((cur - prev) / prev) * 100;
@@ -298,24 +292,7 @@ export default function Dashboard() {
                 : "resultados por data de fechamento"}
             </p>
           </div>
-          <Tabs value={dateBasis} onValueChange={(v) => setDateBasis(v as DateBasis)}>
-            <TabsList className="h-11 gap-1 p-1.5">
-              <TabsTrigger
-                value="criacao"
-                title="Período pela data de criação dos leads"
-                className="px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
-              >
-                Comercial
-              </TabsTrigger>
-              <TabsTrigger
-                value="fechamento"
-                title="Período pela data de fechamento (ganho + perdido)"
-                className="px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
-              >
-                Financeiro
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <AxisTabs value={dateBasis} onChange={setDateBasis} />
         </div>
 
         {/* Status + ação */}
