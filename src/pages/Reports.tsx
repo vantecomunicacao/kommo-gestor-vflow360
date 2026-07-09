@@ -3,11 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Link } from "react-router-dom";
-import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw } from "lucide-react";
+import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FilterSelect, MultiFilterSelect } from "@/components/dashboard/Header";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,27 +28,30 @@ interface MetricDef {
   value: (m: ReportMetrics) => number;
   invert?: boolean;        // cair é bom (perda, receita perdida)
   showDirection?: boolean; // mostra seta ▲▼ colorida mesmo no modo Valores (taxas)
+  desc?: string;           // explicação curta (tooltip na pill e na linha)
 }
 
 // Catálogo por eixo — mesma foto, leitura diferente.
 const CATALOG: Record<DateBasis, MetricDef[]> = {
   criacao: [
-    { id: "leads", label: "Leads Criados", fmt: "num", value: (m) => m.leads },
-    { id: "won", label: "Vendas", fmt: "num", value: (m) => m.won },
-    { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue },
-    { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket },
+    { id: "leads", label: "Leads Criados", fmt: "num", value: (m) => m.leads, desc: "Leads criados no mês (safra por data de criação)." },
+    { id: "won", label: "Vendas", fmt: "num", value: (m) => m.won, desc: "Da safra criada no mês, quantos viraram venda ganha." },
+    { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue, desc: "Soma do valor das vendas ganhas da safra." },
+    { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket, desc: "Receita ganha ÷ nº de vendas ganhas." },
     // Conversão ponta-a-ponta: da entrada (leads criados) até a venda ganha.
     { id: "convGeral", label: "Taxa de Conversão Geral", fmt: "pct", showDirection: true,
-      value: (m) => m.leads > 0 ? (m.won / m.leads) * 100 : 0 },
+      value: (m) => m.leads > 0 ? (m.won / m.leads) * 100 : 0,
+      desc: "Vendas ganhas ÷ leads de entrada. Conversão ponta-a-ponta do funil." },
   ],
   fechamento: [
-    { id: "won", label: "Vendas Ganhas", fmt: "num", value: (m) => m.won },
-    { id: "lost", label: "Vendas Perdidas", fmt: "num", value: (m) => m.lost, invert: true },
-    { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue },
-    { id: "lostRevenue", label: "Receita Perdida", fmt: "brl", value: (m) => m.lostRevenue, invert: true },
-    { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket },
+    { id: "won", label: "Vendas Ganhas", fmt: "num", value: (m) => m.won, desc: "Negócios ganhos no mês (por data de fechamento)." },
+    { id: "lost", label: "Vendas Perdidas", fmt: "num", value: (m) => m.lost, invert: true, desc: "Negócios perdidos no mês (por data de fechamento)." },
+    { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue, desc: "Soma do valor dos negócios ganhos." },
+    { id: "lostRevenue", label: "Receita Perdida", fmt: "brl", value: (m) => m.lostRevenue, invert: true, desc: "Soma do valor dos negócios perdidos. Cair é bom." },
+    { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket, desc: "Receita ganha ÷ nº de vendas ganhas." },
     // Win rate: KPI de saúde comercial. Fica disponível como pill, mas desligado por padrão.
-    { id: "taxaFechamento", label: "Taxa de Fechamento", fmt: "pct", value: (m) => m.winRate, showDirection: true },
+    { id: "taxaFechamento", label: "Taxa de Fechamento", fmt: "pct", value: (m) => m.winRate, showDirection: true,
+      desc: "Vendas ganhas ÷ (ganhas + perdidas). Win rate entre os que fecharam." },
   ],
 };
 
@@ -253,6 +257,7 @@ export default function Reports() {
         label: r.label,
         fmt: "num",
         value: (m: ReportMetrics) => m.reached?.find((x) => x.id === r.id)?.count ?? 0,
+        desc: `Nº de leads da safra que chegaram na etapa "${r.label}".`,
       };
       // Bucket "fechamento": mantém só a contagem (sem taxa própria). Demais buckets
       // também ganham a taxa "% da safra que chegou na etapa".
@@ -266,6 +271,7 @@ export default function Reports() {
           const item = m.reached?.find((x) => x.id === r.id);
           return m.leads > 0 && item ? (item.count / m.leads) * 100 : 0;
         },
+        desc: `% da safra que chegou na etapa "${r.label}" (alcançou ÷ entrada).`,
       };
       return [countDef, rateDef];
     });
@@ -429,19 +435,29 @@ export default function Reports() {
             </TabsList>
           </Tabs>
         </div>
-        <div className="flex items-center gap-2 flex-wrap justify-end">
+        <div className="flex items-center gap-2 justify-end">
+          {/* Ações principais visíveis; secundárias no menu, pra desafogar o topo. */}
           <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" onClick={saveView}>
             <Save className="w-3.5 h-3.5" /> Salvar visão
-          </Button>
-          <Button variant="ghost" size="sm" className="h-8 px-2.5 gap-1.5 text-xs text-muted-foreground" onClick={resetView}>
-            <RotateCcw className="w-3.5 h-3.5" /> Restaurar padrão
           </Button>
           <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" onClick={() => window.print()} disabled={!hasData}>
             <Printer className="w-3.5 h-3.5" /> Exportar PDF
           </Button>
-          <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" asChild>
-            <Link to="/dashboard"><LayoutDashboard className="w-3.5 h-3.5" /> Ver dashboard (ao vivo)</Link>
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Mais ações">
+                <MoreHorizontal className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={resetView}>
+                <RotateCcw className="w-3.5 h-3.5 mr-2" /> Restaurar padrão
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/dashboard"><LayoutDashboard className="w-3.5 h-3.5 mr-2" /> Ver dashboard (ao vivo)</Link>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -524,18 +540,27 @@ export default function Reports() {
               </div>
               <div className="w-px h-5 bg-border hidden sm:block" />
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs font-semibold text-muted-foreground" title="Clique para mostrar/ocultar; arraste para reordenar">Métricas:</span>
+                <span className="text-xs font-semibold text-muted-foreground" title="Clique para mostrar/ocultar; arraste ou Alt+←/→ para reordenar">Métricas:</span>
                 {orderedCatalog.map((m) => {
                   const on = visibleIds.includes(m.id);
                   return (
                     <button key={m.id} aria-pressed={on}
+                      title={m.desc}
                       draggable
                       onDragStart={() => { dragMetricId.current = m.id; }}
                       onDragEnter={() => { if (dragMetricId.current) reorderMetric(dragMetricId.current, m.id); }}
                       onDragOver={(e) => e.preventDefault()}
                       onDragEnd={() => { dragMetricId.current = null; }}
                       onClick={() => setVisibleIds((p) => on ? p.filter((k) => k !== m.id) : [...p, m.id])}
-                      className={cn("group flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-grab active:cursor-grabbing",
+                      onKeyDown={(e) => {
+                        // Alt + ←/→ reordena via teclado (alternativa acessível ao arrastar).
+                        if (!e.altKey || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+                        const ids = orderedCatalog.map((x) => x.id);
+                        const i = ids.indexOf(m.id);
+                        if (e.key === "ArrowLeft" && i > 0) { e.preventDefault(); reorderMetric(m.id, ids[i - 1]); }
+                        if (e.key === "ArrowRight" && i < ids.length - 1) { e.preventDefault(); reorderMetric(m.id, ids[i + 1]); }
+                      }}
+                      className={cn("group flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
                         on ? "bg-primary/10 border-primary/40 text-primary-ink" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
                       <GripVertical className="w-3 h-3 opacity-30 group-hover:opacity-60 -ml-0.5" />
                       {m.label}
@@ -574,7 +599,9 @@ export default function Reports() {
                       <tr key={met.id}
                         className={cn("border-b border-border/60 last:border-0 transition-colors hover:bg-accent",
                           rowIdx % 2 === 1 ? "bg-muted" : "bg-card")}>
-                        <td className="sticky left-0 z-10 bg-inherit font-medium px-4 py-3 whitespace-nowrap">{met.label}</td>
+                        <td className="sticky left-0 z-10 bg-inherit font-medium px-4 py-3 whitespace-nowrap" title={met.desc}>
+                          {met.desc ? <span className="cursor-help decoration-dotted underline-offset-4 hover:underline">{met.label}</span> : met.label}
+                        </td>
                         {shown.map((mo, i) => {
                           const v = met.value(mo.metrics);
                           const prev = i > 0 ? met.value(shown[i - 1].metrics) : null;
