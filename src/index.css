@@ -341,3 +341,50 @@
     }
   }
 }
+
+/* ===== Impressão / Exportar PDF =====
+   Libera as travas de altura/scroll do shell do app (h-screen + overflow) para o
+   conteúdo fluir por várias páginas, e garante fundo branco e cor fiel. A sidebar e
+   o chrome da tela já são ocultados via `print:hidden` nos componentes. */
+@media print {
+  @page { margin: 12mm; }
+  html, body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  /* Se estiver no tema escuro, reaplica os neutros claros para o PDF ficar legível
+     (texto escuro sobre branco). As cores de marca/funil são iguais nos dois temas. */
+  html.dark {
+    --background: 220 13% 95%;
+    --foreground: 215 25% 17%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 25% 17%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 25% 17%;
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 215 25% 17%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 202 70% 95%;
+    --accent-foreground: 201 71% 35%;
+    --primary-ink: 201 71% 42%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --success: 142 76% 36%;
+    --funnel-1-ink: 201 71% 35%;
+    --funnel-2-ink: 201 71% 30%;
+    --funnel-3-ink: 192 70% 28%;
+    --funnel-4-ink: 200 60% 25%;
+  }
+  .h-screen { height: auto !important; }
+  .overflow-hidden,
+  .overflow-y-auto,
+  .overflow-x-auto { overflow: visible !important; }
+  /* força as cores dos gráficos/atingimento a saírem na impressão */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  /* evita quebrar cards no meio */
+  .dashboard-section { box-shadow: none !important; break-inside: avoid; }
+  table { break-inside: auto; }
+  tr, th, td { break-inside: avoid; }
+}

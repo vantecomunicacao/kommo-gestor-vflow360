@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Link } from "react-router-dom";
-import { LayoutDashboard, GitBranch, Users, Target, ChevronDown } from "lucide-react";
+import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -29,11 +29,6 @@ interface MetricDef {
   showDirection?: boolean; // mostra seta ▲▼ colorida mesmo no modo Valores (taxas)
 }
 
-const taxaPerda = (m: ReportMetrics) => {
-  const closed = m.won + m.lost;
-  return closed > 0 ? (m.lost / closed) * 100 : 0;
-};
-
 // Catálogo por eixo — mesma foto, leitura diferente.
 const CATALOG: Record<DateBasis, MetricDef[]> = {
   criacao: [
@@ -41,22 +36,24 @@ const CATALOG: Record<DateBasis, MetricDef[]> = {
     { id: "won", label: "Vendas", fmt: "num", value: (m) => m.won },
     { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue },
     { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket },
+    // Conversão ponta-a-ponta: da entrada (leads criados) até a venda ganha.
+    { id: "convGeral", label: "Taxa de Conversão Geral", fmt: "pct", showDirection: true,
+      value: (m) => m.leads > 0 ? (m.won / m.leads) * 100 : 0 },
   ],
   fechamento: [
-    { id: "leads", label: "Leads Fechados", fmt: "num", value: (m) => m.leads },
     { id: "won", label: "Vendas Ganhas", fmt: "num", value: (m) => m.won },
-    { id: "taxaFechamento", label: "Taxa de Fechamento", fmt: "pct", value: (m) => m.winRate, showDirection: true },
-    { id: "taxaPerda", label: "Taxa de Perda", fmt: "pct", value: taxaPerda, invert: true, showDirection: true },
+    { id: "lost", label: "Vendas Perdidas", fmt: "num", value: (m) => m.lost, invert: true },
     { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue },
     { id: "lostRevenue", label: "Receita Perdida", fmt: "brl", value: (m) => m.lostRevenue, invert: true },
-    { id: "lost", label: "Perdas", fmt: "num", value: (m) => m.lost, invert: true },
     { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket },
+    // Win rate: KPI de saúde comercial. Fica disponível como pill, mas desligado por padrão.
+    { id: "taxaFechamento", label: "Taxa de Fechamento", fmt: "pct", value: (m) => m.winRate, showDirection: true },
   ],
 };
 
 const DEFAULT_VISIBLE: Record<DateBasis, string[]> = {
-  criacao: ["leads", "won", "wonRevenue", "ticket"],
-  fechamento: ["leads", "won", "taxaFechamento", "taxaPerda", "wonRevenue", "lostRevenue"],
+  criacao: ["leads", "won", "wonRevenue", "ticket", "convGeral"],
+  fechamento: ["won", "lost", "wonRevenue", "lostRevenue", "ticket"],
 };
 
 const formatBRL = (v: number) =>
@@ -113,6 +110,8 @@ export default function Reports() {
   const [pipelineId, setPipelineId] = useState<string>("__all__");
   const [sellerIds, setSellerIds] = useState<string[]>([]); // vazio = todos os vendedores
   const [hoveredCol, setHoveredCol] = useState<number | null>(null); // coluna (mês) em foco
+  const [metricOrder, setMetricOrder] = useState<string[]>([]); // ordem custom das métricas (arrastar)
+  const dragMetricId = useRef<string | null>(null);
 
   // Persistência da visão (localStorage, por workspace): lembra a última configuração
   // sem botão. Hidrata ao trocar de conta e regrava a cada mudança relevante.
@@ -133,6 +132,7 @@ export default function Reports() {
         if (typeof v.chartMetric2 === "string") setChartMetric2(v.chartMetric2);
         if (typeof v.pipelineId === "string") setPipelineId(v.pipelineId);
         if (Array.isArray(v.sellerIds)) setSellerIds(v.sellerIds);
+        if (Array.isArray(v.metricOrder)) setMetricOrder(v.metricOrder);
       }
     } catch { /* visão inválida: ignora e segue com os defaults */ }
     hydrated.current = true;
@@ -141,10 +141,10 @@ export default function Reports() {
     if (!viewKey || !hydrated.current) return;
     try {
       localStorage.setItem(viewKey, JSON.stringify({
-        dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds,
+        dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder,
       }));
     } catch { /* quota/priv mode: ignora */ }
-  }, [viewKey, dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds]);
+  }, [viewKey, dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder]);
 
   // Nomes de funil e vendedor (para os seletores) — buscados ao vivo, fora da foto.
   const { data: pipelines = [] } = useQuery({
@@ -246,16 +246,29 @@ export default function Reports() {
     const base = CATALOG[dateBasis];
     if (dateBasis !== "criacao") return base;
     const latest = [...months].reverse().find((mo) => (mo.metrics.reached?.length ?? 0) > 0);
-    const reachDefs: MetricDef[] = (latest?.metrics.reached ?? []).map((r) => ({
-      id: `reach:${r.id}`,
-      label: `Taxa de ${r.label}`,
-      fmt: "pct",
-      showDirection: true,
-      value: (m: ReportMetrics) => {
-        const item = m.reached?.find((x) => x.id === r.id);
-        return m.leads > 0 && item ? (item.count / m.leads) * 100 : 0;
-      },
-    }));
+    const reachDefs: MetricDef[] = (latest?.metrics.reached ?? []).flatMap((r) => {
+      // Contagem bruta: quantos leads da safra chegaram na etapa selecionada.
+      const countDef: MetricDef = {
+        id: `count:${r.id}`,
+        label: r.label,
+        fmt: "num",
+        value: (m: ReportMetrics) => m.reached?.find((x) => x.id === r.id)?.count ?? 0,
+      };
+      // Bucket "fechamento": mantém só a contagem (sem taxa própria). Demais buckets
+      // também ganham a taxa "% da safra que chegou na etapa".
+      if (r.id === "fechamento") return [countDef];
+      const rateDef: MetricDef = {
+        id: `reach:${r.id}`,
+        label: `Taxa ${r.label}`,
+        fmt: "pct",
+        showDirection: true,
+        value: (m: ReportMetrics) => {
+          const item = m.reached?.find((x) => x.id === r.id);
+          return m.leads > 0 && item ? (item.count / m.leads) * 100 : 0;
+        },
+      };
+      return [countDef, rateDef];
+    });
     return [...base, ...reachDefs];
   }, [dateBasis, months]);
 
@@ -280,8 +293,57 @@ export default function Reports() {
   }, [reachIds]);
 
   const shown: ReportMonth[] = useMemo(() => months.slice(-rangeMonths), [months, rangeMonths]);
-  const visibleMetrics = catalog.filter((m) => visibleIds.includes(m.id));
+
+  // Aplica a ordem custom do usuário: primeiro as ids na ordem escolhida, depois as
+  // demais do catálogo (métricas novas entram no fim). Pills e linhas seguem isto.
+  const orderedCatalog = useMemo(() => {
+    const byId = new Map(catalog.map((m) => [m.id, m]));
+    const seen = new Set<string>();
+    const out: MetricDef[] = [];
+    for (const id of metricOrder) {
+      const d = byId.get(id);
+      if (d && !seen.has(id)) { out.push(d); seen.add(id); }
+    }
+    for (const m of catalog) if (!seen.has(m.id)) out.push(m);
+    return out;
+  }, [catalog, metricOrder]);
+
+  const reorderMetric = (from: string, to: string) => {
+    if (from === to) return;
+    const ids = orderedCatalog.map((m) => m.id);
+    const fi = ids.indexOf(from), ti = ids.indexOf(to);
+    if (fi < 0 || ti < 0) return;
+    ids.splice(ti, 0, ids.splice(fi, 1)[0]);
+    setMetricOrder(ids);
+  };
+
+  const visibleMetrics = orderedCatalog.filter((m) => visibleIds.includes(m.id));
   const goalsForAxis = useMemo(() => Object.keys(goals).filter((k) => k.startsWith(`${dateBasis}:`)).length, [goals, dateBasis]);
+
+  // A visão já é salva automaticamente; este botão dá o gesto explícito + confirmação.
+  const saveView = () => {
+    if (!viewKey) return;
+    try {
+      localStorage.setItem(viewKey, JSON.stringify({
+        dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder,
+      }));
+      toast.success("Visualização salva");
+    } catch {
+      toast.error("Não foi possível salvar a visualização");
+    }
+  };
+  // Restaura os padrões do eixo atual (período, leitura, métricas visíveis, ordem e filtros).
+  const resetView = () => {
+    setRangeMonths(6);
+    setMode("valores");
+    setVisibleIds(DEFAULT_VISIBLE[dateBasis]);
+    setMetricOrder([]);
+    setChartMetric("wonRevenue");
+    setChartMetric2("");
+    setPipelineId("__all__");
+    setSellerIds([]);
+    toast.success("Visualização restaurada ao padrão");
+  };
 
   const chartDef = catalog.find((m) => m.id === chartMetric) || catalog[0];
   const chartDef2 = chartMetric2 ? catalog.find((m) => m.id === chartMetric2) : undefined;
@@ -305,7 +367,7 @@ export default function Reports() {
   return (
     <div className="space-y-5 sm:space-y-6">
       {/* Barra de filtros fixa no topo (mesmo padrão do dashboard) */}
-      <div className="sticky top-0 -mx-6 -mt-6 mb-2 z-30 bg-card/95 backdrop-blur-sm border-b border-border">
+      <div className="print:hidden sticky top-0 -mx-6 -mt-6 mb-2 z-30 bg-card/95 backdrop-blur-sm border-b border-border">
         <div className="flex items-end gap-2 overflow-x-auto pl-14 pr-4 py-3 min-h-16">
           <div className="flex flex-col gap-1 shrink-0">
             <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80 px-0.5">Período</span>
@@ -347,12 +409,18 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* Cabeçalho */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
+      {/* Cabeçalho (tela) */}
+      <div className="print:hidden flex items-start justify-between gap-3 flex-wrap">
         <div className="space-y-3">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Relatórios</h1>
-            <p className="text-muted-foreground">{activeWorkspace.name} · comparação mês a mês (fotos congeladas)</p>
+            <h1 className="text-2xl font-bold text-foreground">
+              Relatório {dateBasis === "criacao" ? "Comercial" : "Financeiro"}
+            </h1>
+            <p className="text-muted-foreground">
+              {activeWorkspace.name} · {dateBasis === "criacao"
+                ? "leads por safra de criação"
+                : "resultados por fechamento"} (fotos mensais)
+            </p>
           </div>
           <Tabs value={dateBasis} onValueChange={onAxisChange}>
             <TabsList className="h-11 gap-1 p-1.5">
@@ -361,10 +429,35 @@ export default function Reports() {
             </TabsList>
           </Tabs>
         </div>
-        <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" asChild>
-          <Link to="/dashboard"><LayoutDashboard className="w-3.5 h-3.5" /> Ver dashboard (ao vivo)</Link>
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" onClick={saveView}>
+            <Save className="w-3.5 h-3.5" /> Salvar visão
+          </Button>
+          <Button variant="ghost" size="sm" className="h-8 px-2.5 gap-1.5 text-xs text-muted-foreground" onClick={resetView}>
+            <RotateCcw className="w-3.5 h-3.5" /> Restaurar padrão
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" onClick={() => window.print()} disabled={!hasData}>
+            <Printer className="w-3.5 h-3.5" /> Exportar PDF
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" asChild>
+            <Link to="/dashboard"><LayoutDashboard className="w-3.5 h-3.5" /> Ver dashboard (ao vivo)</Link>
+          </Button>
+        </div>
       </div>
+
+      {/* Cabeçalho (impressão): metadados do relatório — só aparece no PDF */}
+      {hasData && (
+        <div className="hidden print:block border-b border-border pb-3 mb-4">
+          <h1 className="text-xl font-bold text-foreground">Relatório {dateBasis === "criacao" ? "Comercial" : "Financeiro"}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">{activeWorkspace.name}</p>
+          <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground max-w-2xl">
+            <span><strong className="text-foreground font-medium">Período:</strong> {shown.length > 0 ? `${monthLabel(shown[0].month)} – ${monthLabel(shown[shown.length - 1].month)} (${rangeMonths} meses)` : "—"}</span>
+            <span><strong className="text-foreground font-medium">Funil:</strong> {pipelineId === "__all__" ? "Todos os funis" : (pipelineName.get(pipelineId) || pipelineId)}</span>
+            <span><strong className="text-foreground font-medium">Vendedor:</strong> {sellerIds.length === 0 ? "Todos" : sellerIds.map((id) => sellerOptions.find((s) => s.id === id)?.name || id).join(", ")}</span>
+            <span><strong className="text-foreground font-medium">Emitido em:</strong> {format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
+          </div>
+        </div>
+      )}
 
       {isLoading && <div className="dashboard-section text-muted-foreground">Carregando fotos…</div>}
       {error && <div className="dashboard-section text-destructive">Erro: {error}</div>}
@@ -379,7 +472,7 @@ export default function Reports() {
           {/* Tabela de comparação — zebra + âncora no mês atual + realce de coluna no hover */}
           <div className="dashboard-section p-0 overflow-hidden">
             {/* Metas (colapsável): meta fixa mensal por métrica — o atingimento aparece na coluna "atual". */}
-            <div className="border-b border-border">
+            <div className="print:hidden border-b border-border">
               <button
                 onClick={() => setGoalsOpen((o) => !o)}
                 className="w-full flex items-center justify-between px-4 py-2.5 text-xs font-semibold text-muted-foreground hover:bg-accent/40 transition-colors">
@@ -418,7 +511,7 @@ export default function Reports() {
               )}
             </div>
             {/* Controles da tabela: leitura + quais métricas mostrar (agem aqui, então moram aqui) */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
+            <div className="print:hidden flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-muted-foreground">Leitura:</span>
                 {(["valores", "variacao"] as const).map((m) => (
@@ -431,14 +524,20 @@ export default function Reports() {
               </div>
               <div className="w-px h-5 bg-border hidden sm:block" />
               <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs font-semibold text-muted-foreground">Métricas:</span>
-                {catalog.map((m) => {
+                <span className="text-xs font-semibold text-muted-foreground" title="Clique para mostrar/ocultar; arraste para reordenar">Métricas:</span>
+                {orderedCatalog.map((m) => {
                   const on = visibleIds.includes(m.id);
                   return (
                     <button key={m.id} aria-pressed={on}
+                      draggable
+                      onDragStart={() => { dragMetricId.current = m.id; }}
+                      onDragEnter={() => { if (dragMetricId.current) reorderMetric(dragMetricId.current, m.id); }}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDragEnd={() => { dragMetricId.current = null; }}
                       onClick={() => setVisibleIds((p) => on ? p.filter((k) => k !== m.id) : [...p, m.id])}
-                      className={cn("px-2.5 py-1 rounded-full text-xs font-medium border transition-colors",
+                      className={cn("group flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors cursor-grab active:cursor-grabbing",
                         on ? "bg-primary/10 border-primary/40 text-primary-ink" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
+                      <GripVertical className="w-3 h-3 opacity-30 group-hover:opacity-60 -ml-0.5" />
                       {m.label}
                     </button>
                   );
@@ -522,7 +621,10 @@ export default function Reports() {
           <div className="dashboard-section">
             <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <h2 className="section-title mb-0">Evolução no tempo</h2>
-              <div className="flex items-center gap-2">
+              <span className="hidden print:inline text-xs text-muted-foreground">
+                {chartDef.label}{chartDef2 ? ` vs ${chartDef2.label}` : ""}
+              </span>
+              <div className="print:hidden flex items-center gap-2">
                 <Select value={chartMetric} onValueChange={setChartMetric}>
                   <SelectTrigger className="h-8 text-xs font-medium border-border/60 hover:bg-accent/50 border-primary/40 bg-primary/5 text-foreground gap-2 px-3 w-auto min-w-[150px] max-w-[220px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1">
                     <SelectValue />
@@ -546,14 +648,14 @@ export default function Reports() {
             </div>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
+                <LineChart data={chartData} margin={{ top: 8, right: 12, bottom: 0, left: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                   <XAxis dataKey="mes" axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} className="capitalize" />
                   <YAxis yAxisId="left" axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-                    tickFormatter={axisFmt(chartDef.fmt)} width={chartDef.fmt === "brl" ? 64 : 40} />
+                    tickFormatter={axisFmt(chartDef.fmt)} width={chartDef.fmt === "brl" ? 80 : 44} />
                   {chartDef2 && (
                     <YAxis yAxisId="right" orientation="right" axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--funnel-3))", fontSize: 12 }}
-                      tickFormatter={axisFmt(chartDef2.fmt)} width={chartDef2.fmt === "brl" ? 64 : 40} />
+                      tickFormatter={axisFmt(chartDef2.fmt)} width={chartDef2.fmt === "brl" ? 80 : 44} />
                   )}
                   <Tooltip
                     contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}

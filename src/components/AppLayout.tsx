@@ -30,9 +30,13 @@ const AppLayout = () => {
         Pular para o conteúdo principal
       </a>
       <div className="h-screen flex w-full overflow-hidden">
-        <AppSidebar />
+        <div className="print:hidden contents">
+          <AppSidebar />
+        </div>
         <div className="flex-1 flex flex-col min-w-0 h-screen relative">
-          <CollapsedOnlyTrigger />
+          <div className="print:hidden contents">
+            <CollapsedOnlyTrigger />
+          </div>
           <main id="main-content" tabIndex={-1} className="flex-1 overflow-y-auto focus:outline-none">
             <div className="p-6">
               <Outlet />

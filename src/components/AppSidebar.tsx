@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 
 export function AppSidebar() {
-  const { state } = useSidebar();
+  const { state, toggleSidebar } = useSidebar();
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
@@ -51,15 +51,21 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r border-sidebar-border">
       <div className="px-4 py-5 flex items-center justify-between gap-2">
         {collapsed ? (
-          /* Símbolo "V" recortado do logo p/ a sidebar colapsada */
-          <div className="w-7 h-7 overflow-hidden shrink-0" aria-label="VFlow360">
+          /* Colapsada: o próprio símbolo "V" vira o botão de reabrir o menu */
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label="Expandir menu"
+            title="Expandir menu"
+            className="w-7 h-7 overflow-hidden shrink-0 rounded-md hover:bg-sidebar-accent transition-colors"
+          >
             <img
               src="/vflow360-logo-escuro.png"
               alt="VFlow360"
               className="h-7 max-w-none"
               style={{ objectFit: "cover", objectPosition: "left center", width: "auto" }}
             />
-          </div>
+          </button>
         ) : (
           <>
             <img src="/vflow360-logo-escuro.png" alt="VFlow360" className="h-7 w-auto" />
@@ -79,7 +85,7 @@ export function AppSidebar() {
             <SidebarMenu>
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
+                  <SidebarMenuButton asChild tooltip={item.title}>
                     <NavLink
                       to={item.url}
                       end={item.end !== false}
@@ -114,7 +120,7 @@ export function AppSidebar() {
             <div className="min-w-0">
               <p className="text-sm font-medium text-sidebar-foreground truncate">{displayName}</p>
               {email && email !== displayName && (
-                <p className="text-xs text-sidebar-foreground/60 truncate">{email}</p>
+                <p className="text-xs text-sidebar-foreground/75 truncate">{email}</p>
               )}
             </div>
           )}
@@ -125,7 +131,7 @@ export function AppSidebar() {
         <SidebarMenu>
           {viewSettings && (
             <SidebarMenuItem>
-              <SidebarMenuButton asChild>
+              <SidebarMenuButton asChild tooltip="Configurações">
                 <NavLink
                   to="/settings"
                   end={false}
@@ -141,6 +147,7 @@ export function AppSidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton
               onClick={handleSignOut}
+              tooltip="Sair"
               className="flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground hover:bg-sidebar-accent transition-colors w-full"
             >
               <LogOut className="w-5 h-5 shrink-0" />

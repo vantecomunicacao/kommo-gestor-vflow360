@@ -289,8 +289,14 @@ export default function Dashboard() {
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-3">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-            <p className="text-muted-foreground">{activeWorkspace.name} · oportunidades VFlow360</p>
+            <h1 className="text-2xl font-bold text-foreground">
+              Dashboard {dateBasis === "criacao" ? "Comercial" : "Financeiro"}
+            </h1>
+            <p className="text-muted-foreground">
+              {activeWorkspace.name} · {dateBasis === "criacao"
+                ? "oportunidades por data de criação"
+                : "resultados por data de fechamento"}
+            </p>
           </div>
           <Tabs value={dateBasis} onValueChange={(v) => setDateBasis(v as DateBasis)}>
             <TabsList className="h-11 gap-1 p-1.5">
