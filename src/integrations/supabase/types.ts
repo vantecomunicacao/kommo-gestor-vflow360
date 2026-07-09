@@ -14,6 +14,53 @@ export type Database = {
   }
   kommo: {
     Tables: {
+      report_snapshots: {
+        Row: {
+          created_at: string
+          date_basis: string
+          frozen_at: string
+          id: string
+          is_partial: boolean
+          metrics: Json
+          month: string
+          pipeline_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          date_basis: string
+          frozen_at?: string
+          id?: string
+          is_partial?: boolean
+          metrics?: Json
+          month: string
+          pipeline_id?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          date_basis?: string
+          frozen_at?: string
+          id?: string
+          is_partial?: boolean
+          metrics?: Json
+          month?: string
+          pipeline_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_snapshots_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           created_at: string

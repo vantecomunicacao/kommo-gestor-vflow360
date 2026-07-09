@@ -74,6 +74,23 @@ serve(async (req) => {
     const sellerNameById = new Map<string, string>();
     for (const u of (usersRows || []) as any[]) sellerNameById.set(u.kommo_id, u.name);
 
+    // Anti-duplicidade: ações já registradas pelo vflow (kommo.lead_actions) e tarefas
+    // abertas já sincronizadas (kommo.tasks). taskDone = criada por nós OU tarefa aberta;
+    // tagDone = tag aplicada pelo vflow (tags não são sincronizadas).
+    const [{ data: actionRows }, { data: openTaskRows }] = await Promise.all([
+      db.from("lead_actions").select("lead_kommo_id,kind").eq("workspace_id", workspaceId),
+      db.from("tasks").select("lead_id").eq("workspace_id", workspaceId).eq("is_completed", false),
+    ]);
+    const taskDoneSet = new Set<string>();
+    const tagDoneSet = new Set<string>();
+    for (const a of (actionRows || []) as any[]) {
+      if (a.kind === "task") taskDoneSet.add(String(a.lead_kommo_id));
+      else if (a.kind === "tag") tagDoneSet.add(String(a.lead_kommo_id));
+    }
+    for (const t of (openTaskRows || []) as any[]) {
+      if (t.lead_id) taskDoneSet.add(String(t.lead_id));
+    }
+
     // Leads abertos (sem filtro de data; aplica pipeline opcional). Exclui deletados.
     let q = db
       .from("leads")
@@ -93,7 +110,7 @@ serve(async (req) => {
       return true;
     };
 
-    type CoolingLead = { name: string; seller: string | null; days: number };
+    type CoolingLead = { name: string; seller: string | null; days: number; kommo_id: string; responsible_user_id: string | null; taskDone: boolean; tagDone: boolean };
     const result = {
       warning: 0, alert: 0, critical: 0, total: 0,
       thresholds: COOLING_THRESHOLDS,
@@ -119,6 +136,10 @@ serve(async (req) => {
         name: (l as any).name || `Lead ${String((l as any).kommo_id).slice(0, 6)}`,
         seller: (l as any).responsible_user_id ? (sellerNameById.get((l as any).responsible_user_id) || null) : null,
         days: Math.floor(days),
+        kommo_id: String((l as any).kommo_id),
+        responsible_user_id: (l as any).responsible_user_id ? String((l as any).responsible_user_id) : null,
+        taskDone: taskDoneSet.has(String((l as any).kommo_id)),
+        tagDone: tagDoneSet.has(String((l as any).kommo_id)),
       });
     }
     for (const k of ["warning", "alert", "critical"] as const) {

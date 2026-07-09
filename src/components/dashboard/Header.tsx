@@ -192,7 +192,7 @@ function DateRangePicker({
   );
 }
 
-function FilterSelect({
+export function FilterSelect({
   value, onChange, placeholder, icon: Icon, options, className,
 }: {
   value: string | null;
@@ -224,7 +224,7 @@ function FilterSelect({
   );
 }
 
-function MultiFilterSelect({
+export function MultiFilterSelect({
   values, onChange, placeholder, pluralLabel, icon: Icon, options, className,
 }: {
   values: string[];

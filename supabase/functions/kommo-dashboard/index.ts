@@ -117,6 +117,11 @@ serve(async (req) => {
 
     const startDate: string | null = payload.startDate || null;
     const endDate: string | null = payload.endDate || null;
+    // Eixo de data do período principal:
+    //   - "criacao"    (default) → filtra por kommo_created_at  → aba Comercial
+    //   - "fechamento"           → filtra por closed_at (ganho+perdido) → aba Financeiro
+    // Sem o parâmetro, o comportamento é idêntico ao histórico (criação).
+    const dateBasis: "criacao" | "fechamento" = payload.dateBasis === "fechamento" ? "fechamento" : "criacao";
     const additionalStartDate: string | null = payload.additionalStartDate || null;
     const additionalEndDate: string | null = payload.additionalEndDate || null;
     const filterPipelineId: string | null = payload.pipelineId || null;
@@ -126,14 +131,17 @@ serve(async (req) => {
     // ===== Catálogos =====
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
       db.from("pipelines").select("kommo_id,name,statuses,is_main,sort").eq("workspace_id", workspaceId),
-      db.from("users").select("kommo_id,name").eq("workspace_id", workspaceId),
+      db.from("users").select("kommo_id,name,is_active").eq("workspace_id", workspaceId),
       db.from("loss_reasons").select("kommo_id,name").eq("workspace_id", workspaceId),
       db.from("dashboard_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
       db.from("custom_fields").select("kommo_id,name,code,entity_type,field_type,enums").eq("workspace_id", workspaceId),
     ]);
 
     const allPipelines = (pipelinesRows || []) as Array<{ kommo_id: string; name: string; statuses: any; is_main: boolean; sort: number }>;
-    const usersList = (usersRows || []) as Array<{ kommo_id: string; name: string }>;
+    const usersList = (usersRows || []) as Array<{ kommo_id: string; name: string; is_active?: boolean }>;
+    // Só vendedores ativos alimentam o filtro e o seed da performance; o mapa de
+    // nomes (sellerNameMap) segue completo p/ resolver quem já teve venda mas foi desativado.
+    const activeUsers = usersList.filter((u) => u.is_active !== false);
     const lossList = (lossRows || []) as Array<{ kommo_id: string; name: string }>;
     const settings = (settingsRow || {}) as any;
     const customFieldDefs = (cfRows || []) as Array<{ kommo_id: string; name: string; code: string | null; entity_type: string | null; field_type: string | null; enums: any }>;
@@ -194,8 +202,12 @@ serve(async (req) => {
     // Com filtro adicional ativo, não restringimos a data de criação no SQL — a união
     // (criado no período OU vendido no período adicional) é resolvida no JS abaixo.
     if (!additionalActive) {
-      if (startDate) q = q.gte("kommo_created_at", startDate);
-      if (endDate) q = q.lte("kommo_created_at", endDate);
+      // Comercial → data de criação; Financeiro → data de fechamento (closed_at).
+      // Comparar closed_at por gte/lte já exclui NULL, então o Financeiro traz
+      // apenas leads fechados (ganho ou perdido) dentro do período.
+      const periodColumn = dateBasis === "fechamento" ? "closed_at" : "kommo_created_at";
+      if (startDate) q = q.gte(periodColumn, startDate);
+      if (endDate) q = q.lte(periodColumn, endDate);
     }
 
     const { data: leadsRows, error: leadsErr } = await q;
@@ -227,8 +239,10 @@ serve(async (req) => {
           : null;
       };
       leads = leads.filter((l) => {
-        const created = l.kommo_created_at ? new Date(l.kommo_created_at as string).getTime() : null;
-        const inMain = created !== null && created >= mainFrom && created <= mainTo;
+        // O eixo principal segue o dateBasis: criação (Comercial) ou fechamento (Financeiro).
+        const mainRef = dateBasis === "fechamento" ? l.closed_at : l.kommo_created_at;
+        const mainTs = mainRef ? new Date(mainRef as string).getTime() : null;
+        const inMain = mainTs !== null && mainTs >= mainFrom && mainTs <= mainTo;
         const ad = additionalDateOf(l);
         const inAdd = !!ad && ad.getTime() >= addFrom && ad.getTime() <= addTo;
         return inMain || inAdd;
@@ -396,17 +410,23 @@ serve(async (req) => {
 
     // ===== Sellers =====
     const sellersMap = new Map<string, any>();
-    for (const u of usersList) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, avgResponseMinutes: null, responseCount: 0 });
+    for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
     for (const l of leads) {
       const b = stageBucket(l.status_id);
       if (!b) continue;
       const key = l.responsible_user_id || "__unassigned__";
       let s = sellersMap.get(key);
-      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : `Usuário ${String(key).slice(0, 6)}`, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
+      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
       if (b === "contato_inicial") s.contatoInicial++;
       else if (b === "proposta_enviada") s.propostaEnviada++;
       else if (b === "fechamento") s.fechamento++;
       else if (b === "venda_ganha") s.vendaGanha++;
+    }
+    // Receita ganha por vendedor (soma o valor dos leads ganhos por responsável).
+    for (const l of wonOpps) {
+      const key = l.responsible_user_id || "__unassigned__";
+      const s = sellersMap.get(key);
+      if (s) s.wonRevenue += Number(l.price) || 0;
     }
     const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha > 0);
 
@@ -437,10 +457,14 @@ serve(async (req) => {
     const endRef = endDate ? new Date(endDate) : new Date();
     const dayLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
     // Conta leads por data-calendário BRT
+    // Eixo do gráfico segue o dateBasis: criação (Comercial) ou fechamento (Financeiro).
+    const dailyDateOf = (l: any): string | null =>
+      dateBasis === "fechamento" ? (l.closed_at || null) : (l.kommo_created_at || null);
     const leadsByDay = new Map<string, number>();
     for (const l of leads) {
-      if (!l.kommo_created_at) continue;
-      const iso = brtDate(new Date(l.kommo_created_at as string));
+      const ref = dailyDateOf(l);
+      if (!ref) continue;
+      const iso = brtDate(new Date(ref as string));
       leadsByDay.set(iso, (leadsByDay.get(iso) || 0) + 1);
     }
     // Últimos 7 dias terminando no dia BRT de endRef (aritmética de calendário em UTC puro)
@@ -465,6 +489,7 @@ serve(async (req) => {
     // ===== Monetário =====
     const totalMonetary = leads.reduce((a, l) => a + (Number(l.price) || 0), 0);
     const wonMonetary = wonOpps.reduce((a, l) => a + (Number(l.price) || 0), 0);
+    const lostMonetary = lostOpps.reduce((a, l) => a + (Number(l.price) || 0), 0);
     const negotiatingMonetary = leads.reduce((a, l) => {
       if (l.status === "lost") return a;
       const b = stageBucket(l.status_id);
@@ -572,10 +597,10 @@ serve(async (req) => {
       cycleToLostDays: cycleToLost.days, cycleToLostSample: cycleToLost.sampleSize,
       dailyLeads,
       pipelines: allPipelines.map((p) => ({ id: p.kommo_id, name: p.name, stages: Array.isArray(p.statuses) ? p.statuses : [] })),
-      users: usersList.map((u) => ({ id: u.kommo_id, name: u.name })),
+      users: activeUsers.map((u) => ({ id: u.kommo_id, name: u.name })),
       origins: origem.distribution.map((d) => d.name),
       overallFillRate, lossReasons,
-      totalMonetary, wonMonetary, negotiatingMonetary,
+      totalMonetary, wonMonetary, lostMonetary, negotiatingMonetary,
       additionalDateFieldId, additionalDateFieldName,
       // Fase 2 (dependem de conversas/mensagens):
       responseTime: { averageMinutes: 0, responseCount: 0, conversationsAnalyzed: 0, conversationsWithInbound: 0, businessHoursStart: settings?.business_hours_start || "09:00", businessHoursEnd: settings?.business_hours_end || "18:00", unanswered: [] },

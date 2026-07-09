@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,23 @@ export default function DashboardSettings() {
   const [businessEnd, setBusinessEnd] = useState<string>("18:00");
   const [wonStageKeys, setWonStageKeys] = useState<string[]>(["venda_ganha"]);
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({}); // bucket key -> rótulo customizado
+  const [reportRateStages, setReportRateStages] = useState<string[]>([]); // etapas p/ taxas do relatório
+
+  // Detecção de alterações não salvas (baseline capturado ao carregar / após salvar).
+  const editable = useMemo(() => JSON.stringify({
+    defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
+    utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages,
+  }), [defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
+    utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages]);
+  const baselineRef = useRef<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    if (loading) return;
+    if (baselineRef.current === null) { baselineRef.current = editable; setDirty(false); return; }
+    setDirty(editable !== baselineRef.current);
+  }, [editable, loading]);
 
   useEffect(() => {
     if (!activeWorkspace?.id) return;
@@ -52,6 +69,7 @@ export default function DashboardSettings() {
   const loadAll = async () => {
     if (!activeWorkspace?.id) return;
     setLoading(true);
+    baselineRef.current = null; // recaptura o baseline após carregar (evita "sujo" ao trocar de conta)
     try {
       const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }] = await Promise.all([
         supabase.from("pipelines" as any).select("*").eq("workspace_id", activeWorkspace.id),
@@ -84,6 +102,9 @@ export default function DashboardSettings() {
         setBusinessEnd((settings as any).business_hours_end || "18:00");
         setWonStageKeys(settings.won_stage_keys || ["venda_ganha"]);
         setStageLabels((settings.funnel_stage_labels as any) || {});
+        // report_rate_stages guarda CHAVES DE FASE; descarta valores legados (ids de etapa).
+        setReportRateStages(((settings as any).report_rate_stages || []).filter((x: string) =>
+          FUNNEL_BUCKETS.some((b) => b.key === x)));
       }
     } catch (e) {
       toast.error("Erro ao carregar", { description: (e as Error).message });
@@ -113,12 +134,18 @@ export default function DashboardSettings() {
         business_hours_end: businessEnd || "18:00",
         won_stage_keys: wonStageKeys,
         funnel_stage_labels: stageLabels,
+        report_rate_stages: reportRateStages,
       };
       const { error } = await supabase
         .from("dashboard_settings" as any)
         .upsert(payload as any, { onConflict: "workspace_id" });
       if (error) throw error;
+      baselineRef.current = editable; // novo baseline = estado salvo
+      setDirty(false);
       toast.success("Configurações salvas");
+      // Recalcula as fotos do relatório (para refletir taxas de etapa recém-configuradas).
+      supabase.functions.invoke("kommo-report-snapshot", { body: { workspace_id: activeWorkspace.id, months: 12 } })
+        .catch(() => { /* silencioso: o cron diário também recalcula */ });
     } catch (e) {
       toast.error("Erro ao salvar", { description: (e as Error).message });
     } finally {
@@ -334,6 +361,33 @@ export default function DashboardSettings() {
             </div>
           ))}
           {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Sincronize pipelines primeiro.</p>}
+        </CardContent>
+      </Card>
+
+      {/* Taxas de fase do Relatório */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Taxas de fase (Relatório)</CardTitle>
+          <CardDescription>
+            Escolha uma ou mais das 4 fases do funil para virarem taxas no Relatório (aba
+            Comercial), ex.: "Taxa de Agendamento". Cada taxa = leads da safra do mês que
+            alcançaram a fase ÷ leads criados no mês. Como as 4 fases são comuns a todos os
+            funis, a taxa funciona corretamente inclusive em "Todos os funis". Use os nomes
+            personalizados acima ("Nomes das etapas do funil") para adequar ao seu negócio.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {FUNNEL_BUCKETS.map((b) => (
+            <label key={b.key} className="flex items-center gap-2 pl-1 text-sm cursor-pointer">
+              <Checkbox
+                checked={reportRateStages.includes(b.key)}
+                onCheckedChange={(c) =>
+                  setReportRateStages((prev) => c ? [...prev, b.key] : prev.filter((x) => x !== b.key))
+                }
+              />
+              {stageLabels[b.key] || b.label}
+            </label>
+          ))}
         </CardContent>
       </Card>
 
@@ -556,6 +610,20 @@ export default function DashboardSettings() {
           })()}
         </CardContent>
       </Card>
+
+      {/* Barra flutuante de salvar — aparece quando há alterações não salvas */}
+      {dirty && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-full border border-border bg-card/95 backdrop-blur-sm shadow-lg px-4 py-2.5">
+          <span className="flex items-center gap-2 text-sm text-foreground">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            Alterações não salvas
+          </span>
+          <Button size="sm" onClick={save} disabled={saving || syncing} className="h-8">
+            {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            Salvar
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

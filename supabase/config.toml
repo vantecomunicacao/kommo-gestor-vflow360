@@ -22,6 +22,10 @@ verify_jwt = false
 [functions.kommo-manage]
 verify_jwt = false
 
+# Kommo (Fase 1): leads esfriando (schema kommo). Exige usuário autenticado internamente.
+[functions.cooling-leads]
+verify_jwt = false
+
 [functions.log-event]
 verify_jwt = false
 

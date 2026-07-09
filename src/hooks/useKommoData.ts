@@ -12,6 +12,7 @@ export interface Seller {
   propostaEnviada: number;
   fechamento: number;
   vendaGanha: number;
+  wonRevenue?: number;
   avgResponseMinutes?: number | null;
   responseCount?: number;
 }
@@ -59,7 +60,17 @@ export interface CustomFieldDistribution {
   filledCount: number;
   distribution: { name: string; count: number; percentage: number }[];
 }
-export interface CoolingLead { name: string; seller: string | null; days: number; }
+export interface CoolingLead {
+  name: string;
+  seller: string | null;
+  days: number;
+  // Presentes apenas quando vindos da edge function `cooling-leads` (não do dashboard),
+  // usados para agir no lead (criar tarefa / aplicar tag) via `kommo-actions`.
+  kommo_id?: string;
+  responsible_user_id?: string | null;
+  taskDone?: boolean; // já tem tarefa (criada pelo vflow ou tarefa aberta no Kommo)
+  tagDone?: boolean;  // tag já aplicada pelo vflow
+}
 export interface CoolingLeads {
   warning: number;  // 7–9 dias parado
   alert: number;    // 10–13 dias parado
@@ -124,6 +135,7 @@ export interface DashboardData {
   lossReasons: LossReason[];
   totalMonetary?: number;
   wonMonetary?: number;
+  lostMonetary?: number;
   negotiatingMonetary?: number;
   cachedAt?: string;
   additionalDateFieldId?: string | null;
@@ -143,6 +155,8 @@ export interface DashboardFilters {
   workspaceId: string | null;
   additionalStartDate?: Date | null;
   additionalEndDate?: Date | null;
+  /** Eixo de data do período: "criacao" (aba Comercial) ou "fechamento" (aba Financeiro). Default: "criacao". */
+  dateBasis?: "criacao" | "fechamento";
 }
 
 interface UseGhlDataOptions {
@@ -179,6 +193,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.utmCampaign,
       filters.additionalStartDate?.getTime() ?? null,
       filters.additionalEndDate?.getTime() ?? null,
+      filters.dateBasis ?? "criacao",
     ],
     [
       filters.workspaceId,
@@ -191,6 +206,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.utmCampaign,
       filters.additionalStartDate,
       filters.additionalEndDate,
+      filters.dateBasis,
     ],
   );
 
@@ -209,6 +225,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
           utmCampaign: filters.utmCampaign,
           additionalStartDate: filters.additionalStartDate ? filters.additionalStartDate.toISOString() : null,
           additionalEndDate: filters.additionalEndDate ? filters.additionalEndDate.toISOString() : null,
+          dateBasis: filters.dateBasis ?? "criacao",
         },
       });
       if (functionError) throw new Error(functionError.message);

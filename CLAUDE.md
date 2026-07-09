@@ -89,8 +89,16 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.sync_watermarks` | Marcos de sincronização (incremental) |
 | `kommo.dashboard_settings` | Configurações do dashboard |
 | `kommo.lead_stage_events` | Histórico de mudança de etapa dos leads (tempo por etapa) |
+| `kommo.report_snapshots` | Fotos mensais congeladas (relatório de comparação mês a mês) |
+| `kommo.lead_actions` | Ações do vflow por lead (tarefa/tag criadas) — anti-duplicidade dos leads esfriando |
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
+
+- `20260709160000_kommo_report_goals.sql` — adiciona coluna
+  `kommo.dashboard_settings.report_goals jsonb` (metas fixas mensais por métrica do
+  Relatório; chave `"<eixo>:<metricId>"`, ex.: `{"fechamento:won":30}`). Editada/gravada
+  pelo frontend (tela /relatorios) via upsert; atingimento mostrado na coluna "atual" e
+  linha de meta no gráfico.
 
 - `20260618120000_kommo_vault_token.sql` — token da integração no Vault
 - `20260618130000_kommo_sync_cron.sql` — cron de sincronização
@@ -109,6 +117,25 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-09 (`20260709160000_kommo_report_goals.sql`): adicionada coluna
+  `kommo.dashboard_settings.report_goals jsonb` — metas fixas mensais por métrica do
+  Relatório (edição na tela /relatorios, atingimento na coluna "atual" + linha de meta
+  no gráfico). _(aplicada em prod via SQL direto — pg, 2026-07-09.)_
+- 2026-07-09 (`20260709150000_kommo_report_rate_stages.sql`): adicionada coluna
+  `kommo.dashboard_settings.report_rate_stages text[]` — etapas escolhidas p/ virarem
+  "taxas de etapa" no Relatório (ex.: Taxa de Agendamento); a edge function
+  `kommo-report-snapshot` calcula alcance por safra. _(aplicada em prod via SQL direto.)_
+
+- 2026-07-09 (`20260709140000_kommo_lead_actions.sql`): **nova tabela**
+  `kommo.lead_actions` — registra tarefa/tag que o vflow criou em cada lead (workspace ×
+  lead × kind, `unique`). Escrita pela edge function `kommo-actions` (idempotência +
+  anti-duplicidade dos leads esfriando); leitura por membros via RLS. _(aplicada em prod
+  via SQL direto.)_
+- 2026-07-09 (`20260709120000_kommo_report_snapshots.sql`): **nova tabela**
+  `kommo.report_snapshots` — fotos mensais congeladas (workspace × funil × mês × eixo,
+  `metrics` jsonb) para a tela de Relatórios (comparação mês a mês). Escrita pela edge
+  function `kommo-report-snapshot`; leitura por membros via RLS. _(ainda não aplicada em
+  prod — em validação local)._
 - 2026-07-07 (`20260707120000_kommo_sync_watermarks_incremental.sql`): adicionadas
   colunas `contacts_last_seen_at`, `tasks_last_seen_at`, `events_last_seen_at` em
   `kommo.sync_watermarks` — habilitam o sync incremental por entidade no `kommo-sync`

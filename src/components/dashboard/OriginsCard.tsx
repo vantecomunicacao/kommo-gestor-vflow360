@@ -54,6 +54,8 @@ const COPY: Record<Mode, {
 
 export function OriginsCard({ mode, distribution, fillRate, total, configured, colorMap }: OriginsCardProps) {
   const copy = COPY[mode];
+  const title = copy.title;
+  const unitLabel = copy.unitLabel;
   const Icon = copy.icon;
   const colorFor = (name: string, i: number) =>
     name === UNFILLED_LABEL ? UNFILLED_COLOR : (colorMap?.[name] ?? getPieColor(name, i));
@@ -74,15 +76,15 @@ export function OriginsCard({ mode, distribution, fillRate, total, configured, c
     if (grouped.length === 0) return copy.emptyData;
     const total = grouped.reduce((sum, g) => sum + g.count, 0);
     const top = grouped.slice(0, 3).map((g) => `${g.name} ${g.percentage.toFixed(0)}%`).join(", ");
-    return `${copy.title}: gráfico de pizza com ${grouped.length} fatia${grouped.length === 1 ? "" : "s"}, totalizando ${total} ${copy.unitLabel}. Maiores: ${top}.`;
-  }, [grouped, copy]);
+    return `${title}: gráfico de pizza com ${grouped.length} fatia${grouped.length === 1 ? "" : "s"}, totalizando ${total} ${unitLabel}. Maiores: ${top}.`;
+  }, [grouped, copy, title, unitLabel]);
 
   if (!configured) {
     return (
       <div className="dashboard-section animate-slide-up h-full">
         <h2 className="section-title">
           <Icon className="w-5 h-5 text-primary-ink" />
-          {copy.title}
+          {title}
         </h2>
         <div className="flex flex-col items-center justify-center text-center py-10 gap-3">
           <p className="text-sm text-muted-foreground max-w-md">
@@ -107,7 +109,7 @@ export function OriginsCard({ mode, distribution, fillRate, total, configured, c
       <div className="flex items-center justify-between mb-4">
         <h2 className="section-title mb-0">
           <Icon className="w-5 h-5 text-primary-ink" />
-          {copy.title}
+          {title}
           <SectionTooltip text={copy.tooltip} />
         </h2>
         <div

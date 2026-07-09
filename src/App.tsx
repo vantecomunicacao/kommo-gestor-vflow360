@@ -33,6 +33,7 @@ import NotFound from "./pages/NotFound";
 
 // Lazy: rotas pesadas (recharts, listas, integrações, etc.)
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Reports = lazy(() => import("./pages/Reports"));
 const CoolingLeads = lazy(() => import("./pages/CoolingLeads"));
 const Integrations = lazy(() => import("./pages/Integrations"));
 const AccountSettings = lazy(() => import("./pages/settings/AccountSettings"));
@@ -71,6 +72,7 @@ const App = () => (
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<GestorGuard>{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</GestorGuard>} />
+                <Route path="/relatorios" element={<GestorGuard>{lazyRoute(<Reports />, <GenericPageSkeleton />)}</GestorGuard>} />
                 <Route
                   path="/cooling-leads"
                   element={<PermissionGuard require="viewSuggestions">{lazyRoute(<CoolingLeads />, <GenericPageSkeleton />)}</PermissionGuard>}

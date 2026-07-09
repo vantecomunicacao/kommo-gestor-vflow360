@@ -1,4 +1,4 @@
-import { LayoutDashboard, Plug, Settings, LogOut, ShieldCheck, Snowflake } from "lucide-react";
+import { LayoutDashboard, Plug, Settings, LogOut, ShieldCheck, Snowflake, BarChart3 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
@@ -41,7 +41,8 @@ export function AppSidebar() {
   // Ver docs/ROADMAP_FASE2_COPILOTO.md.
   const navItems: { title: string; url: string; icon: typeof LayoutDashboard; show: boolean; end?: boolean }[] = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: gestor },
-    { title: "Leads esfriando", url: "/cooling-leads", icon: Snowflake, show: viewSuggestions },
+    { title: "Relatórios", url: "/relatorios", icon: BarChart3, show: gestor },
+    { title: "Leads esfriando", url: "/cooling-leads", icon: Snowflake, show: viewSuggestions || isAdmin },
     { title: "Integrações", url: "/integrations", icon: Plug, show: viewIntegrations },
     { title: "Admin", url: "/admin", icon: ShieldCheck, show: isAdmin },
   ].filter((i) => i.show);

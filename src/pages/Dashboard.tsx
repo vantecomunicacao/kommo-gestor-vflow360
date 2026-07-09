@@ -3,8 +3,9 @@ import { subDays, startOfDay, endOfDay, differenceInDays, format } from "date-fn
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
 import { Link } from "react-router-dom";
-import { Users, TrendingUp, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal } from "lucide-react";
+import { Users, TrendingUp, TrendingDown, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
@@ -15,6 +16,7 @@ import { Header } from "@/components/dashboard/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { FunnelVisualization } from "@/components/dashboard/FunnelVisualization";
 import { SellerPerformance } from "@/components/dashboard/SellerPerformance";
+import { SellerRevenue } from "@/components/dashboard/SellerRevenue";
 import { TimePerStage } from "@/components/dashboard/TimePerStage";
 import { OriginsCard } from "@/components/dashboard/OriginsCard";
 import { groupTopN } from "@/lib/group-top-n";
@@ -31,11 +33,11 @@ import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
 
+type DateBasis = "criacao" | "fechamento";
+
 type SavedFilters = {
   from?: string;
   to?: string;
-  addFrom?: string;
-  addTo?: string;
   pipelineId?: string | null;
   stageId?: string | null; // legado (seleção única)
   stageIds?: string[];
@@ -43,6 +45,7 @@ type SavedFilters = {
   sellerIds?: string[];
   utmMedium?: string | null;
   utmCampaign?: string | null;
+  dateBasis?: DateBasis;
 };
 
 const filtersStorageKey = (workspaceId: string) => `dashboard:filters:${workspaceId}`;
@@ -55,12 +58,12 @@ export default function Dashboard() {
     from: subDays(new Date(), 7),
     to: subDays(new Date(), 1),
   });
-  const [additionalDateRange, setAdditionalDateRange] = useState<DateRange | undefined>(undefined);
   const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
   const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
   const [selectedUtmMedium, setSelectedUtmMedium] = useState<string | null>(null);
   const [selectedUtmCampaign, setSelectedUtmCampaign] = useState<string | null>(null);
+  const [dateBasis, setDateBasis] = useState<DateBasis>("criacao");
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({});
 
   // Hidratar filtros salvos por workspace (ou aplicar pipeline padrão)
@@ -92,16 +95,12 @@ export default function Dashboard() {
               ? { from: new Date(saved.from), to: saved.to ? new Date(saved.to) : undefined }
               : { from: subDays(new Date(), 7), to: subDays(new Date(), 1) }
           );
-          setAdditionalDateRange(
-            saved.addFrom
-              ? { from: new Date(saved.addFrom), to: saved.addTo ? new Date(saved.addTo) : undefined }
-              : undefined
-          );
           restoredPipeline = saved.pipelineId ?? null;
           setSelectedStageIds(saved.stageIds ?? (saved.stageId ? [saved.stageId] : []));
           setSelectedSellerIds(saved.sellerIds ?? (saved.sellerId ? [saved.sellerId] : []));
           setSelectedUtmMedium(saved.utmMedium ?? null);
           setSelectedUtmCampaign(saved.utmCampaign ?? null);
+          setDateBasis(saved.dateBasis === "fechamento" ? "fechamento" : "criacao");
           restored = true;
         }
       } catch {
@@ -111,11 +110,11 @@ export default function Dashboard() {
       if (!restored) {
         // Reset padrão
         setDateRange({ from: subDays(new Date(), 7), to: subDays(new Date(), 1) });
-        setAdditionalDateRange(undefined);
         setSelectedSellerIds([]);
         setSelectedUtmMedium(null);
         setSelectedUtmCampaign(null);
         setSelectedStageIds([]);
+        setDateBasis("criacao");
       }
 
       // 2) Pipeline: o funil padrão configurado vence na abertura. Se as etapas salvas
@@ -139,35 +138,23 @@ export default function Dashboard() {
     const payload: SavedFilters = {
       from: dateRange?.from ? dateRange.from.toISOString() : undefined,
       to: dateRange?.to ? dateRange.to.toISOString() : undefined,
-      addFrom: additionalDateRange?.from ? additionalDateRange.from.toISOString() : undefined,
-      addTo: additionalDateRange?.to ? additionalDateRange.to.toISOString() : undefined,
       pipelineId: selectedPipelineId,
       stageIds: selectedStageIds,
       sellerIds: selectedSellerIds,
       utmMedium: selectedUtmMedium,
       utmCampaign: selectedUtmCampaign,
+      dateBasis,
     };
     try {
       localStorage.setItem(filtersStorageKey(activeWorkspace.id), JSON.stringify(payload));
     } catch {
       // ignora quota cheia
     }
-  }, [hydrated, activeWorkspace?.id, dateRange, additionalDateRange, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign]);
+  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign, dateBasis]);
 
 
   const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 7)), [dateRange?.from]);
   const endDate = useMemo(() => endOfDay(dateRange?.to || dateRange?.from || subDays(new Date(), 1)), [dateRange?.to, dateRange?.from]);
-
-  const additionalStartDate = useMemo(
-    () => (additionalDateRange?.from ? startOfDay(additionalDateRange.from) : null),
-    [additionalDateRange?.from]
-  );
-  const additionalEndDate = useMemo(
-    () => (additionalDateRange?.to || additionalDateRange?.from
-      ? endOfDay(additionalDateRange.to || additionalDateRange.from!)
-      : null),
-    [additionalDateRange?.to, additionalDateRange?.from]
-  );
 
   const filters: DashboardFilters = useMemo(() => ({
     startDate, endDate,
@@ -177,17 +164,14 @@ export default function Dashboard() {
     utmMedium: selectedUtmMedium,
     utmCampaign: selectedUtmCampaign,
     workspaceId: activeWorkspace?.id || null,
-    additionalStartDate,
-    additionalEndDate,
-  }), [startDate, endDate, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign, activeWorkspace?.id, additionalStartDate, additionalEndDate]);
+    dateBasis,
+  }), [startDate, endDate, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign, activeWorkspace?.id, dateBasis]);
 
   const periodDays = useMemo(() => differenceInDays(endDate, startDate) + 1, [startDate, endDate]);
   const prevFilters: DashboardFilters = useMemo(() => ({
     ...filters,
     startDate: startOfDay(subDays(startDate, periodDays)),
     endDate: endOfDay(subDays(startDate, 1)),
-    additionalStartDate: null,
-    additionalEndDate: null,
   }), [filters, startDate, periodDays]);
 
   const { data, isLoading, isFetching, error, refetch, cachedAt } = useKommoData(filters);
@@ -225,6 +209,15 @@ export default function Dashboard() {
     return { value: Math.round(Math.abs(ch) * 10) / 10, isPositive: ch > 0 };
   };
 
+  // Aba Financeira: eixo de data = fechamento (ganho + perdido). Vários cards de
+  // processo/pipeline não fazem sentido nesse eixo e são ocultados (ver
+  // docs/plano-abas-comercial-financeiro.md).
+  const isFinance = dateBasis === "fechamento";
+  const totalLeadsLabel = isFinance ? "Leads Fechados" : "Total de Leads";
+  const totalLeadsTooltip = isFinance
+    ? "Leads fechados no período (ganho + perdido), pela data de fechamento."
+    : "Quantidade total de leads criados no período filtrado.";
+
   // Aplica os rótulos customizados das etapas (Configurações → Nomes das etapas do funil).
   const funnelStagesLabeled = data.funnelStages.map((s) => ({
     ...s,
@@ -247,6 +240,20 @@ export default function Dashboard() {
   const revenueTrend = prevData ? calcTrend(wonRevenue, prevWonRevenue) : undefined;
   const negotiatingTrend = prevData ? calcTrend(negotiatingRevenue, prevNegotiatingRevenue) : undefined;
   const ticketTrend = prevData ? calcTrend(ticketAvg, prevTicketAvg) : undefined;
+
+  // Financeiro: taxa de ganho (win rate) entre os que fecharam, e receita perdida.
+  const closedCount = currentWon + (data.lostLeads || 0);
+  const winRate = closedCount > 0 ? (currentWon / closedCount) * 100 : 0;
+  const prevClosedCount = prevWon + (prevData?.lostLeads || 0);
+  const prevWinRate = prevClosedCount > 0 ? (prevWon / prevClosedCount) * 100 : 0;
+  const winRateTrend = prevData ? calcTrend(winRate, prevWinRate) : undefined;
+  const lostRevenue = data.lostMonetary ?? 0;
+  const prevLostRevenue = prevData?.lostMonetary ?? 0;
+  // Perder MENOS dinheiro é positivo → invertemos o sinal da tendência.
+  const lostRevenueTrendRaw = prevData ? calcTrend(lostRevenue, prevLostRevenue) : undefined;
+  const lostRevenueTrend = lostRevenueTrendRaw
+    ? { value: lostRevenueTrendRaw.value, isPositive: !lostRevenueTrendRaw.isPositive }
+    : undefined;
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -276,16 +283,33 @@ export default function Dashboard() {
         onUtmMediumChange={setSelectedUtmMedium}
         onUtmCampaignChange={setSelectedUtmCampaign}
         cachedAt={cachedAt}
-        additionalDateRange={additionalDateRange}
-        onAdditionalDateRangeChange={setAdditionalDateRange}
-        additionalDateLabel={data.additionalDateFieldName || null}
       />
 
       <div className={cn("space-y-5 sm:space-y-6 transition-opacity duration-300", isFetching && "opacity-50 pointer-events-none")} aria-busy={isFetching}>
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
-          <p className="text-muted-foreground">{activeWorkspace.name} · oportunidades VFlow360</p>
+        <div className="space-y-3">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+            <p className="text-muted-foreground">{activeWorkspace.name} · oportunidades VFlow360</p>
+          </div>
+          <Tabs value={dateBasis} onValueChange={(v) => setDateBasis(v as DateBasis)}>
+            <TabsList className="h-11 gap-1 p-1.5">
+              <TabsTrigger
+                value="criacao"
+                title="Período pela data de criação dos leads"
+                className="px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+              >
+                Comercial
+              </TabsTrigger>
+              <TabsTrigger
+                value="fechamento"
+                title="Período pela data de fechamento (ganho + perdido)"
+                className="px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md"
+              >
+                Financeiro
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
         </div>
 
         {/* Status + ação */}
@@ -295,6 +319,18 @@ export default function Dashboard() {
               Atualizado {format(new Date(cachedAt), "HH:mm", { locale: ptBR })}
             </span>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 px-3 gap-1.5 text-xs"
+            asChild
+            title="Ver histórico congelado (comparação mês a mês)"
+          >
+            <Link to="/relatorios" aria-label="Ver relatórios">
+              <BarChart3 className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>Relatórios</span>
+            </Link>
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -325,41 +361,62 @@ export default function Dashboard() {
       </div>
 
       <AnimatedSection className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
-        <MetricCard title="Total de Leads" value={data.totalLeads} icon={Users} variant="default" tooltip="Quantidade total de leads criados no período filtrado." trend={leadsTrend} />
+        <MetricCard title={totalLeadsLabel} value={data.totalLeads} icon={Users} variant="default" tooltip={totalLeadsTooltip} trend={leadsTrend} />
         <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Leads que chegaram à etapa de venda ganha no período." trend={wonTrend} />
-        <MetricCard title="Taxa de Conversão" value={formatPercentage(data.conversionRates.overallConversion)} icon={TrendingUp} variant="accent" tooltip="Percentual da primeira etapa até venda ganha." trend={convTrend} />
+        {isFinance ? (
+          <MetricCard title="Taxa de Ganho" value={formatPercentage(winRate)} icon={TrendingUp} variant="accent" tooltip="Dos negócios que fecharam no período (ganhos + perdidos), o percentual que foi ganho." trend={winRateTrend} />
+        ) : (
+          <MetricCard title="Taxa de Conversão" value={formatPercentage(data.conversionRates.overallConversion)} icon={TrendingUp} variant="accent" tooltip="Percentual da primeira etapa até venda ganha." trend={convTrend} />
+        )}
         <MetricCard title="Receita Ganha" value={formatBRL(wonRevenue)} icon={Banknote} variant="success" tooltip="Soma dos valores dos leads marcados como Venda Ganha no período." trend={revenueTrend} />
-        <MetricCard title="Em Negociação" value={formatBRL(negotiatingRevenue)} icon={HandCoins} variant="accent" tooltip="Soma dos valores dos leads nas etapas Proposta Enviada e Fechamento — receita potencial em jogo no pipeline." trend={negotiatingTrend} />
+        {isFinance ? (
+          <MetricCard title="Receita Perdida" value={formatBRL(lostRevenue)} icon={TrendingDown} variant="default" tooltip="Soma do valor dos leads perdidos no período (pela data de fechamento). Tendência: cair é positivo." trend={lostRevenueTrend} />
+        ) : (
+          <MetricCard title="Em Negociação" value={formatBRL(negotiatingRevenue)} icon={HandCoins} variant="accent" tooltip="Soma dos valores dos leads nas etapas Proposta Enviada e Fechamento — receita potencial em jogo no pipeline." trend={negotiatingTrend} />
+        )}
         <MetricCard title="Ticket Médio" value={formatBRL(ticketAvg)} icon={Receipt} variant="default" tooltip="Receita ganha dividida pela quantidade de vendas ganhas no período." trend={ticketTrend} />
       </AnimatedSection>
 
 
-      <AnimatedSection delay={0.05}>
-        <FunnelVisualization
-          funnelStages={funnelStagesLabeled}
-          conversionRates={data.conversionRates}
-          lostLeads={data.lostLeads || 0}
-          lostLeadsDetail={data.lostLeadsDetail || []}
-          belowLostCard={
-            <FunnelCycles
-              cycleToWonDays={data.cycleToWonDays ?? 0}
-              cycleToWonSample={data.cycleToWonSample ?? 0}
-              cycleToLostDays={data.cycleToLostDays ?? 0}
-              cycleToLostSample={data.cycleToLostSample ?? 0}
-            />
-          }
-        />
-      </AnimatedSection>
+      {isFinance ? (
+        <AnimatedSection delay={0.05}>
+          <FunnelCycles
+            cycleToWonDays={data.cycleToWonDays ?? 0}
+            cycleToWonSample={data.cycleToWonSample ?? 0}
+            cycleToLostDays={data.cycleToLostDays ?? 0}
+            cycleToLostSample={data.cycleToLostSample ?? 0}
+          />
+        </AnimatedSection>
+      ) : (
+        <AnimatedSection delay={0.05}>
+          <FunnelVisualization
+            funnelStages={funnelStagesLabeled}
+            conversionRates={data.conversionRates}
+            lostLeads={data.lostLeads || 0}
+            lostLeadsDetail={data.lostLeadsDetail || []}
+            belowLostCard={
+              <FunnelCycles
+                cycleToWonDays={data.cycleToWonDays ?? 0}
+                cycleToWonSample={data.cycleToWonSample ?? 0}
+                cycleToLostDays={data.cycleToLostDays ?? 0}
+                cycleToLostSample={data.cycleToLostSample ?? 0}
+              />
+            }
+          />
+        </AnimatedSection>
+      )}
 
-      <AnimatedSection className="grid grid-cols-1 lg:grid-cols-3 gap-5 lg:gap-6" delay={0.05}>
-        <OriginsCard
-          mode="leads"
-          distribution={data.leadsOriginDistribution || []}
-          fillRate={data.leadsOriginFillRate || 0}
-          total={data.totalLeads}
-          configured={data.utmConfigured?.source || false}
-          colorMap={originColorMap}
-        />
+      <AnimatedSection className={cn("grid grid-cols-1 gap-5 lg:gap-6", isFinance ? "lg:grid-cols-2" : "lg:grid-cols-3")} delay={0.05}>
+        {!isFinance && (
+          <OriginsCard
+            mode="leads"
+            distribution={data.leadsOriginDistribution || []}
+            fillRate={data.leadsOriginFillRate || 0}
+            total={data.totalLeads}
+            configured={data.utmConfigured?.source || false}
+            colorMap={originColorMap}
+          />
+        )}
         <OriginsCard
           mode="wins"
           distribution={data.wonOriginDistribution || []}
@@ -371,44 +428,69 @@ export default function Dashboard() {
         <LossReasons lossReasons={data.lossReasons || []} totalLost={data.lostLeads || 0} />
       </AnimatedSection>
 
-      {data.customFieldDistributions && data.customFieldDistributions.length > 0 && (
+      {isFinance && (
+        <AnimatedSection delay={0.05}>
+          <SellerRevenue sellers={data.sellers} />
+        </AnimatedSection>
+      )}
+
+      {!isFinance && data.customFieldDistributions && data.customFieldDistributions.length > 0 && (
         <AnimatedSection delay={0.05}>
           <CustomFieldCharts fields={data.customFieldDistributions} />
         </AnimatedSection>
       )}
 
-      <AnimatedSection delay={0.05}>
-        <DataQuality customFields={data.customFields} overallFillRate={data.overallFillRate} />
-      </AnimatedSection>
+      {!isFinance && (
+        <AnimatedSection delay={0.05}>
+          <DataQuality customFields={data.customFields} overallFillRate={data.overallFillRate} />
+        </AnimatedSection>
+      )}
+
+      {!isFinance && (
+        <AnimatedSection delay={0.05}>
+          <SellerPerformance
+            sellers={data.sellers}
+            selectedSellerIds={selectedSellerIds}
+            onSellerToggle={(id) => setSelectedSellerIds((prev) => prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id])}
+            onClearSellers={() => setSelectedSellerIds([])}
+          />
+        </AnimatedSection>
+      )}
+
+      {!isFinance && (
+        <AnimatedSection delay={0.05}>
+          <CoolingLeadsCard data={data.coolingLeads} />
+        </AnimatedSection>
+      )}
+
+      {!isFinance && (
+        <AnimatedSection delay={0.05}>
+          <FunnelVelocity velocity={data.funnelVelocity} />
+        </AnimatedSection>
+      )}
+
+      {!isFinance && (
+        <AnimatedSection delay={0.05}>
+          <FollowUpCard data={data.followUp} />
+        </AnimatedSection>
+      )}
 
       <AnimatedSection delay={0.05}>
-        <SellerPerformance
-          sellers={data.sellers}
-          selectedSellerIds={selectedSellerIds}
-          onSellerToggle={(id) => setSelectedSellerIds((prev) => prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id])}
-          onClearSellers={() => setSelectedSellerIds([])}
+        <DailyLeads
+          dailyLeads={data.dailyLeads || []}
+          title={isFinance ? "Fechamentos por dia" : "Entrada de Oportunidades"}
+          unitNoun={isFinance ? "fechamentos" : "oportunidades"}
+          tooltip={isFinance
+            ? "Volume diário de negócios fechados (ganho + perdido) pela data de fechamento. A linha mostra a tendência."
+            : "Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período."}
         />
       </AnimatedSection>
 
-      <AnimatedSection delay={0.05}>
-        <CoolingLeadsCard data={data.coolingLeads} />
-      </AnimatedSection>
-
-      <AnimatedSection delay={0.05}>
-        <FunnelVelocity velocity={data.funnelVelocity} />
-      </AnimatedSection>
-
-      <AnimatedSection delay={0.05}>
-        <FollowUpCard data={data.followUp} />
-      </AnimatedSection>
-
-      <AnimatedSection delay={0.05}>
-        <DailyLeads dailyLeads={data.dailyLeads || []} />
-      </AnimatedSection>
-
-      <AnimatedSection delay={0.05}>
-        <TimePerStage averageTimePerStage={data.averageTimePerStage} />
-      </AnimatedSection>
+      {!isFinance && (
+        <AnimatedSection delay={0.05}>
+          <TimePerStage averageTimePerStage={data.averageTimePerStage} />
+        </AnimatedSection>
+      )}
       </div>
     </div>
   );

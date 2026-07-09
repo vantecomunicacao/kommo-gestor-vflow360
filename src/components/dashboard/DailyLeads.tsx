@@ -3,9 +3,20 @@ import { BarChart3, TrendingUp, Calendar, ArrowUp } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 import { ComposedChart, Bar, Line, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";
 
-interface DailyLeadsProps { dailyLeads: DailyLead[]; }
+interface DailyLeadsProps {
+  dailyLeads: DailyLead[];
+  title?: string;
+  /** Substantivo do que está sendo contado por dia (ex.: "oportunidades", "fechamentos"). */
+  unitNoun?: string;
+  tooltip?: string;
+}
 
-export function DailyLeads({ dailyLeads }: DailyLeadsProps) {
+export function DailyLeads({
+  dailyLeads,
+  title = "Entrada de Oportunidades",
+  unitNoun = "oportunidades",
+  tooltip = "Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período.",
+}: DailyLeadsProps) {
   const data = dailyLeads || [];
   const periodLabel =
     data.length === 0 ? "no período"
@@ -19,7 +30,7 @@ export function DailyLeads({ dailyLeads }: DailyLeadsProps) {
       <div className="dashboard-section animate-slide-up">
         <h2 className="section-title">
           <BarChart3 className="w-5 h-5 text-primary-ink" />
-          Entrada de Oportunidades {titleSuffix}
+          {title} {titleSuffix}
         </h2>
         <p className="text-muted-foreground text-center py-8">Sem dados disponíveis.</p>
       </div>
@@ -37,9 +48,9 @@ export function DailyLeads({ dailyLeads }: DailyLeadsProps) {
   const maxCount = Math.max(...data.map((d) => d.count), 1);
 
   const chartDescription =
-    `Entrada de oportunidades ${periodLabel.startsWith("Últimos") ? `nos ${periodLabel.toLowerCase()}` : periodLabel}: ` +
+    `${title} ${periodLabel.startsWith("Últimos") ? `nos ${periodLabel.toLowerCase()}` : periodLabel}: ` +
     `total ${totalWeek}, média ${avgPerDay.toFixed(1)} por dia. ` +
-    `Maior volume em ${maxDay.dayName} (${maxDay.count} oportunidades). ` +
+    `Maior volume em ${maxDay.dayName} (${maxDay.count} ${unitNoun}). ` +
     `Hoje: ${today.count}${yesterday ? `, ontem: ${yesterday.count}` : ""}.`;
 
   const formatDate = (s: string) => {
@@ -52,8 +63,8 @@ export function DailyLeads({ dailyLeads }: DailyLeadsProps) {
       <div className="lg:col-span-2 dashboard-section animate-slide-up">
         <h2 className="section-title">
           <BarChart3 className="w-5 h-5 text-primary-ink" />
-          Entrada de Oportunidades {titleSuffix}
-          <SectionTooltip text="Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período." />
+          {title} {titleSuffix}
+          <SectionTooltip text={tooltip} />
         </h2>
         <div className="h-64" role="img" aria-label={chartDescription}>
           <ResponsiveContainer width="100%" height="100%">
@@ -62,7 +73,7 @@ export function DailyLeads({ dailyLeads }: DailyLeadsProps) {
               <YAxis axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} allowDecimals={false} />
               <Tooltip<number, string>
                 contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "16px", boxShadow: "0 8px 24px rgba(0,0,0,0.08)" }}
-                formatter={(v, n) => [`${v} opps`, n === "count" ? "Entrada" : "Tendência"]}
+                formatter={(v, n) => [`${v} ${unitNoun}`, n === "count" ? "Total" : "Tendência"]}
                 labelFormatter={(label, payload) => {
                   const p = payload?.[0]?.payload as { date?: string } | undefined;
                   return p?.date ? formatDate(p.date) : label;

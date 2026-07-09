@@ -19,7 +19,8 @@ const PermissionGuard = ({
       </div>
     );
   }
-  if (!permissions[require]) {
+  // Admin passa por qualquer permissão exigida (gestor enxerga tudo).
+  if (!permissions[require] && !permissions.isAdmin) {
     return <Navigate to={landingPath(permissions)} replace />;
   }
   return <>{children}</>;
