@@ -40,18 +40,23 @@ serve(async (req) => {
     if (!authHeader) throw new Error("Missing authorization");
     const token = authHeader.replace("Bearer ", "");
 
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data: claimsData, error: cErr } = await userClient.auth.getClaims(token);
-    if (cErr || !claimsData?.claims) throw new Error("Unauthorized");
-    const userId = claimsData.claims.sub as string;
-
     const payload = await req.json().catch(() => ({} as any));
     const workspaceId = payload.workspace_id as string;
     if (!workspaceId) throw new Error("workspace_id is required");
     const filterPipelineId: string | null = payload.pipelineId || null;
 
+    // Auth: exige usuário válido no JWT + membership no workspace.
+    // getClaims em try/catch (não derruba com 500 nas API keys novas), mas o
+    // usuário é OBRIGATÓRIO — sem usuário, 401; sem membership, 403.
+    let userId: string | null = null;
+    try {
+      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data: claims } = await userClient.auth.getClaims(token);
+      userId = claims?.claims?.sub ?? null;
+    } catch { userId = null; }
+    if (!userId) throw new Error("Unauthorized");
     const { data: isMember } = await db.rpc("is_workspace_member", {
       _user_id: userId, _workspace_id: workspaceId,
     });

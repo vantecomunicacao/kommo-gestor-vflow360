@@ -59,16 +59,25 @@ export function AppSidebar() {
             title="Expandir menu"
             className="w-7 h-7 overflow-hidden shrink-0 rounded-md hover:bg-sidebar-accent transition-colors"
           >
-            <img
-              src="/vflow360-logo-escuro.png"
-              alt="VFlow360"
-              className="h-7 max-w-none"
-              style={{ objectFit: "cover", objectPosition: "left center", width: "auto" }}
-            />
+            <>
+              <img
+                src="/vflow360-logo-barra.png"
+                alt="VFlow360"
+                className="h-7 max-w-none dark:hidden"
+                style={{ objectFit: "cover", objectPosition: "left center", width: "auto" }}
+              />
+              <img
+                src="/vflow360-logo-escuro.png"
+                alt="VFlow360"
+                className="h-7 max-w-none hidden dark:block"
+                style={{ objectFit: "cover", objectPosition: "left center", width: "auto" }}
+              />
+            </>
           </button>
         ) : (
           <>
-            <img src="/vflow360-logo-escuro.png" alt="VFlow360" className="h-7 w-auto" />
+            <img src="/vflow360-logo-barra.png" alt="VFlow360" className="h-7 w-auto dark:hidden" />
+            <img src="/vflow360-logo-escuro.png" alt="VFlow360" className="h-7 w-auto hidden dark:block" />
             <SidebarTrigger className="h-7 w-7 shrink-0 text-sidebar-foreground border border-sidebar-border hover:bg-sidebar-accent hover:text-sidebar-accent-foreground" />
           </>
         )}

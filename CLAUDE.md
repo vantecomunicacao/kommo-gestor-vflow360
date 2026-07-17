@@ -101,7 +101,10 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   linha de meta no gráfico.
 
 - `20260618120000_kommo_vault_token.sql` — token da integração no Vault
-- `20260618130000_kommo_sync_cron.sql` — cron de sincronização
+- `20260618130000_kommo_sync_cron.sql` — cron de sincronização (tick incremental 15min)
+- `20260710140000_kommo_sync_full_daily.sql` — full-scan diário (`{full:true}`, 06:20 UTC)
+  que dispara a reconciliação de exclusões no `kommo-sync` (marca `is_deleted` nos leads
+  que sumiram do Kommo; o tick incremental sozinho nunca via exclusões)
 - `20260625120000_kommo_workspace_functions.sql` — RPCs de workspace/membros no
   schema `kommo` (`create_workspace`, `can_manage_workspace`,
   `list_workspace_members`, `add_workspace_member`, `remove_workspace_member`)
@@ -117,6 +120,11 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-17 (`20260717120000_kommo_report_snapshots_rls_fix.sql`): fix de consistência
+  de RLS em `kommo.report_snapshots` — adiciona a policy `"svc all"` (FOR ALL TO
+  service_role) que faltava e revoga o excesso `insert/update/delete` de `authenticated`
+  (grant "morto"), alinhando ao padrão das demais tabelas. Sem mudança estrutural; hardening
+  de login/senha. _(aplicar em prod via SQL direto — pendente.)_
 - 2026-07-09 (`20260709160000_kommo_report_goals.sql`): adicionada coluna
   `kommo.dashboard_settings.report_goals jsonb` — metas fixas mensais por métrica do
   Relatório (edição na tela /relatorios, atingimento na coluna "atual" + linha de meta

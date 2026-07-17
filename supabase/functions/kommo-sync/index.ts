@@ -69,6 +69,26 @@ serve(async (req) => {
     if (!subdomain || !token) throw new Error("Credenciais Kommo ausentes (integração sem subdomínio/token no Vault)");
     const creds: KommoCreds = { subdomain, token };
 
+    // --- Sonda de diagnóstico (read-only): quando/quem excluiu leads. Não grava nada,
+    // não sincroniza. `probe_deletions: true` → busca eventos lead_deleted e retorna
+    // { lead_id, deleted_at, by_user_id }. Filtra por `ids` se enviado. ---
+    if (body.probe_deletions === true) {
+      const wantIds: Set<string> | null = Array.isArray(body.ids)
+        ? new Set((body.ids as unknown[]).map((x) => String(x))) : null;
+      const evts = await kommoFetchAll(
+        creds, `/events?limit=100&filter[type]=lead_deleted&filter[entity]=lead`, "events", { maxPages: 30 },
+      );
+      const out = evts
+        .map((e: any) => ({
+          lead_id: e.entity_id != null ? String(e.entity_id) : null,
+          deleted_at: unixToIso(e.created_at),
+          by_user_id: e.created_by != null ? String(e.created_by) : null,
+        }))
+        .filter((r: any) => r.lead_id && (!wantIds || wantIds.has(r.lead_id)));
+      return new Response(JSON.stringify({ success: true, probe: "deletions", count: out.length, events: out }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
     // --- Sync incremental: lê os watermarks por entidade. NULL → full-scan
     // (1ª sync ou pós-troca de conta, quando kommo-manage limpa a linha). ---
     const OVERLAP_MS = 2 * 60_000; // sobreposição p/ não perder linhas alteradas durante a rodada
@@ -181,7 +201,8 @@ serve(async (req) => {
     counts.contacts = contacts.length;
 
     // === 6. Leads (entidade central do dashboard) ===
-    const leads = await kommoFetchAll(creds, `/leads?limit=250&with=contacts${leadsSince}`, "leads", { maxPages: 60 });
+    const LEADS_MAX_PAGES = 60, LEADS_PAGE = 250;
+    const leads = await kommoFetchAll(creds, `/leads?limit=${LEADS_PAGE}&with=contacts${leadsSince}`, "leads", { maxPages: LEADS_MAX_PAGES });
     if (leads.length) {
       const rows = leads.map((l: any) => {
         const mainContactId = l?._embedded?.contacts?.[0]?.id ?? null;
@@ -208,6 +229,39 @@ serve(async (req) => {
       await upsertChunked(db, "leads", rows, "workspace_id,kommo_id");
     }
     counts.leads = leads.length;
+
+    // === 6b. Reconciliação de exclusões (só no full-scan) ===
+    // Um lead apagado no Kommo some da resposta de /leads e NUNCA volta marcado
+    // (l.is_deleted não ajuda: o registro nem vem no payload). Então, num full-scan,
+    // tudo que existe localmente mas não veio agora foi excluído no Kommo → is_deleted.
+    // Só é seguro no full-scan (leadsSince === ""); no incremental não há visão completa.
+    // Guarda: se a busca bateu no teto de páginas, o retorno pode estar truncado —
+    // nesse caso NÃO reconcilia (evitaria marcar leads válidos como excluídos).
+    // dry_run: faz a varredura e reporta o que SERIA marcado, sem gravar nada.
+    const dryRun = body.dry_run === true;
+    const hitPageCap = leads.length >= LEADS_MAX_PAGES * LEADS_PAGE;
+    if (leadsSince === "" && !hitPageCap) {
+      const seen = new Set(leads.map((l: any) => String(l.id)));
+      const { data: localLeads } = await db.from("leads")
+        .select("kommo_id").eq("workspace_id", workspaceId).neq("is_deleted", true);
+      const missing = (localLeads ?? [])
+        .map((r: any) => r.kommo_id as string)
+        .filter((id: string) => !seen.has(id));
+      if (!dryRun) {
+        for (let i = 0; i < missing.length; i += 200) {
+          const chunk = missing.slice(i, i + 200);
+          const { error } = await db.from("leads").update({ is_deleted: true })
+            .eq("workspace_id", workspaceId).in("kommo_id", chunk);
+          if (error) throw error;
+        }
+      }
+      counts.leads_deleted_reconciled = missing.length;
+      counts.leads_deleted_dry_run = dryRun ? 1 : 0;
+      // amostra p/ inspeção no dry-run (limita p/ não estourar a resposta)
+      (counts as any).leads_deleted_ids = missing.slice(0, 100);
+    } else if (leadsSince === "" && hitPageCap) {
+      counts.leads_deleted_reconciled = -1; // sinaliza: pulado por teto de páginas
+    }
 
     // === 7. Eventos de mudança de etapa (histórico → tempo por etapa / velocidade) ===
     // Resiliente: se falhar, NÃO derruba o sync (leads já foram gravados). Limitado

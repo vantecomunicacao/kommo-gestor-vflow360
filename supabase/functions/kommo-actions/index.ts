@@ -41,11 +41,17 @@ serve(async (req) => {
     if (!authHeader) throw new Error("Missing authorization");
     const token = authHeader.replace("Bearer ", "");
 
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data: claims } = await userClient.auth.getClaims(token);
-    const userId = claims?.claims?.sub as string | undefined;
+    // Auth: exige usuário válido no JWT + membership no workspace.
+    // getClaims em try/catch (não derruba com 500 nas API keys novas), mas o
+    // usuário é OBRIGATÓRIO — sem usuário, 401; sem membership, 403.
+    let userId: string | null = null;
+    try {
+      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+      });
+      const { data: claims } = await userClient.auth.getClaims(token);
+      userId = claims?.claims?.sub ?? null;
+    } catch { userId = null; }
     if (!userId) throw new Error("Unauthorized");
 
     const body = await req.json().catch(() => ({} as any));
@@ -71,7 +77,7 @@ serve(async (req) => {
     // Registra a ação (best-effort; conflito = já registrado por outra requisição).
     const recordAction = async () => {
       await db.from("lead_actions")
-        .upsert({ workspace_id: workspaceId, lead_kommo_id: leadKommoId, kind, created_by: userId },
+        .upsert({ workspace_id: workspaceId, lead_kommo_id: leadKommoId, kind, created_by: userId ?? null },
           { onConflict: "workspace_id,lead_kommo_id,kind", ignoreDuplicates: true });
     };
 

@@ -84,8 +84,8 @@ const AccountSettings = () => {
 
   const changePassword = async () => {
     if (!user?.email) return;
-    if (newPw.length < 6) {
-      toast.error("A nova senha precisa ter ao menos 6 caracteres");
+    if (newPw.length < 8) {
+      toast.error("A nova senha precisa ter ao menos 8 caracteres");
       return;
     }
     if (newPw !== confirmPw) {
