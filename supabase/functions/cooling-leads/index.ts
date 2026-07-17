@@ -15,6 +15,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchAllRows } from "../_shared/paginate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -82,9 +83,11 @@ serve(async (req) => {
     // Anti-duplicidade: ações já registradas pelo vflow (kommo.lead_actions) e tarefas
     // abertas já sincronizadas (kommo.tasks). taskDone = criada por nós OU tarefa aberta;
     // tagDone = tag aplicada pelo vflow (tags não são sincronizadas).
-    const [{ data: actionRows }, { data: openTaskRows }] = await Promise.all([
-      db.from("lead_actions").select("lead_kommo_id,kind").eq("workspace_id", workspaceId),
-      db.from("tasks").select("lead_id").eq("workspace_id", workspaceId).eq("is_completed", false),
+    const [actionRows, openTaskRows] = await Promise.all([
+      fetchAllRows((from, to) => db.from("lead_actions").select("lead_kommo_id,kind")
+        .eq("workspace_id", workspaceId).order("id").range(from, to)),
+      fetchAllRows((from, to) => db.from("tasks").select("lead_id")
+        .eq("workspace_id", workspaceId).eq("is_completed", false).order("id").range(from, to)),
     ]);
     const taskDoneSet = new Set<string>();
     const tagDoneSet = new Set<string>();
@@ -97,15 +100,16 @@ serve(async (req) => {
     }
 
     // Leads abertos (sem filtro de data; aplica pipeline opcional). Exclui deletados.
-    let q = db
-      .from("leads")
-      .select("kommo_id,name,status,status_id,responsible_user_id,kommo_updated_at,kommo_created_at")
-      .eq("workspace_id", workspaceId)
-      .neq("is_deleted", true)
-      .limit(10000);
-    if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
-    const { data: leadRows, error: leadErr } = await q;
-    if (leadErr) throw leadErr;
+    // Paginado — PostgREST corta a resposta em 1000 linhas.
+    const leadRows = await fetchAllRows((from, to) => {
+      let q = db
+        .from("leads")
+        .select("kommo_id,name,status,status_id,responsible_user_id,kommo_updated_at,kommo_created_at")
+        .eq("workspace_id", workspaceId)
+        .neq("is_deleted", true);
+      if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
+      return q.order("kommo_id").range(from, to);
+    });
 
     const nowMs = Date.now();
     const isOpen = (l: any) => {

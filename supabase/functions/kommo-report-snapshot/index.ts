@@ -7,6 +7,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchAllRows } from "../_shared/paginate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -90,11 +91,10 @@ serve(async (req) => {
       .map((b) => ({ id: b, label: funnelLabels[b] || DEFAULT_LABEL[b], order: BUCKET_ORDER[b] }));
 
     // ===== Leads (TODOS os funis — o escopo por funil é resolvido na agregação) =====
-    const { data: leadsRows, error: leadsErr } = await db.from("leads")
+    const leadsRows = await fetchAllRows((from, to) => db.from("leads")
       .select("kommo_id,status,status_id,price,responsible_user_id,kommo_created_at,closed_at,pipeline_id")
-      .eq("workspace_id", workspaceId).eq("is_deleted", false).limit(10000);
-    if (leadsErr) throw leadsErr;
-    const leads = (leadsRows || []) as any[];
+      .eq("workspace_id", workspaceId).eq("is_deleted", false).order("kommo_id").range(from, to));
+    const leads = leadsRows as any[];
 
     // ===== Taxas de fase ("chegou até a fase X") — cohort por data de criação =====
     // As 4 fases são a linguagem comum entre TODOS os funis, então isto funciona
@@ -102,8 +102,8 @@ serve(async (req) => {
     // alcançada por lead (fase atual + histórico de eventos; ganho alcança tudo).
     const maxBucketByLead = new Map<string, number>();
     if (targets.length) {
-      const { data: evRows } = await db.from("lead_stage_events")
-        .select("lead_id,after_status_id").eq("workspace_id", workspaceId).limit(50000);
+      const evRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
+        .select("lead_id,after_status_id").eq("workspace_id", workspaceId).order("id").range(from, to));
       for (const e of (evRows || []) as any[]) {
         const b = statusBucket.get(String(e.after_status_id));
         if (b == null || !e.lead_id) continue;

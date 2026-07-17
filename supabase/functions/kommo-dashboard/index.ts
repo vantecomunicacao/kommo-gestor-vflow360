@@ -7,6 +7,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { fetchAllRows } from "../_shared/paginate.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -190,29 +191,29 @@ serve(async (req) => {
     const wonStageIds = new Set<string>(stageMap.venda_ganha);
     wonStageIds.add("142");
 
-    // ===== Query leads =====
-    let q = db.from("leads")
-      .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at")
-      .eq("workspace_id", workspaceId).eq("is_deleted", false).limit(10000);
-    if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
-    if (filterStageIds.length === 1) q = q.eq("status_id", filterStageIds[0]);
-    else if (filterStageIds.length > 1) q = q.in("status_id", filterStageIds);
-    if (filterUserIds.length === 1) q = q.eq("responsible_user_id", filterUserIds[0]);
-    else if (filterUserIds.length > 1) q = q.in("responsible_user_id", filterUserIds);
-    // Com filtro adicional ativo, não restringimos a data de criação no SQL — a união
-    // (criado no período OU vendido no período adicional) é resolvida no JS abaixo.
-    if (!additionalActive) {
-      // Comercial → data de criação; Financeiro → data de fechamento (closed_at).
-      // Comparar closed_at por gte/lte já exclui NULL, então o Financeiro traz
-      // apenas leads fechados (ganho ou perdido) dentro do período.
-      const periodColumn = dateBasis === "fechamento" ? "closed_at" : "kommo_created_at";
-      if (startDate) q = q.gte(periodColumn, startDate);
-      if (endDate) q = q.lte(periodColumn, endDate);
-    }
-
-    const { data: leadsRows, error: leadsErr } = await q;
-    if (leadsErr) throw leadsErr;
-    let leads = (leadsRows || []) as any[];
+    // ===== Query leads (paginada — PostgREST corta em 1000 por resposta) =====
+    const leadsRows = await fetchAllRows((from, to) => {
+      let q = db.from("leads")
+        .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at")
+        .eq("workspace_id", workspaceId).eq("is_deleted", false);
+      if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
+      if (filterStageIds.length === 1) q = q.eq("status_id", filterStageIds[0]);
+      else if (filterStageIds.length > 1) q = q.in("status_id", filterStageIds);
+      if (filterUserIds.length === 1) q = q.eq("responsible_user_id", filterUserIds[0]);
+      else if (filterUserIds.length > 1) q = q.in("responsible_user_id", filterUserIds);
+      // Com filtro adicional ativo, não restringimos a data de criação no SQL — a união
+      // (criado no período OU vendido no período adicional) é resolvida no JS abaixo.
+      if (!additionalActive) {
+        // Comercial → data de criação; Financeiro → data de fechamento (closed_at).
+        // Comparar closed_at por gte/lte já exclui NULL, então o Financeiro traz
+        // apenas leads fechados (ganho ou perdido) dentro do período.
+        const periodColumn = dateBasis === "fechamento" ? "closed_at" : "kommo_created_at";
+        if (startDate) q = q.gte(periodColumn, startDate);
+        if (endDate) q = q.lte(periodColumn, endDate);
+      }
+      return q.order("kommo_id").range(from, to);
+    });
+    let leads = leadsRows as any[];
     if (!filterPipelineId && activePipelineIds.size > 0) {
       leads = leads.filter((l) => !l.pipeline_id || activePipelineIds.has(l.pipeline_id));
     }
@@ -259,9 +260,9 @@ serve(async (req) => {
     // ===== Tempo por etapa (a partir do histórico de eventos) =====
     // Para cada lead, reconstrói os trechos (status, entrada, saída) usando created_at
     // + eventos de mudança de etapa, e tira a média de dias por balde do funil.
-    const { data: stageEvRows } = await db.from("lead_stage_events")
+    const stageEvRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
       .select("lead_id,pipeline_id,before_status_id,after_status_id,changed_at")
-      .eq("workspace_id", workspaceId).limit(50000);
+      .eq("workspace_id", workspaceId).order("id").range(from, to));
     const eventsByLead = new Map<string, Array<{ before: string | null; after: string | null; t: number }>>();
     for (const e of (stageEvRows || []) as any[]) {
       const t = e.changed_at ? new Date(e.changed_at).getTime() : NaN;
@@ -344,9 +345,9 @@ serve(async (req) => {
     const openLeads = leads.filter((l) => l.status !== "won" && l.status !== "lost" && !wonStageIds.has(l.status_id));
     const leadsSemProximaAcao = openLeads.filter((l) => !l.closest_task_at).length;
 
-    const { data: taskRows } = await db.from("tasks")
+    const taskRows = await fetchAllRows((from, to) => db.from("tasks")
       .select("lead_id,responsible_user_id,complete_till,is_completed")
-      .eq("workspace_id", workspaceId).eq("is_completed", false).limit(50000);
+      .eq("workspace_id", workspaceId).eq("is_completed", false).order("id").range(from, to));
     const fuNow = Date.now();
     const fuToday = brtDate(new Date());
     const sellerNameMap = new Map(usersList.map((u) => [u.kommo_id, u.name]));
