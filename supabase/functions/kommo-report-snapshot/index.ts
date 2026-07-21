@@ -8,6 +8,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchAllRows } from "../_shared/paginate.ts";
+import { authorizeWorkspace } from "../_shared/authorize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,28 +37,14 @@ serve(async (req) => {
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Missing authorization");
-    const token = authHeader.replace("Bearer ", "");
-
     const payload = await req.json().catch(() => ({} as any));
     const workspaceId = payload.workspace_id as string;
     if (!workspaceId) throw new Error("workspace_id is required");
     const months: number = Number.isFinite(payload.months) ? Math.max(1, Math.min(36, payload.months)) : 12;
 
-    // Auth: se houver usuário no JWT, exige membership; contexto service/cron passa.
-    let userId: string | null = null;
-    try {
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-      const { data: claims } = await userClient.auth.getClaims(token);
-      userId = claims?.claims?.sub ?? null;
-    } catch { userId = null; }
-    if (userId) {
-      const { data: isMember } = await db.rpc("is_workspace_member", { _user_id: userId, _workspace_id: workspaceId });
-      if (!isMember) throw new Error("Forbidden");
-    }
+    // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
+    // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
+    await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
 
     // ===== Settings: mapeamento das 4 fases + fases-alvo das taxas =====
     const { data: settingsRow } = await db.from("dashboard_settings")

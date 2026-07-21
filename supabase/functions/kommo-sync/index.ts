@@ -13,12 +13,16 @@ import {
   KommoCreds, normalizeSubdomain, kommoFetchAll,
   unixToIso, leadStatusKind, extractContactPhoneEmail,
 } from "../_shared/kommo-client.ts";
+import { authorizeWorkspace } from "../_shared/authorize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-internal-secret",
 };
+
+// Intervalo mínimo entre syncs MANUAIS de usuário (server-side, não burlável).
+const SYNC_COOLDOWN_MS = 2 * 60 * 1000;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -39,24 +43,9 @@ serve(async (req) => {
     workspaceId = (body.workspace_id as string) || null;
     if (!workspaceId) throw new Error("workspace_id is required");
 
-    // --- auth: se houver usuário no JWT, exige membership no workspace.
-    // Sem usuário (cron postgres->edge com anon key) é permitido — o token vem do Vault. ---
-    const authHeader = req.headers.get("Authorization");
-    const jwt = authHeader ? authHeader.replace("Bearer ", "") : "";
-    let userId: string | null = null;
-    if (jwt) {
-      try {
-        const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-          global: { headers: { Authorization: `Bearer ${jwt}` } },
-        });
-        const { data: claims } = await userClient.auth.getClaims(jwt);
-        userId = claims?.claims?.sub ?? null;
-      } catch { userId = null; }
-    }
-    if (userId) {
-      const { data: isMember } = await db.rpc("is_workspace_member", { _user_id: userId, _workspace_id: workspaceId });
-      if (!isMember) throw new Error("Forbidden: not a member of this workspace");
-    }
+    // --- auth: JWT válido + membership (usuário) OU segredo interno (cron
+    // postgres->edge com x-internal-secret). Ver _shared/authorize.ts. ---
+    const auth = await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
 
     // --- credenciais: SEMPRE da integração conectada + token no Vault (por workspace) ---
     const { data: intg } = await db.from("integrations")
@@ -87,6 +76,23 @@ serve(async (req) => {
         .filter((r: any) => r.lead_id && (!wantIds || wantIds.has(r.lead_id)));
       return new Response(JSON.stringify({ success: true, probe: "deletions", count: out.length, events: out }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+
+    // --- Cooldown do "Atualizar agora" (server-side, não burlável) ---
+    // Só vale para sync MANUAL de usuário: cron (segredo interno), full-scan e a
+    // sonda não entram. Antes o cooldown vivia no localStorage do frontend e era
+    // contornável limpando o storage; agora a autoridade é o sync_status.last_sync_at.
+    const isManualUserSync = auth.via === "user" && body.cron !== true && body.full !== true;
+    if (isManualUserSync) {
+      const { data: st } = await db.from("sync_status")
+        .select("last_sync_at,is_running").eq("workspace_id", workspaceId).maybeSingle();
+      const lastMs = st?.last_sync_at ? new Date(st.last_sync_at).getTime() : 0;
+      const elapsed = Date.now() - lastMs;
+      if (st?.is_running || (lastMs && elapsed < SYNC_COOLDOWN_MS)) {
+        const wait = st?.is_running ? 30 : Math.ceil((SYNC_COOLDOWN_MS - elapsed) / 1000);
+        return new Response(JSON.stringify({ error: `COOLDOWN:${wait}` }),
+          { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
     }
 
     // --- Sync incremental: lê os watermarks por entidade. NULL → full-scan
@@ -358,14 +364,23 @@ serve(async (req) => {
   } catch (e) {
     const msg = serializeErr(e);
     console.error("kommo-sync error:", msg);
-    if (workspaceId) {
-      await db.from("sync_status").upsert({
-        workspace_id: workspaceId, is_running: false, last_sync_status: "error", last_sync_error: msg.slice(0, 1000),
-      }, { onConflict: "workspace_id" }).catch(() => {});
+    // Erro de autorização → 403 limpo, sem sujar o sync_status (não foi uma
+    // sincronização que falhou; foi um chamador sem permissão).
+    const isAuthErr = msg === "Forbidden" || msg === "Missing authorization"
+      || msg.startsWith("Forbidden");
+    const status = isAuthErr ? 403 : 500;
+    if (workspaceId && !isAuthErr) {
+      // try/await em vez de `.catch()` no builder do PostgREST (que é PromiseLike
+      // e pode não expor `.catch`, disparando um 2º erro dentro do catch).
+      try {
+        await db.from("sync_status").upsert({
+          workspace_id: workspaceId, is_running: false, last_sync_status: "error", last_sync_error: msg.slice(0, 1000),
+        }, { onConflict: "workspace_id" });
+      } catch { /* ignora falha ao registrar o erro */ }
     }
     return new Response(
       JSON.stringify({ success: false, error: msg }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      { status, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }
 });

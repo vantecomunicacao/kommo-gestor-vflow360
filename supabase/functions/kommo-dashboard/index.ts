@@ -8,6 +8,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchAllRows } from "../_shared/paginate.ts";
+import { authorizeWorkspace } from "../_shared/authorize.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -93,28 +94,13 @@ serve(async (req) => {
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Missing authorization");
-    const token = authHeader.replace("Bearer ", "");
-
     const payload = await req.json().catch(() => ({} as any));
     const workspaceId = payload.workspace_id as string;
     if (!workspaceId) throw new Error("workspace_id is required");
 
-    // Auth: se houver um usuário válido no JWT, exige membership no workspace.
-    // Se não houver usuário (contexto service/interno/teste), permite — M4 endurece.
-    let userId: string | null = null;
-    try {
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-      const { data: claims } = await userClient.auth.getClaims(token);
-      userId = claims?.claims?.sub ?? null;
-    } catch { userId = null; }
-    if (userId) {
-      const { data: isMember } = await db.rpc("is_workspace_member", { _user_id: userId, _workspace_id: workspaceId });
-      if (!isMember) throw new Error("Forbidden");
-    }
+    // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
+    // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
+    await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
 
     const startDate: string | null = payload.startDate || null;
     const endDate: string | null = payload.endDate || null;
@@ -162,9 +148,6 @@ serve(async (req) => {
       ? (customFieldDefs.find((d) => d.kommo_id === additionalDateFieldId)
         || customFieldDefs.find((d) => d.code === additionalDateFieldId))
       : null;
-    const additionalDateFieldName = isClosedSentinel
-      ? (additionalDateFieldId === SENTINEL_WON ? "Data da venda" : "Data de perda")
-      : (additionalDateDef?.name ?? null);
     const additionalDateConfigured = isClosedSentinel || !!additionalDateDef;
     const additionalActive = additionalDateConfigured && !!(additionalStartDate || additionalEndDate);
 
@@ -448,7 +431,6 @@ serve(async (req) => {
     };
     const origem = buildDist(getOrigin, leads);
     const wonOrigem = buildDist(getOrigin, wonOpps);
-    const utmSource = buildDist((l) => extractCf(l.custom_fields, utmSourceField), leads);
     const utmMedium = buildDist((l) => extractCf(l.custom_fields, utmMediumField), leads);
     const utmCampaign = buildDist((l) => extractCf(l.custom_fields, utmCampaignField), leads);
 
@@ -581,12 +563,11 @@ serve(async (req) => {
       totalLeads, lostLeads,
       lostLeadsDetail: lostOpps.slice(0, 200).map((l, i) => ({ id: i, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}` })),
       funnelStages, conversionRates, sellers,
-      leadOrigins: origem.distribution, origemDistribution: origem.distribution, origemFillRate: origem.fillRate,
-      wonOrigemDistribution: wonOrigem.distribution, wonOrigemFillRate: wonOrigem.fillRate,
-      utmSourceDistribution: utmSource.distribution, utmSourceFillRate: utmSource.fillRate, utmSourceValues: utmSource.distribution.map((d) => d.name),
-      utmMediumDistribution: utmMedium.distribution, utmMediumFillRate: utmMedium.fillRate, utmMediumValues: utmMedium.distribution.map((d) => d.name),
-      utmCampaignDistribution: utmCampaign.distribution, utmCampaignFillRate: utmCampaign.fillRate, utmCampaignValues: utmCampaign.distribution.map((d) => d.name),
-      wonUtmSourceDistribution: [], wonUtmSourceFillRate: 0,
+      // Origens/UTM: só os campos realmente consumidos. Os cards de origem usam
+      // leadsOriginDistribution/wonOriginDistribution; os selects de filtro usam
+      // utm{Medium,Campaign}Values. (Duplicatas legadas removidas — 2026-07-21.)
+      utmMediumValues: utmMedium.distribution.map((d) => d.name),
+      utmCampaignValues: utmCampaign.distribution.map((d) => d.name),
       leadsOriginDistribution: origem.distribution, leadsOriginFillRate: origem.fillRate,
       wonOriginDistribution: wonOrigem.distribution, wonOriginFillRate: wonOrigem.fillRate,
       utmConfigured: { source: true, medium: true, campaign: true, content: true, term: true },
@@ -599,10 +580,8 @@ serve(async (req) => {
       dailyLeads,
       pipelines: allPipelines.map((p) => ({ id: p.kommo_id, name: p.name, stages: Array.isArray(p.statuses) ? p.statuses : [] })),
       users: activeUsers.map((u) => ({ id: u.kommo_id, name: u.name })),
-      origins: origem.distribution.map((d) => d.name),
       overallFillRate, lossReasons,
       totalMonetary, wonMonetary, lostMonetary, negotiatingMonetary,
-      additionalDateFieldId, additionalDateFieldName,
       // Fase 2 (dependem de conversas/mensagens):
       responseTime: { averageMinutes: 0, responseCount: 0, conversationsAnalyzed: 0, conversationsWithInbound: 0, businessHoursStart: settings?.business_hours_start || "09:00", businessHoursEnd: settings?.business_hours_end || "18:00", unanswered: [] },
       coolingLeads: cooling,

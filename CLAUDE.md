@@ -91,6 +91,8 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.lead_stage_events` | Histórico de mudança de etapa dos leads (tempo por etapa) |
 | `kommo.report_snapshots` | Fotos mensais congeladas (relatório de comparação mês a mês) |
 | `kommo.lead_actions` | Ações do vflow por lead (tarefa/tag criadas) — anti-duplicidade dos leads esfriando |
+| `kommo.dashboard_analyses` | Histórico das análises de IA sob demanda do Dashboard (prompt + params + resultado + custo) |
+| `kommo.ai_provider_config` | Chave OpenAI/modelo por usuário (tela Configurações › IA) — antes gravava no public/GHL e falhava |
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
@@ -120,6 +122,27 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-21 (`20260721150000_kommo_ai_provider_config.sql`): **nova tabela**
+  `kommo.ai_provider_config` — chave OpenAI/modelo por usuário (tela Configurações › IA).
+  Corrige o "não salva": o client aponta para o schema `kommo`, mas a tabela só existia
+  em `public` (GHL), então o insert/update falhava silencioso. Espelha a estrutura da
+  versão public, isolada. Lida também pela edge `kommo-ai-analyze`. _(ainda não aplicada
+  em prod — em validação local.)_
+- 2026-07-21 (`20260721140000_kommo_dashboard_analyses.sql`): **nova tabela**
+  `kommo.dashboard_analyses` — histórico das análises de IA sob demanda do Dashboard
+  (workspace × usuário × momento; `params`/`metrics` jsonb, `result` texto, `cost_usd`).
+  Escrita pela edge function `kommo-ai-analyze` (modo `analyze`) via service role; leitura
+  por membros via RLS. O custo do modelo é gravado aqui (não em `public.ai_usage_log`, que
+  é do GHL). _(ainda não aplicada em prod — em validação local.)_
+- 2026-07-21 (`20260721120000_kommo_cron_internal_secret.sql`): hardening de auth das
+  edge functions — recria os 3 crons (`trigger_sync_all`, `trigger_sync_all_full`,
+  `trigger_report_snapshot_all`) para enviarem o header `x-internal-secret` (valor do
+  Vault `kommo_internal_function_secret`) + nova função `kommo.internal_function_secret()`.
+  As edges `kommo-dashboard/sync/report-snapshot` passaram a EXIGIR JWT+membership OU esse
+  segredo (fim do "sem usuário = liberado"), via `_shared/authorize.ts`. Sem mudança
+  estrutural de tabela. _(APLICADA em prod 2026-07-21: Vault secret criado, env
+  `INTERNAL_FUNCTION_SECRET` gravado, migration rodada via `supabase db query --linked`,
+  3 edges redeployadas e smoke-testadas — sem segredo = Forbidden, com segredo = OK.)_
 - 2026-07-17 (`20260717120000_kommo_report_snapshots_rls_fix.sql`): fix de consistência
   de RLS em `kommo.report_snapshots` — adiciona a policy `"svc all"` (FOR ALL TO
   service_role) que faltava e revoga o excesso `insert/update/delete` de `authenticated`

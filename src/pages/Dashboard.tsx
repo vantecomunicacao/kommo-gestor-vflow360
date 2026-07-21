@@ -13,6 +13,7 @@ import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
 import { resolveFunnelLabel } from "@/lib/dashboard-funnel";
+import { calcTrend, invertTrend, winRate, ticketAverage } from "@/lib/dashboard-metrics";
 import { supabase } from "@/integrations/supabase/client";
 import { Header } from "@/components/dashboard/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -34,6 +35,7 @@ import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
+import DashboardAiAnalysis from "@/components/dashboard/DashboardAiAnalysis";
 
 type SavedFilters = {
   from?: string;
@@ -196,12 +198,6 @@ export default function Dashboard() {
   if (!data) return <ErrorState error="Sem dados. Clique em Atualizar agora para sincronizar com o VFlow360." onRetry={() => refetch(true)} />;
 
   const formatPercentage = (v: number) => `${v.toFixed(1)}%`;
-  const calcTrend = (cur: number, prev: number) => {
-    if (prev === 0) return cur > 0 ? { value: 100, isPositive: true } : undefined;
-    const ch = ((cur - prev) / prev) * 100;
-    if (Math.abs(ch) < 0.1) return undefined;
-    return { value: Math.round(Math.abs(ch) * 10) / 10, isPositive: ch > 0 };
-  };
 
   // Aba Financeira: eixo de data = fechamento (ganho + perdido). Vários cards de
   // processo/pipeline não fazem sentido nesse eixo e são ocultados (ver
@@ -227,27 +223,22 @@ export default function Dashboard() {
 
   const wonRevenue = data.wonMonetary ?? 0;
   const negotiatingRevenue = data.negotiatingMonetary ?? 0;
-  const ticketAvg = currentWon > 0 ? wonRevenue / currentWon : 0;
+  const ticketAvg = ticketAverage(wonRevenue, currentWon);
   const prevWonRevenue = prevData?.wonMonetary ?? 0;
   const prevNegotiatingRevenue = prevData?.negotiatingMonetary ?? 0;
-  const prevTicketAvg = prevWon > 0 ? prevWonRevenue / prevWon : 0;
+  const prevTicketAvg = ticketAverage(prevWonRevenue, prevWon);
   const revenueTrend = prevData ? calcTrend(wonRevenue, prevWonRevenue) : undefined;
   const negotiatingTrend = prevData ? calcTrend(negotiatingRevenue, prevNegotiatingRevenue) : undefined;
   const ticketTrend = prevData ? calcTrend(ticketAvg, prevTicketAvg) : undefined;
 
   // Financeiro: taxa de ganho (win rate) entre os que fecharam, e receita perdida.
-  const closedCount = currentWon + (data.lostLeads || 0);
-  const winRate = closedCount > 0 ? (currentWon / closedCount) * 100 : 0;
-  const prevClosedCount = prevWon + (prevData?.lostLeads || 0);
-  const prevWinRate = prevClosedCount > 0 ? (prevWon / prevClosedCount) * 100 : 0;
-  const winRateTrend = prevData ? calcTrend(winRate, prevWinRate) : undefined;
+  const currentWinRate = winRate(currentWon, data.lostLeads || 0);
+  const prevWinRate = winRate(prevWon, prevData?.lostLeads || 0);
+  const winRateTrend = prevData ? calcTrend(currentWinRate, prevWinRate) : undefined;
   const lostRevenue = data.lostMonetary ?? 0;
   const prevLostRevenue = prevData?.lostMonetary ?? 0;
   // Perder MENOS dinheiro é positivo → invertemos o sinal da tendência.
-  const lostRevenueTrendRaw = prevData ? calcTrend(lostRevenue, prevLostRevenue) : undefined;
-  const lostRevenueTrend = lostRevenueTrendRaw
-    ? { value: lostRevenueTrendRaw.value, isPositive: !lostRevenueTrendRaw.isPositive }
-    : undefined;
+  const lostRevenueTrend = invertTrend(prevData ? calcTrend(lostRevenue, prevLostRevenue) : undefined);
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -302,6 +293,13 @@ export default function Dashboard() {
               Atualizado {format(new Date(cachedAt), "HH:mm", { locale: ptBR })}
             </span>
           )}
+          {permissions.viewSettings && (
+            <DashboardAiAnalysis
+              workspaceId={activeWorkspace.id}
+              pipelines={data.pipelines}
+              initialDateBasis={dateBasis}
+            />
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -347,7 +345,7 @@ export default function Dashboard() {
         <MetricCard title={totalLeadsLabel} value={data.totalLeads} icon={Users} variant="default" tooltip={totalLeadsTooltip} trend={leadsTrend} />
         <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Leads que chegaram à etapa de venda ganha no período." trend={wonTrend} />
         {isFinance ? (
-          <MetricCard title="Taxa de Ganho" value={formatPercentage(winRate)} icon={TrendingUp} variant="accent" tooltip="Dos negócios que fecharam no período (ganhos + perdidos), o percentual que foi ganho." trend={winRateTrend} />
+          <MetricCard title="Taxa de Ganho" value={formatPercentage(currentWinRate)} icon={TrendingUp} variant="accent" tooltip="Dos negócios que fecharam no período (ganhos + perdidos), o percentual que foi ganho." trend={winRateTrend} />
         ) : (
           <MetricCard title="Taxa de Conversão" value={formatPercentage(data.conversionRates.overallConversion)} icon={TrendingUp} variant="accent" tooltip="Percentual da primeira etapa até venda ganha." trend={convTrend} />
         )}

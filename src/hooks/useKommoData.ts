@@ -97,22 +97,8 @@ export interface DashboardData {
   funnelStages: FunnelStage[];
   conversionRates: ConversionRates;
   sellers: Seller[];
-  leadOrigins: LeadOrigin[];
-  origemDistribution: LeadOrigin[];
-  origemFillRate: number;
-  wonOrigemDistribution: LeadOrigin[];
-  wonOrigemFillRate: number;
-  utmSourceDistribution: LeadOrigin[];
-  utmSourceFillRate: number;
-  utmSourceValues: string[];
-  utmMediumDistribution: LeadOrigin[];
-  utmMediumFillRate: number;
   utmMediumValues: string[];
-  utmCampaignDistribution: LeadOrigin[];
-  utmCampaignFillRate: number;
   utmCampaignValues: string[];
-  wonUtmSourceDistribution: LeadOrigin[];
-  wonUtmSourceFillRate: number;
   leadsOriginDistribution: LeadOrigin[];
   leadsOriginFillRate: number;
   wonOriginDistribution: LeadOrigin[];
@@ -130,7 +116,6 @@ export interface DashboardData {
   dailyLeads: DailyLead[];
   pipelines: Pipeline[];
   users: User[];
-  origins: string[];
   overallFillRate: number;
   lossReasons: LossReason[];
   totalMonetary?: number;
@@ -138,8 +123,6 @@ export interface DashboardData {
   lostMonetary?: number;
   negotiatingMonetary?: number;
   cachedAt?: string;
-  additionalDateFieldId?: string | null;
-  additionalDateFieldName?: string | null;
   responseTime?: ResponseTime | null;
   coolingLeads?: CoolingLeads | null;
 }
@@ -172,8 +155,6 @@ interface UseGhlDataReturn {
   refetch: (forceRefresh?: boolean) => Promise<void>;
   cachedAt: string | null;
 }
-
-const COOLDOWN_MS = 2 * 60 * 1000;
 
 export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptions = {}): UseGhlDataReturn {
   const { enabled = true } = options;
@@ -250,16 +231,9 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
   const syncMutation = useMutation<void, Error, void>({
     mutationFn: async () => {
       if (!filters.workspaceId) throw new Error("Sem workspace ativo");
-      const ckey = `kommo-sync-last:${filters.workspaceId}`;
-      const lastStr = localStorage.getItem(ckey);
-      const last = lastStr ? Number(lastStr) : 0;
-      const elapsed = Date.now() - last;
-      if (last && elapsed < COOLDOWN_MS) {
-        const wait = Math.ceil((COOLDOWN_MS - elapsed) / 1000);
-        throw new Error(`COOLDOWN:${wait}`);
-      }
-      localStorage.setItem(ckey, String(Date.now()));
 
+      // O cooldown é validado no servidor (kommo-sync usa sync_status.last_sync_at,
+      // não-burlável). Se estiver no intervalo, a função responde { error: "COOLDOWN:<s>" }.
       const { data: syncData, error: syncError } = await supabase.functions.invoke("kommo-sync", {
         body: { workspace_id: filters.workspaceId },
       });
