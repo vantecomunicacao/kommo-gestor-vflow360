@@ -62,17 +62,15 @@ const AiSettings = () => {
         .eq("user_id", user.id)
         .maybeSingle();
 
-      if (existing) {
-        await (supabase.from("ai_provider_config" as any) as any)
-          .update(payload)
-          .eq("user_id", user.id);
-      } else {
-        await supabase.from("ai_provider_config" as any).insert(payload as any);
-      }
+      const { error: writeError } = existing
+        ? await (supabase.from("ai_provider_config" as any) as any).update(payload).eq("user_id", user.id)
+        : await supabase.from("ai_provider_config" as any).insert(payload as any);
+      if (writeError) throw writeError;
 
       toast.success("Configuração de IA salva com sucesso!");
     } catch (e) {
-      toast.error("Erro ao salvar configuração de IA");
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Erro ao salvar configuração de IA: ${msg}`);
     } finally {
       setSavingAi(false);
     }
