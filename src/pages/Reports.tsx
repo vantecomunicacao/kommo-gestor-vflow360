@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Link } from "react-router-dom";
-import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw, MoreHorizontal } from "lucide-react";
+import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw, MoreHorizontal, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
@@ -30,6 +30,7 @@ interface MetricDef {
   invert?: boolean;        // cair é bom (perda, receita perdida)
   showDirection?: boolean; // mostra seta ▲▼ colorida mesmo no modo Valores (taxas)
   desc?: string;           // explicação curta (tooltip na pill e na linha)
+  tag?: string;            // tagzinha ao lado do nome (ex.: "coorte", "win rate")
 }
 
 // Catálogo por eixo — mesma foto, leitura diferente.
@@ -39,10 +40,11 @@ const CATALOG: Record<DateBasis, MetricDef[]> = {
     { id: "won", label: "Vendas", fmt: "num", value: (m) => m.won, desc: "Da safra criada no mês, quantos viraram venda ganha." },
     { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue, desc: "Soma do valor das vendas ganhas da safra." },
     { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket, desc: "Receita ganha ÷ nº de vendas ganhas." },
-    // Conversão ponta-a-ponta: da entrada (leads criados) até a venda ganha.
-    { id: "convGeral", label: "Taxa de Conversão Geral", fmt: "pct", showDirection: true,
+    // Conversão por coorte: da entrada (leads criados no mês) até a venda ganha,
+    // tenha o lead fechado quando tiver fechado. Meses recentes ainda amadurecem.
+    { id: "convGeral", label: "Taxa de Conversão", tag: "coorte", fmt: "pct", showDirection: true,
       value: (m) => m.leads > 0 ? (m.won / m.leads) * 100 : 0,
-      desc: "Vendas ganhas ÷ leads de entrada. Conversão ponta-a-ponta do funil." },
+      desc: "Vendas ganhas ÷ leads que ENTRARAM no mês (por safra de criação), independente de quando fecharam. Meses recentes ainda estão maturando: a taxa tende a subir conforme os leads em aberto fecham." },
   ],
   fechamento: [
     { id: "won", label: "Vendas Ganhas", fmt: "num", value: (m) => m.won, desc: "Negócios ganhos no mês (por data de fechamento)." },
@@ -51,8 +53,8 @@ const CATALOG: Record<DateBasis, MetricDef[]> = {
     { id: "lostRevenue", label: "Receita Perdida", fmt: "brl", value: (m) => m.lostRevenue, invert: true, desc: "Soma do valor dos negócios perdidos. Cair é bom." },
     { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket, desc: "Receita ganha ÷ nº de vendas ganhas." },
     // Win rate: KPI de saúde comercial. Fica disponível como pill, mas desligado por padrão.
-    { id: "taxaFechamento", label: "Taxa de Fechamento", fmt: "pct", value: (m) => m.winRate, showDirection: true,
-      desc: "Vendas ganhas ÷ (ganhas + perdidas). Win rate entre os que fecharam." },
+    { id: "taxaFechamento", label: "Taxa de Fechamento", tag: "win rate", fmt: "pct", value: (m) => m.winRate, showDirection: true,
+      desc: "Vendas ganhas ÷ (ganhas + perdidas). Win rate entre os negócios que JÁ decidiram no mês — mede qualidade da negociação, não conversão do funil. Complementar à Taxa de Conversão (por coorte), não substitui." },
   ],
 };
 
@@ -112,6 +114,8 @@ export default function Reports() {
   const [hoveredCol, setHoveredCol] = useState<number | null>(null); // coluna (mês) em foco
   const [metricOrder, setMetricOrder] = useState<string[]>([]); // ordem custom das métricas (arrastar)
   const dragMetricId = useRef<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false); // re-disparo manual das fotos
+  const queryClient = useQueryClient();
 
   // Persistência da visão (localStorage, por workspace): lembra a última configuração
   // sem botão. Hidrata ao trocar de conta e regrava a cada mudança relevante.
@@ -206,6 +210,37 @@ export default function Reports() {
   };
 
   const { months: rawMonths, isLoading, error } = useReportSnapshots(wsId, dateBasis, pipelineId);
+
+  // Momento da foto atual (todas as linhas de um recompute compartilham o frozen_at).
+  const lastFrozen = useMemo(() => {
+    const ts = rawMonths.map((m) => m.frozenAt).filter(Boolean).sort();
+    return ts.length ? ts[ts.length - 1] : null;
+  }, [rawMonths]);
+
+  // Re-dispara o recompute (mesma edge function do cron) e recarrega as fotos.
+  // Também mostra o resultado do check de integridade que a função devolve.
+  const refreshSnapshot = async () => {
+    if (!wsId || refreshing) return;
+    setRefreshing(true);
+    try {
+      const { data, error: fnErr } = await supabase.functions.invoke("kommo-report-snapshot", {
+        body: { workspace_id: wsId, months: 12 },
+      });
+      if (fnErr) throw fnErr;
+      await queryClient.invalidateQueries({ queryKey: ["report-snapshots"] });
+      const q = (data as any)?.quality;
+      if (q && q.ok === false) {
+        const falhas = (q.checks || []).filter((c: any) => !c.ok).map((c: any) => c.detail || c.name).join("; ");
+        toast.warning("Fotos atualizadas, mas a integridade acusou divergência", { description: falhas });
+      } else {
+        toast.success("Fotos atualizadas", { description: "Integridade conferida: números consistentes." });
+      }
+    } catch (e) {
+      toast.error("Erro ao atualizar as fotos", { description: (e as Error).message });
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   // Aplica os vendedores selecionados: soma os sub-blocos bySeller escolhidos, mês a
   // mês, recalculando ticket (receita/vendas) e winRate (vendas/fechados) — proporções
@@ -423,11 +458,20 @@ export default function Reports() {
                 ? "leads por safra de criação"
                 : "resultados por fechamento"} (fotos mensais)
             </p>
+            {lastFrozen && (
+              <p className="text-xs text-muted-foreground/80 mt-1 flex items-center gap-1.5">
+                <span className="inline-block w-1.5 h-1.5 rounded-full bg-success" />
+                Dados atualizados até {format(new Date(lastFrozen), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+              </p>
+            )}
           </div>
           <AxisTabs value={dateBasis} onChange={onAxisChange} />
         </div>
         <div className="flex items-center gap-2 justify-end">
           {/* Ações principais visíveis; secundárias no menu, pra desafogar o topo. */}
+          <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" onClick={refreshSnapshot} disabled={refreshing || !wsId}>
+            <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin")} /> {refreshing ? "Atualizando…" : "Atualizar agora"}
+          </Button>
           <Button variant="outline" size="sm" className="h-8 px-3 gap-1.5 text-xs" onClick={saveView}>
             <Save className="w-3.5 h-3.5" /> Salvar visão
           </Button>
@@ -555,6 +599,11 @@ export default function Reports() {
                         on ? "bg-primary/10 border-primary/40 text-primary-ink" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
                       <GripVertical className="w-3 h-3 opacity-30 group-hover:opacity-60 -ml-0.5" />
                       {m.label}
+                      {m.tag && (
+                        <span className="ml-0.5 px-1.5 py-px rounded text-[9px] font-semibold uppercase tracking-wide bg-accent/60 text-accent-foreground border border-border/50">
+                          {m.tag}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -576,7 +625,14 @@ export default function Reports() {
                           title={`Foto de ${format(new Date(mo.frozenAt), "dd/MM/yyyy HH:mm", { locale: ptBR })}`}>
                           <span className="capitalize">{monthLabel(mo.month)}</span>
                           {isLast && <span className="ml-1 text-[10px] font-normal text-primary">atual</span>}
-                          {mo.isPartial && <span className="ml-1 text-[10px] text-accent-foreground font-normal">(parcial)</span>}
+                          {mo.isPartial && (
+                            <span className="ml-1 text-[10px] text-accent-foreground font-normal cursor-help"
+                              title={dateBasis === "criacao"
+                                ? "Coorte em maturação: leads deste mês ainda vão fechar — a taxa de conversão tende a subir nas próximas fotos."
+                                : "Mês ainda em aberto: os números podem mudar até o fechamento."}>
+                              (parcial)
+                            </span>
+                          )}
                         </th>
                       );
                     })}
@@ -592,6 +648,11 @@ export default function Reports() {
                           rowIdx % 2 === 1 ? "bg-muted" : "bg-card")}>
                         <td className="sticky left-0 z-10 bg-inherit font-medium px-4 py-3 whitespace-nowrap" title={met.desc}>
                           {met.desc ? <span className="cursor-help decoration-dotted underline-offset-4 hover:underline">{met.label}</span> : met.label}
+                          {met.tag && (
+                            <span className="ml-1.5 px-1.5 py-px rounded text-[9px] font-semibold uppercase tracking-wide bg-accent/60 text-accent-foreground border border-border/50 align-middle">
+                              {met.tag}
+                            </span>
+                          )}
                         </td>
                         {shown.map((mo, i) => {
                           const v = met.value(mo.metrics);
@@ -633,6 +694,11 @@ export default function Reports() {
                 </tbody>
               </table>
             </div>
+            {dateBasis === "criacao" && (
+              <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
+                <strong className="font-medium text-foreground">Leitura por coorte:</strong> as taxas medem a safra de leads que <em>entrou</em> em cada mês, contando as vendas quando quer que tenham fechado. Meses recentes (marcados <span className="text-accent-foreground">parcial</span>) ainda estão maturando e tendem a subir — compare com segurança apenas os meses já fechados.
+              </p>
+            )}
           </div>
 
           {/* Gráfico de linha (1 ou 2 métricas, eixos independentes) */}

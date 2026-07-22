@@ -244,19 +244,22 @@ ${pipelineList}`;
       : "Todos os funis";
 
     // Métricas reais via kommo-dashboard (período principal + comparação opcional).
-    const mainRaw = await fetchDashboard(SUPABASE_URL, ANON_KEY, authHeader, {
-      workspace_id: workspaceId, startDate: dayStartISO(startDate), endDate: dayEndISO(endDate), dateBasis, pipelineId,
-    });
+    // As duas chamadas rodam EM PARALELO — cada uma varre os leads do período, então
+    // sequencial dobrava a latência.
+    const [mainRaw, cmpRaw] = await Promise.all([
+      fetchDashboard(SUPABASE_URL, ANON_KEY, authHeader, {
+        workspace_id: workspaceId, startDate: dayStartISO(startDate), endDate: dayEndISO(endDate), dateBasis, pipelineId,
+      }),
+      compare
+        ? fetchDashboard(SUPABASE_URL, ANON_KEY, authHeader, {
+            workspace_id: workspaceId, startDate: dayStartISO(params.compareStart), endDate: dayEndISO(params.compareEnd), dateBasis, pipelineId,
+          })
+        : Promise.resolve(null),
+    ]);
     const mainMetrics = summarizeMetrics(mainRaw);
-    let compareMetrics: any = null;
-    if (compare) {
-      const cmpRaw = await fetchDashboard(SUPABASE_URL, ANON_KEY, authHeader, {
-        workspace_id: workspaceId, startDate: dayStartISO(params.compareStart), endDate: dayEndISO(params.compareEnd), dateBasis, pipelineId,
-      });
-      compareMetrics = summarizeMetrics(cmpRaw);
-    }
+    const compareMetrics = cmpRaw ? summarizeMetrics(cmpRaw) : null;
 
-    const sys = `Você é um analista comercial sênior do VFlow360. Gere uma ANÁLISE ACIONÁVEL para o GESTOR a partir dos números reais fornecidos. Hoje é ${todayBRT()}.
+    const sys = `Você é um analista comercial sênior do VFlow360. Gere um RELATÓRIO ACIONÁVEL para o GESTOR a partir dos números reais fornecidos. Hoje é ${todayBRT()}.
 
 Regras FIXAS:
 - Use SOMENTE os números fornecidos no JSON. NUNCA invente dados.
@@ -264,7 +267,14 @@ Regras FIXAS:
 - ${compare ? "Há dois períodos: 'principal' e 'comparacao'. COMPARE-os (subiu/caiu, em % quando fizer sentido)." : "Há um único período. Não invente comparações."}
 - Escopo: ${pipelineName}. ${pipelineId ? "É UM funil isolado — pode falar de taxa de ganho e gargalo por etapa." : "São TODOS os funis somados — foque em VOLUME e VALOR; NÃO calcule 'conversão' somando funis diferentes."}
 - Não compare um período em andamento (ainda aberto) como se estivesse fechado — sinalize quando o período incluir dias futuros/hoje.
-- Português do Brasil, objetivo e profissional. Estruture em tópicos curtos com a AÇÃO sugerida ao final.
+- Português do Brasil, objetivo e profissional.
+
+FORMATO DE SAÍDA (Markdown, obrigatório):
+- Use EXATAMENTE estas seções, nesta ordem, cada título com "## " e TODO EM MAIÚSCULAS:
+  "## RESUMO EXECUTIVO" (2-3 frases), "## DESTAQUES" (bullets com números),
+  "## GARGALOS E RISCOS" (bullets), "## RECOMENDAÇÕES" (bullets com a AÇÃO a tomar).
+- Use "- " para bullets e **negrito** para números/variações importantes.
+- Seja conciso: no máximo ~3 bullets por seção. Qualidade > quantidade.
 
 FOCO pedido pelo gestor: ${typeof params.foco === "string" && params.foco ? params.foco : prompt}`;
 

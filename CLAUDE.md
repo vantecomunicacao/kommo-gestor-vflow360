@@ -126,14 +126,14 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   `kommo.ai_provider_config` — chave OpenAI/modelo por usuário (tela Configurações › IA).
   Corrige o "não salva": o client aponta para o schema `kommo`, mas a tabela só existia
   em `public` (GHL), então o insert/update falhava silencioso. Espelha a estrutura da
-  versão public, isolada. Lida também pela edge `kommo-ai-analyze`. _(ainda não aplicada
-  em prod — em validação local.)_
+  versão public, isolada. Lida também pela edge `kommo-ai-analyze`. _(APLICADA em prod
+  2026-07-22 via SQL Editor.)_
 - 2026-07-21 (`20260721140000_kommo_dashboard_analyses.sql`): **nova tabela**
   `kommo.dashboard_analyses` — histórico das análises de IA sob demanda do Dashboard
   (workspace × usuário × momento; `params`/`metrics` jsonb, `result` texto, `cost_usd`).
   Escrita pela edge function `kommo-ai-analyze` (modo `analyze`) via service role; leitura
   por membros via RLS. O custo do modelo é gravado aqui (não em `public.ai_usage_log`, que
-  é do GHL). _(ainda não aplicada em prod — em validação local.)_
+  é do GHL). _(APLICADA em prod 2026-07-22 via SQL Editor; edge kommo-ai-analyze deployada.)_
 - 2026-07-21 (`20260721120000_kommo_cron_internal_secret.sql`): hardening de auth das
   edge functions — recria os 3 crons (`trigger_sync_all`, `trigger_sync_all_full`,
   `trigger_report_snapshot_all`) para enviarem o header `x-internal-secret` (valor do

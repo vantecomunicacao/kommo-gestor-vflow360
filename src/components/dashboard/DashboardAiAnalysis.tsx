@@ -17,9 +17,10 @@ import {
   Collapsible, CollapsibleContent, CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
+import AnalysisReport from "@/components/dashboard/AnalysisReport";
 import {
   useParseAnalysis, useRunAnalysis, useAnalysisHistory,
-  type AnalysisInterpretation, type AnalysisParams,
+  type AnalysisInterpretation, type AnalysisParams, type AnalysisMetrics,
 } from "@/hooks/useDashboardAnalysis";
 
 interface Props {
@@ -30,6 +31,18 @@ interface Props {
 }
 
 const ALL = "__all__"; // sentinela do Select para "Todos os funis" (Select não aceita value="")
+
+// Sugestões (mini-prompts) que o gestor pode clicar para partir de um pedido pronto.
+const SUGGESTIONS: string[] = [
+  "Onde estou perdendo mais vendas e por quê?",
+  "Compare o mês passado com o mês anterior",
+  "Quais os principais gargalos do funil?",
+  "Qual vendedor está convertendo melhor?",
+  "Analise a receita: ganha, perdida e em negociação",
+  "Como está minha conversão vs. o período anterior?",
+];
+
+interface Report { result: string; metrics: AnalysisMetrics | null; params: Record<string, unknown> | null }
 
 // Converte a interpretação (parse) no estado editável de confirmação.
 function toParams(i: AnalysisInterpretation): AnalysisParams {
@@ -55,7 +68,7 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
   const [prompt, setPrompt] = useState("");
   const [params, setParams] = useState<AnalysisParams | null>(null); // bloco de confirmação
   const [confirmacao, setConfirmacao] = useState<string[]>([]);
-  const [result, setResult] = useState<string | null>(null);
+  const [report, setReport] = useState<Report | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const parse = useParseAnalysis(workspaceId);
@@ -64,10 +77,11 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
 
   const setP = (patch: Partial<AnalysisParams>) => setParams((p) => (p ? { ...p, ...patch } : p));
 
-  const handleInterpret = () => {
-    if (!prompt.trim()) return;
-    setResult(null);
-    parse.mutate(prompt.trim(), {
+  const interpret = (text: string) => {
+    const q = text.trim();
+    if (!q) return;
+    setReport(null);
+    parse.mutate(q, {
       onSuccess: (r) => {
         const base = toParams(r.interpretation);
         setParams({ ...base, dateBasis: base.dateBasis || initialDateBasis || "criacao" });
@@ -77,6 +91,10 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
     });
   };
 
+  const handleInterpret = () => interpret(prompt);
+
+  const handleSuggestion = (text: string) => { setPrompt(text); interpret(text); };
+
   const handleRun = () => {
     if (!params) return;
     if (params.compare && (!params.compareStart || !params.compareEnd)) {
@@ -84,7 +102,7 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
       return;
     }
     run.mutate({ prompt: prompt.trim(), params }, {
-      onSuccess: (r) => { setResult(r.result); setParams(null); setConfirmacao([]); },
+      onSuccess: (r) => { setReport({ result: r.result, metrics: r.metrics, params: r.params }); setParams(null); setConfirmacao([]); },
       onError: (e) => toast({ title: "Falha na análise", description: e.message, variant: "destructive" }),
     });
   };
@@ -127,6 +145,25 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
           </Button>
         </div>
       </div>
+
+      {/* Sugestões (mini-prompts) — atalhos para análises comuns */}
+      {!params && (
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Sugestões</p>
+          <div className="flex flex-wrap gap-1.5">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => handleSuggestion(s)}
+                disabled={parse.isPending || !workspaceId}
+                className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary/40 hover:bg-primary/10 hover:text-foreground disabled:opacity-50"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Bloco de confirmação (sempre confirmar antes de gerar) */}
       {params && (
@@ -208,11 +245,9 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
         </div>
       )}
 
-      {/* Resultado */}
-      {result && (
-        <div className="rounded-lg border border-border bg-background p-3">
-          <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{result}</p>
-        </div>
+      {/* Resultado (relatório: KPIs + gráfico + texto formatado) */}
+      {report && (
+        <AnalysisReport result={report.result} metrics={report.metrics} params={report.params} />
       )}
 
       {/* Histórico */}
@@ -231,7 +266,7 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
               return (
                 <button
                   key={h.id}
-                  onClick={() => { setResult(h.result); setParams(null); }}
+                  onClick={() => { setReport({ result: h.result, metrics: h.metrics, params: h.params }); setParams(null); setConfirmacao([]); }}
                   className="w-full rounded-md border border-border bg-muted/20 p-2 text-left transition-colors hover:bg-muted/40"
                 >
                   <p className="line-clamp-1 text-xs font-medium text-foreground">{h.prompt}</p>

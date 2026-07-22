@@ -32,9 +32,27 @@ export interface AnalysisRecord {
   prompt: string;
   params: Record<string, unknown> | null;
   result: string;
+  metrics: AnalysisMetrics | null;
   model: string | null;
   cost_usd: number | null;
   created_at: string;
+}
+
+// Snapshot compacto devolvido pela edge (mesma forma de summarizeMetrics no backend).
+export interface PeriodMetrics {
+  totalLeads: number;
+  lostLeads: number;
+  funnelStages: { id: string; name: string; count: number }[];
+  conversionRates: Record<string, number>;
+  monetary: { total: number; won: number; lost: number; negotiating: number };
+  cycleToWonDays: number | null;
+  cycleToLostDays: number | null;
+  lossReasons: { name: string; count: number }[];
+  sellers: { name: string; contatoInicial: number; propostaEnviada: number; fechamento: number; vendaGanha: number; wonRevenue: number }[];
+}
+export interface AnalysisMetrics {
+  principal: PeriodMetrics | null;
+  comparacao: PeriodMetrics | null;
 }
 
 interface ParseResponse {
@@ -49,7 +67,7 @@ interface AnalyzeResponse {
   created_at: string | null;
   result: string;
   params: Record<string, unknown>;
-  metrics: unknown;
+  metrics: AnalysisMetrics;
 }
 
 function unwrap<T>(data: unknown, error: { message: string } | null): T {
@@ -93,7 +111,7 @@ export function useAnalysisHistory(workspaceId: string | null | undefined) {
     queryKey: ["dashboard-analyses", workspaceId],
     queryFn: async () => {
       const { data, error } = await (supabase.from("dashboard_analyses" as any) as any)
-        .select("id, prompt, params, result, model, cost_usd, created_at")
+        .select("id, prompt, params, result, metrics, model, cost_usd, created_at")
         .eq("workspace_id", workspaceId as string)
         .order("created_at", { ascending: false })
         .limit(30);

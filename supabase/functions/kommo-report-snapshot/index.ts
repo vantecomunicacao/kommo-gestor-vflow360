@@ -192,6 +192,31 @@ serve(async (req) => {
       }
     }
 
+    // ===== Check de integridade (auditoria automática dos números gravados) =====
+    // Roda sobre as próprias linhas recém-calculadas. Não bloqueia a gravação; só
+    // reporta divergências pra quem disparou (toast no frontend) e nos logs.
+    const quality: { ok: boolean; checks: { name: string; ok: boolean; detail?: string }[] } = { ok: true, checks: [] };
+    const addCheck = (name: string, ok: boolean, detail?: string) => {
+      quality.checks.push({ name, ok, ...(detail ? { detail } : {}) });
+      if (!ok) quality.ok = false;
+    };
+    const num = (m: any, k: string) => Number(m?.[k]) || 0;
+    // 1) won + lost nunca podem exceder o total de leads da célula.
+    let overflow = 0;
+    for (const r of rows) if (num(r.metrics, "won") + num(r.metrics, "lost") > num(r.metrics, "leads")) overflow++;
+    addCheck("won+lost ≤ leads", overflow === 0, overflow ? `${overflow} célula(s) com ganho+perda > total` : undefined);
+    // 2) '__all__' tem de ser a soma exata dos funis (mesmo eixo + mês), sem dupla contagem.
+    let mismatch = 0;
+    for (const axis of ["criacao", "fechamento"] as const) {
+      for (const key of monthKeys) {
+        const all = agg.get(`__all__|${axis}|${key}`);
+        let soma = 0;
+        for (const p of pipelinesSeen) soma += (agg.get(`${p}|${axis}|${key}`)?.leads ?? 0);
+        if ((all?.leads ?? 0) !== soma) mismatch++;
+      }
+    }
+    addCheck("__all__ = soma dos funis", mismatch === 0, mismatch ? `${mismatch} mês/eixo divergente(s)` : undefined);
+
     // Upsert em lotes (evita payloads grandes com muitos funis).
     for (let i = 0; i < rows.length; i += 500) {
       const { error: upErr } = await db.from("report_snapshots")
@@ -199,9 +224,12 @@ serve(async (req) => {
       if (upErr) throw upErr;
     }
 
+    if (!quality.ok) console.warn("kommo-report-snapshot integridade:", JSON.stringify(quality));
+
     return new Response(JSON.stringify({
       ok: true, workspace_id: workspaceId, months, rows: rows.length,
       pipelines: pipelinesSeen.size, monthKeys, leadsScanned: leads.length,
+      frozenAt, quality,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     const msg = err instanceof Error
