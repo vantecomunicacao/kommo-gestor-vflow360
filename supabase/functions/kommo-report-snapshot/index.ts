@@ -210,6 +210,8 @@ serve(async (req) => {
         ? JSON.stringify(err)
         : String(err);
     console.error("kommo-report-snapshot error:", msg);
-    return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    // Acesso negado → 403 (consistente com kommo-sync); demais falhas → 500.
+    const status = msg === "Forbidden" || msg === "Missing authorization" ? 403 : 500;
+    return new Response(JSON.stringify({ error: msg }), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
 });
