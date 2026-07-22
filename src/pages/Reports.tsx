@@ -228,12 +228,15 @@ export default function Reports() {
       });
       if (fnErr) throw fnErr;
       await queryClient.invalidateQueries({ queryKey: ["report-snapshots"] });
-      const q = (data as any)?.quality;
+      type QualityCheck = { name: string; ok: boolean; detail?: string };
+      const q = (data as { quality?: { ok: boolean; checks: QualityCheck[] } } | null)?.quality;
       if (q && q.ok === false) {
-        const falhas = (q.checks || []).filter((c: any) => !c.ok).map((c: any) => c.detail || c.name).join("; ");
+        const falhas = (q.checks || []).filter((c) => !c.ok).map((c) => c.detail || c.name).join("; ");
         toast.warning("Fotos atualizadas, mas a integridade acusou divergência", { description: falhas });
       } else {
-        toast.success("Fotos atualizadas", { description: "Integridade conferida: números consistentes." });
+        toast.success("Fotos atualizadas", {
+          description: q ? "Integridade conferida: números consistentes." : undefined,
+        });
       }
     } catch (e) {
       toast.error("Erro ao atualizar as fotos", { description: (e as Error).message });
