@@ -133,6 +133,15 @@ function summarizeMetrics(d: any) {
       name: s.name, contatoInicial: s.contatoInicial, propostaEnviada: s.propostaEnviada,
       fechamento: s.fechamento, vendaGanha: s.vendaGanha, wonRevenue: s.wonRevenue,
     })),
+    // Tarefas/follow-up: totais + atrasadas por vendedor (responde "quem tem mais tarefas atrasadas").
+    followUp: d?.followUp
+      ? {
+          tarefasAtrasadas: d.followUp.tarefasAtrasadas ?? 0,
+          tarefasHoje: d.followUp.tarefasHoje ?? 0,
+          leadsSemProximaAcao: d.followUp.leadsSemProximaAcao ?? 0,
+          atrasadasPorVendedor: d.followUp.porVendedor ?? [],
+        }
+      : null,
   };
 }
 
@@ -147,14 +156,33 @@ serve(async (req) => {
     const dbPublic = createClient(SUPABASE_URL, SERVICE_KEY);
 
     const payload = await req.json().catch(() => ({} as any));
-    const mode = payload.mode === "analyze" ? "analyze" : "parse";
+    const VALID_MODES = ["analyze", "followup", "delete", "pin"];
+    const mode = VALID_MODES.includes(payload.mode) ? payload.mode as string : "parse";
     const workspaceId = payload.workspace_id as string;
     const prompt = (payload.prompt as string | undefined)?.trim();
     if (!workspaceId) throw new Error("workspace_id é obrigatório");
-    if (!prompt) throw new Error("prompt é obrigatório");
+    // delete/pin não usam prompt; os demais modos exigem.
+    if (mode !== "delete" && mode !== "pin" && !prompt) throw new Error("prompt é obrigatório");
 
     // Auth: JWT válido + membership (usuário). Sem cron/anon.
     const auth = await authorizeWorkspace({ req, db: dbKommo, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
+
+    // ===================== MODOS DE GESTÃO (delete / pin) =====================
+    // Escrita via service role (RLS só tem "members select"); membership já validado acima.
+    if (mode === "delete" || mode === "pin") {
+      const analysisId = payload.analysis_id as string | undefined;
+      if (!analysisId) throw new Error("analysis_id é obrigatório");
+      if (mode === "delete") {
+        const { error } = await dbKommo.from("dashboard_analyses").delete().eq("id", analysisId).eq("workspace_id", workspaceId);
+        if (error) throw new Error(error.message);
+      } else {
+        const pinned = !!payload.pinned;
+        const { error } = await dbKommo.from("dashboard_analyses").update({ pinned }).eq("id", analysisId).eq("workspace_id", workspaceId);
+        if (error) throw new Error(error.message);
+      }
+      return new Response(JSON.stringify({ success: true, data: { id: analysisId } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // Owner do workspace chaveia a chave de IA (custo atribuído à conta).
     const { data: ws } = await dbKommo.from("workspaces").select("owner_id").eq("id", workspaceId).maybeSingle();
@@ -173,6 +201,7 @@ serve(async (req) => {
 
 Sua tarefa: transformar o pedido do gestor em parâmetros estruturados. Responda SOMENTE um JSON (sem texto fora dele) com EXATAMENTE estas chaves:
 {
+  "intent": "analise"|"pergunta", // "pergunta" = questão factual/direta e curta; "analise" = pedido amplo de diagnóstico
   "pipelineId": string|null,   // kommo_id do funil citado; null = TODOS os funis
   "pipelineName": string|null, // nome do funil (ou null)
   "startDate": "YYYY-MM-DD",   // início do período principal
@@ -184,6 +213,12 @@ Sua tarefa: transformar o pedido do gestor em parâmetros estruturados. Responda
   "foco": string,              // 1 frase: o foco da análise (ex.: "gargalos e queda de conversão")
   "confirmacao": string[]      // itens que o gestor DEVE revisar por estarem ambíguos ou assumidos por padrão
 }
+
+Como classificar "intent":
+- "pergunta": o gestor faz uma questão DIRETA e específica que se responde com um número/uma lista curta
+  (ex.: "quantos vendedores temos?", "qual vendedor tem mais vendas?", "quantos leads em junho?").
+- "analise": pedido amplo de diagnóstico/relatório (ex.: "analise o mês", "como está o funil?", "faça um diagnóstico").
+- Na dúvida, "analise".
 
 Regras FIXAS (não podem ser quebradas):
 - Datas SEMPRE no formato YYYY-MM-DD válido. Nunca deixe data vazia: se o período estiver ambíguo, escolha a interpretação mais provável e ADICIONE um aviso em "confirmacao".
@@ -219,10 +254,60 @@ ${pipelineList}`;
       }
       if (!Array.isArray(interp.confirmacao)) interp.confirmacao = [];
       if (typeof interp.foco !== "string") interp.foco = prompt;
+      interp.intent = interp.intent === "pergunta" ? "pergunta" : "analise";
 
       const costUsd = estimateCostUsd(cfg.model, Number(usage.prompt_tokens || 0), Number(usage.completion_tokens || 0));
       return new Response(
         JSON.stringify({ success: true, data: { interpretation: interp, pipelines: pipelines.map((p) => ({ id: p.kommo_id, name: p.name })), model: cfg.model, cost_usd: Number(costUsd.toFixed(6)) } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // ===================== MODO FOLLOWUP =====================
+    // Pergunta de acompanhamento ancorada numa análise já existente. NÃO re-consulta o
+    // CRM: reusa o snapshot (metrics) + o relatório anterior + o histórico da conversa.
+    if (mode === "followup") {
+      const analysisId = payload.analysis_id as string | undefined;
+      if (!analysisId) throw new Error("analysis_id é obrigatório no modo followup");
+
+      const { data: row, error: rowErr } = await dbKommo
+        .from("dashboard_analyses")
+        .select("id, prompt, params, result, metrics, messages, cost_usd")
+        .eq("id", analysisId).eq("workspace_id", workspaceId).maybeSingle();
+      if (rowErr || !row) throw new Error("Análise não encontrada para este workspace.");
+
+      const priorMsgs = Array.isArray(row.messages) ? row.messages as Array<{ role: string; content: string }> : [];
+      const sys = `Você é um analista comercial sênior do VFlow360 conversando com o GESTOR sobre uma análise JÁ FEITA. Hoje é ${todayBRT()}.
+
+Regras FIXAS:
+- Responda SOMENTE com base nos NÚMEROS e no RELATÓRIO abaixo (o mesmo recorte da análise). NÃO invente dados nem cite períodos/funis fora deste recorte.
+- Se a pergunta exigir um dado que não está aqui (outro período/funil, um lead específico), diga com franqueza que é preciso gerar uma nova análise com esse recorte.
+- Cite números concretos. Português do Brasil, objetivo. Pode usar bullets, mas seja curto.
+
+RECORTE: ${JSON.stringify(row.params ?? {})}
+RELATÓRIO ANTERIOR:
+${row.result ?? ""}
+
+DADOS (JSON):
+${JSON.stringify(row.metrics ?? {}).slice(0, 14000)}`;
+
+      const messagesOpenAI = [
+        { role: "system", content: sys },
+        ...priorMsgs.map((m) => ({ role: m.role, content: m.content })),
+        { role: "user", content: prompt },
+      ];
+      const { content, usage } = await callOpenAI(cfg, { messages: messagesOpenAI, temperature: 0.3 });
+      const answer = content || "Não consegui responder agora. Pode reformular?";
+
+      const newMessages = [...priorMsgs, { role: "user", content: prompt }, { role: "assistant", content: answer }];
+      const addCost = estimateCostUsd(cfg.model, Number(usage.prompt_tokens || 0), Number(usage.completion_tokens || 0));
+      const { error: updErr } = await dbKommo.from("dashboard_analyses")
+        .update({ messages: newMessages, cost_usd: Number((Number(row.cost_usd || 0) + addCost).toFixed(6)) })
+        .eq("id", analysisId).eq("workspace_id", workspaceId);
+      if (updErr) console.error("Falha ao salvar follow-up:", updErr.message);
+
+      return new Response(
+        JSON.stringify({ success: true, data: { answer, messages: newMessages } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -259,54 +344,105 @@ ${pipelineList}`;
     const mainMetrics = summarizeMetrics(mainRaw);
     const compareMetrics = cmpRaw ? summarizeMetrics(cmpRaw) : null;
 
-    const sys = `Você é um analista comercial sênior do VFlow360. Gere um RELATÓRIO ACIONÁVEL para o GESTOR a partir dos números reais fornecidos. Hoje é ${todayBRT()}.
+    const sys = `Você é um analista comercial sênior do VFlow360, respondendo ao GESTOR a partir dos números reais fornecidos. Hoje é ${todayBRT()}.
 
 Regras FIXAS:
-- Use SOMENTE os números fornecidos no JSON. NUNCA invente dados.
-- Cada afirmação relevante deve citar um número concreto (valor/variação).
-- ${compare ? "Há dois períodos: 'principal' e 'comparacao'. COMPARE-os (subiu/caiu, em % quando fizer sentido)." : "Há um único período. Não invente comparações."}
-- Escopo: ${pipelineName}. ${pipelineId ? "É UM funil isolado — pode falar de taxa de ganho e gargalo por etapa." : "São TODOS os funis somados — foque em VOLUME e VALOR; NÃO calcule 'conversão' somando funis diferentes."}
-- Não compare um período em andamento (ainda aberto) como se estivesse fechado — sinalize quando o período incluir dias futuros/hoje.
-- Português do Brasil, objetivo e profissional.
+- Use SOMENTE os números do JSON. NUNCA invente dados.
+- Se o dado necessário para responder NÃO estiver no JSON, diga isso com franqueza em 1 frase
+  (ex.: "Esta análise não traz o total de tarefas por usuário, só as atrasadas."). NÃO desvie para outro assunto.
+- Cada afirmação deve citar um número concreto.
+- ${compare ? "Há dois períodos ('principal' e 'comparacao'): COMPARE-os quando fizer sentido." : "Há um único período. Não invente comparações."}
+- Escopo: ${pipelineName}. ${pipelineId ? "Funil isolado — pode falar de taxa de ganho e gargalo por etapa." : "TODOS os funis somados — foque em VOLUME e VALOR; NÃO some 'conversão' de funis diferentes."}
+- Português do Brasil, objetivo.
 
-FORMATO DE SAÍDA (Markdown, obrigatório):
-- Use EXATAMENTE estas seções, nesta ordem, cada título com "## " e TODO EM MAIÚSCULAS:
-  "## RESUMO EXECUTIVO" (2-3 frases), "## DESTAQUES" (bullets com números),
-  "## GARGALOS E RISCOS" (bullets), "## RECOMENDAÇÕES" (bullets com a AÇÃO a tomar).
-- Use "- " para bullets e **negrito** para números/variações importantes.
-- Seja conciso: no máximo ~3 bullets por seção. Qualidade > quantidade.
+COMO RESPONDER — escolha o formato conforme o pedido:
+1) PERGUNTA DIRETA/SIMPLES (ex.: "qual vendedor tem mais tarefas atrasadas?", "quantos leads em junho?"):
+   responda DIRETO e CURTO — 1 a 3 frases OU uma lista curta —, começando pela resposta e o número.
+   NÃO gere as seções de relatório. NÃO encha de contexto que não foi pedido.
+2) PEDIDO AMPLO DE ANÁLISE (ex.: "analise o mês", "como está o funil?", "faça um diagnóstico"):
+   aí sim use o RELATÓRIO em Markdown com estas seções (título "## " em MAIÚSCULAS):
+   "## RESUMO EXECUTIVO" (2-3 frases), "## DESTAQUES", "## GARGALOS E RISCOS", "## RECOMENDAÇÕES".
+   Bullets com "- " e **negrito** nos números; máx ~3 bullets por seção.
+Na dúvida entre os dois, prefira a resposta DIRETA. Atenda ao PEDIDO LITERAL abaixo.
 
-FOCO pedido pelo gestor: ${typeof params.foco === "string" && params.foco ? params.foco : prompt}`;
+PEDIDO LITERAL DO GESTOR: "${prompt}"`;
 
     const periodLabel = compare
       ? `Período principal: ${startDate} a ${endDate}. Comparação: ${params.compareStart} a ${params.compareEnd}. Eixo: ${dateBasis}.`
       : `Período: ${startDate} a ${endDate}. Eixo: ${dateBasis}.`;
 
-    const userContent = `${periodLabel}\n\nDADOS (JSON):\n${JSON.stringify({ principal: mainMetrics, comparacao: compareMetrics }).slice(0, 14000)}`;
+    const userContent = `PERGUNTA DO GESTOR: "${prompt}"\n\n${periodLabel}\n\nDADOS (JSON):\n${JSON.stringify({ principal: mainMetrics, comparacao: compareMetrics }).slice(0, 14000)}`;
+    const chatMessages = [{ role: "system", content: sys }, { role: "user", content: userContent }];
+    const savedParams = { pipelineId, pipelineName, startDate, endDate, dateBasis, compare, compareStart: compare ? params.compareStart : null, compareEnd: compare ? params.compareEnd : null, foco: params.foco ?? null, intent: params.intent === "pergunta" ? "pergunta" : "analise" };
+    const fullMetrics = { principal: mainMetrics, comparacao: compareMetrics };
 
-    const { content: answer, usage } = await callOpenAI(cfg, {
-      messages: [{ role: "system", content: sys }, { role: "user", content: userContent }],
-      temperature: 0.3,
-    });
+    // Grava a análise concluída no histórico e devolve id/created_at.
+    const persist = async (result: string, usage: any) => {
+      const costUsd = estimateCostUsd(cfg.model, Number(usage?.prompt_tokens || 0), Number(usage?.completion_tokens || 0));
+      const { data: inserted, error: insErr } = await dbKommo.from("dashboard_analyses").insert({
+        workspace_id: workspaceId, user_id: auth.userId, prompt, params: savedParams, result,
+        metrics: fullMetrics, model: cfg.model, cost_usd: Number(costUsd.toFixed(6)),
+      }).select("id, created_at").maybeSingle();
+      if (insErr) console.error("Falha ao gravar histórico:", insErr.message);
+      return inserted;
+    };
+
+    // ---- Streaming (opt-in por stream:true): NDJSON meta -> deltas -> done ----
+    if (payload.stream) {
+      const encoder = new TextEncoder();
+      const readable = new ReadableStream({
+        async start(controller) {
+          const send = (obj: unknown) => controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+          try {
+            send({ type: "meta", prompt, params: savedParams, metrics: fullMetrics });
+            const res = await fetch(OPENAI_ENDPOINT, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ model: cfg.model, messages: chatMessages, temperature: 0.3, stream: true, stream_options: { include_usage: true } }),
+            });
+            if (!res.ok || !res.body) { send({ type: "error", error: `Falha na IA [${res.status}]` }); controller.close(); return; }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "", full = "", usageObj: any = {};
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const parts = buf.split("\n");
+              buf = parts.pop() || "";
+              for (const line of parts) {
+                const t = line.trim();
+                if (!t.startsWith("data:")) continue;
+                const p = t.slice(5).trim();
+                if (p === "[DONE]") continue;
+                try {
+                  const j = JSON.parse(p);
+                  const delta = j.choices?.[0]?.delta?.content;
+                  if (delta) { full += delta; send({ type: "delta", text: delta }); }
+                  if (j.usage) usageObj = j.usage;
+                } catch { /* linha parcial */ }
+              }
+            }
+            const result = full || "Não consegui concluir a análise agora. Tente reformular o pedido.";
+            const inserted = await persist(result, usageObj);
+            send({ type: "done", id: inserted?.id ?? null, created_at: inserted?.created_at ?? null });
+          } catch (e) {
+            try { send({ type: "error", error: e instanceof Error ? e.message : String(e) }); } catch { /* ignore */ }
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(readable, { headers: { ...corsHeaders, "Content-Type": "application/x-ndjson", "Cache-Control": "no-cache" } });
+    }
+
+    // ---- Não-streaming (fallback / padrão) ----
+    const { content: answer, usage } = await callOpenAI(cfg, { messages: chatMessages, temperature: 0.3 });
     const result = answer || "Não consegui concluir a análise agora. Tente reformular o pedido.";
-
-    const costUsd = estimateCostUsd(cfg.model, Number(usage.prompt_tokens || 0), Number(usage.completion_tokens || 0));
-    const savedParams = { pipelineId, pipelineName, startDate, endDate, dateBasis, compare, compareStart: compare ? params.compareStart : null, compareEnd: compare ? params.compareEnd : null, foco: params.foco ?? null };
-
-    const { data: inserted, error: insErr } = await dbKommo.from("dashboard_analyses").insert({
-      workspace_id: workspaceId,
-      user_id: auth.userId,
-      prompt,
-      params: savedParams,
-      result,
-      metrics: { principal: mainMetrics, comparacao: compareMetrics },
-      model: cfg.model,
-      cost_usd: Number(costUsd.toFixed(6)),
-    }).select("id, created_at").maybeSingle();
-    if (insErr) console.error("Falha ao gravar histórico:", insErr.message);
+    const inserted = await persist(result, usage);
 
     return new Response(
-      JSON.stringify({ success: true, data: { id: inserted?.id ?? null, created_at: inserted?.created_at ?? null, result, params: savedParams, metrics: { principal: mainMetrics, comparacao: compareMetrics } } }),
+      JSON.stringify({ success: true, data: { id: inserted?.id ?? null, created_at: inserted?.created_at ?? null, prompt, result, params: savedParams, metrics: fullMetrics, messages: [] } }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {

@@ -122,6 +122,20 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-22 (`20260722130000_kommo_dashboard_analyses_pinned.sql`): adiciona coluna
+  `kommo.dashboard_analyses.pinned boolean default false` — favoritar/fixar análises no topo
+  do histórico. Toggle/exclusão pela edge `kommo-ai-analyze` (modos `pin`/`delete`, service role).
+  Nesta leva de UX: skeleton, empty state, ícones/cores por seção, resumo na confirmação, gráfico
+  de comparação, copiar/exportar PDF, regenerar, busca/título no histórico e STREAMING da resposta
+  (edge modo analyze com `stream:true` → NDJSON; fallback JSON). Aditiva; sem mudança de RLS.
+  _(APLICADA em prod 2026-07-22 via db query; edge redeployada.)_
+- 2026-07-22 (`20260722120000_kommo_dashboard_analysis_messages.sql`): adiciona coluna
+  `kommo.dashboard_analyses.messages jsonb default '[]'` — conversa de acompanhamento
+  (follow-ups) da Análise IA: depois do relatório, o gestor pergunta mais, ancorado no
+  MESMO snapshot (a edge `kommo-ai-analyze` modo `followup` NÃO re-consulta o CRM). Também
+  nesta leva: a análise passou a receber o prompt LITERAL (não só o `foco` resumido) e o
+  relatório mostra o comando que o gerou. Aditiva; sem mudança de RLS. _(aplicar em prod
+  via SQL Editor + redeploy da edge.)_
 - 2026-07-21 (`20260721150000_kommo_ai_provider_config.sql`): **nova tabela**
   `kommo.ai_provider_config` — chave OpenAI/modelo por usuário (tela Configurações › IA).
   Corrige o "não salva": o client aponta para o schema `kommo`, mas a tabela só existia

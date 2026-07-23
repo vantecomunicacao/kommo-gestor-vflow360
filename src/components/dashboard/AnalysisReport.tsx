@@ -1,6 +1,10 @@
-import { Fragment, useMemo } from "react";
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, LabelList } from "recharts";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import {
+  BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell, LabelList, Legend,
+} from "recharts";
+import {
+  TrendingUp, TrendingDown, Minus, FileText, AlertTriangle, Lightbulb, Copy, Check, Printer,
+} from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { formatBRL } from "@/lib/format";
 import type { AnalysisMetrics, PeriodMetrics } from "@/hooks/useDashboardAnalysis";
@@ -9,12 +13,21 @@ interface Props {
   result: string;
   metrics: AnalysisMetrics | null;
   params?: Record<string, unknown> | null;
+  prompt?: string;
 }
 
 function fmtDay(v: unknown): string {
   if (typeof v !== "string" || !v) return "—";
   try { return format(parseISO(v), "dd/MM/yy"); } catch { return v; }
 }
+
+// Estilo (ícone + cor) por seção conhecida do relatório. Fallback: título genérico.
+const SECTION_STYLE: Record<string, { Icon: typeof FileText; cls: string }> = {
+  "RESUMO EXECUTIVO": { Icon: FileText, cls: "text-foreground" },
+  "DESTAQUES": { Icon: TrendingUp, cls: "text-emerald-600 dark:text-emerald-400" },
+  "GARGALOS E RISCOS": { Icon: AlertTriangle, cls: "text-red-600 dark:text-red-400" },
+  "RECOMENDAÇÕES": { Icon: Lightbulb, cls: "text-sky-600 dark:text-sky-400" },
+};
 
 // -------- markdown leve (sem dependência) --------
 // Suporta: "## TÍTULO", "### sub", "- bullet", "1. item", **negrito**, parágrafos.
@@ -59,9 +72,13 @@ function Markdown({ text }: { text: string }) {
 
     if (h2 || h1) {
       flushList();
+      const title = (h2 || h1)![1].toUpperCase();
+      const style = SECTION_STYLE[title];
+      const Icon = style?.Icon;
       blocks.push(
-        <h4 key={`h-${key++}`} className="mt-4 mb-1.5 border-b border-border pb-1 text-xs font-bold uppercase tracking-wide text-primary first:mt-0">
-          {(h2 || h1)![1].toUpperCase()}
+        <h4 key={`h-${key++}`} className={`mt-4 mb-1.5 flex items-center gap-1.5 border-b border-border pb-1 text-xs font-bold uppercase tracking-wide first:mt-0 ${style?.cls ?? "text-primary"}`}>
+          {Icon && <Icon className="h-3.5 w-3.5" />}
+          {title}
         </h4>,
       );
     } else if (h3) {
@@ -93,7 +110,7 @@ function Kpi({ label, value, cur, prev, invert }: { label: string; value: string
   const good = d.dir === "flat" ? null : invert ? d.dir === "down" : d.dir === "up";
   const Icon = d.dir === "up" ? TrendingUp : d.dir === "down" ? TrendingDown : Minus;
   return (
-    <div className="rounded-lg border border-border bg-background p-2.5">
+    <div className="rounded-lg border border-border bg-card p-2.5">
       <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="mt-0.5 text-lg font-bold text-foreground">{value}</p>
       {d.pct != null && (
@@ -105,7 +122,37 @@ function Kpi({ label, value, cur, prev, invert }: { label: string; value: string
   );
 }
 
-export default function AnalysisReport({ result, metrics, params }: Props) {
+// -------- Exportação (texto puro + impressão isolada em nova janela) --------
+function contextLine(pr: Record<string, unknown>): string {
+  const funil = (pr.pipelineName as string) || "Todos os funis";
+  const eixo = pr.dateBasis === "fechamento" ? "por fechamento" : "por criação";
+  const per = `${fmtDay(pr.startDate)} a ${fmtDay(pr.endDate)}`;
+  const cmp = pr.compare ? ` vs ${fmtDay(pr.compareStart)} a ${fmtDay(pr.compareEnd)}` : "";
+  return `${funil} · ${per}${cmp} · ${eixo}`;
+}
+function toPlainText(pr: Record<string, unknown>, prompt: string | undefined, result: string): string {
+  const head = `ANÁLISE VFLOW360\n${contextLine(pr)}${prompt ? `\nComando: ${prompt}` : ""}\n\n`;
+  return head + result.replace(/\*\*/g, "");
+}
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+// markdown -> html simples só para impressão
+function toPrintHtml(result: string): string {
+  return result.replace(/\r/g, "").split("\n").map((raw) => {
+    const line = raw.trim();
+    if (!line) return "";
+    const esc = escapeHtml(line).replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    if (/^#{1,2}\s+/.test(line)) return `<h2>${esc.replace(/^#{1,2}\s+/, "").toUpperCase()}</h2>`;
+    if (/^###\s+/.test(line)) return `<h3>${esc.replace(/^###\s+/, "")}</h3>`;
+    if (/^[-*]\s+/.test(line)) return `<li>${esc.replace(/^[-*]\s+/, "")}</li>`;
+    if (/^\d+\.\s+/.test(line)) return `<li>${esc.replace(/^\d+\.\s+/, "")}</li>`;
+    return `<p>${esc}</p>`;
+  }).join("\n");
+}
+
+export default function AnalysisReport({ result, metrics, params, prompt }: Props) {
+  const [copied, setCopied] = useState(false);
   const p = metrics?.principal ?? null;
   const c = metrics?.comparacao ?? null;
 
@@ -113,25 +160,91 @@ export default function AnalysisReport({ result, metrics, params }: Props) {
     () => (p?.funnelStages || []).map((s) => ({ name: s.name, count: s.count })),
     [p],
   );
+  // Comparação por etapa (atual vs anterior), casada por id.
+  const compareData = useMemo(() => {
+    if (!p || !c) return [];
+    return p.funnelStages.map((s) => ({
+      name: s.name,
+      atual: s.count,
+      anterior: c.funnelStages.find((x) => x.id === s.id)?.count ?? 0,
+    }));
+  }, [p, c]);
 
   const pr = (params || {}) as Record<string, unknown>;
+  const compact = pr.intent === "pergunta"; // pergunta direta → só a resposta, sem KPIs/gráficos
   const funil = (pr.pipelineName as string) || "Todos os funis";
   const eixo = pr.dateBasis === "fechamento" ? "por fechamento" : "por criação";
   const periodo = `${fmtDay(pr.startDate)} – ${fmtDay(pr.endDate)}`;
   const compara = pr.compare ? `vs ${fmtDay(pr.compareStart)} – ${fmtDay(pr.compareEnd)}` : "";
 
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(toPlainText(pr, prompt, result));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch { /* clipboard indisponível */ }
+  };
+
+  const handlePrint = () => {
+    const w = window.open("", "_blank", "width=800,height=900");
+    if (!w) return;
+    w.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Análise VFlow360</title>
+      <style>
+        body{font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#111;max-width:720px;margin:32px auto;padding:0 24px;line-height:1.5}
+        .ctx{color:#555;font-size:13px;margin:2px 0 4px}
+        .cmd{color:#555;font-size:12px;font-style:italic;border-top:1px solid #eee;padding-top:8px;margin-top:8px}
+        h1{font-size:18px;margin:0}
+        h2{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:#1a73e8;border-bottom:1px solid #eee;padding-bottom:4px;margin:20px 0 8px}
+        h3{font-size:14px;margin:12px 0 4px}
+        li{margin:3px 0}p{margin:6px 0}
+      </style></head><body>
+      <h1>Análise VFlow360 — ${escapeHtml(funil)}</h1>
+      <div class="ctx">${escapeHtml(periodo)}${compara ? " " + escapeHtml(compara) : ""} · ${escapeHtml(eixo)}</div>
+      ${prompt ? `<div class="cmd">Comando: ${escapeHtml(prompt)}</div>` : ""}
+      ${toPrintHtml(result)}
+      </body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { w.print(); }, 250);
+  };
+
   return (
     <div className="space-y-4">
-      {/* Cabeçalho do relatório */}
+      {/* Cabeçalho do relatório + ações */}
       <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
-        <p className="text-sm font-bold uppercase tracking-wide text-foreground">{funil}</p>
-        <p className="mt-0.5 text-[11px] text-muted-foreground">
-          {periodo}{compara && <span className="text-primary"> {compara}</span>} · {eixo}
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            {compact ? (
+              <p className="text-xs font-semibold text-foreground">Resposta</p>
+            ) : (
+              <>
+                <p className="text-sm font-bold uppercase tracking-wide text-foreground">{funil}</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  {periodo}{compara && <span className="text-primary"> {compara}</span>} · {eixo}
+                </p>
+              </>
+            )}
+          </div>
+          <div className="flex shrink-0 gap-1">
+            <button onClick={handleCopy} title="Copiar" aria-label="Copiar análise"
+              className="rounded-md border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:text-foreground">
+              {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+            <button onClick={handlePrint} title="Exportar / imprimir (PDF)" aria-label="Exportar PDF"
+              className="rounded-md border border-border bg-card p-1.5 text-muted-foreground transition-colors hover:text-foreground">
+              <Printer className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+        {prompt && (
+          <p className="mt-1.5 border-t border-primary/10 pt-1.5 text-[11px] italic text-muted-foreground">
+            <span className="font-medium not-italic text-foreground">Comando:</span> “{prompt}”
+          </p>
+        )}
       </div>
 
       {/* KPIs */}
-      {p && (
+      {!compact && p && (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Kpi label="Leads" value={String(p.totalLeads)} cur={p.totalLeads} prev={c?.totalLeads} />
           <Kpi label="Vendas" value={String(wonCount(p))} cur={wonCount(p)} prev={c ? wonCount(c) : undefined} />
@@ -140,9 +253,26 @@ export default function AnalysisReport({ result, metrics, params }: Props) {
         </div>
       )}
 
-      {/* Gráfico de funil */}
-      {funnelData.length > 0 && (
-        <div className="rounded-lg border border-border bg-background p-3">
+      {/* Gráfico de comparação (atual vs anterior) — só quando há comparação */}
+      {!compact && compareData.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-3">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-primary">Comparação por etapa</p>
+          <ResponsiveContainer width="100%" height={Math.max(160, compareData.length * 52)}>
+            <BarChart data={compareData} layout="vertical" margin={{ left: 4, right: 28, top: 0, bottom: 0 }} barGap={2}>
+              <XAxis type="number" hide />
+              <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+              <Tooltip cursor={{ fill: "hsl(var(--muted))", opacity: 0.4 }} contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar dataKey="anterior" name="Anterior" fill="hsl(var(--muted-foreground) / 0.5)" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="atual" name="Atual" fill="hsl(var(--primary))" radius={[0, 3, 3, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Gráfico de funil (período principal) */}
+      {!compact && funnelData.length > 0 && (
+        <div className="rounded-lg border border-border bg-card p-3">
           <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-primary">Funil — {p?.totalLeads ?? 0} leads</p>
           <ResponsiveContainer width="100%" height={Math.max(120, funnelData.length * 38)}>
             <BarChart data={funnelData} layout="vertical" margin={{ left: 4, right: 28, top: 0, bottom: 0 }}>
@@ -164,7 +294,7 @@ export default function AnalysisReport({ result, metrics, params }: Props) {
       )}
 
       {/* Texto da análise (markdown) */}
-      <div className="rounded-lg border border-border bg-muted/20 p-3">
+      <div className="rounded-lg border border-border bg-card p-3">
         <Markdown text={result} />
       </div>
     </div>
