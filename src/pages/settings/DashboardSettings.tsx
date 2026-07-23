@@ -9,10 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
-import { Loader2, Save, RefreshCw } from "lucide-react";
+import { Loader2, Save, RefreshCw, Sparkles } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { FUNNEL_BUCKETS, DATE_TYPES } from "@/lib/dashboard-funnel";
+import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
@@ -43,15 +44,17 @@ export default function DashboardSettings() {
   const [wonStageKeys, setWonStageKeys] = useState<string[]>(["venda_ganha"]);
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({}); // bucket key -> rótulo customizado
   const [reportRateStages, setReportRateStages] = useState<string[]>([]); // etapas p/ taxas do relatório
+  const [reportGoals, setReportGoals] = useState<Record<string, number>>({}); // metas do relatório ("<eixo>:<metricId>" -> valor)
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   // Detecção de alterações não salvas (baseline capturado ao carregar / após salvar).
   const editable = useMemo(() => JSON.stringify({
     defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
-    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages,
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
   }), [defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
-    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages]);
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals]);
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
@@ -105,6 +108,7 @@ export default function DashboardSettings() {
         // report_rate_stages guarda CHAVES DE FASE; descarta valores legados (ids de etapa).
         setReportRateStages(((settings as any).report_rate_stages || []).filter((x: string) =>
           FUNNEL_BUCKETS.some((b) => b.key === x)));
+        setReportGoals(((settings as any).report_goals as any) || {});
       }
     } catch (e) {
       toast.error("Erro ao carregar", { description: (e as Error).message });
@@ -135,6 +139,7 @@ export default function DashboardSettings() {
         won_stage_keys: wonStageKeys,
         funnel_stage_labels: stageLabels,
         report_rate_stages: reportRateStages,
+        report_goals: reportGoals,
       };
       const { error } = await supabase
         .from("dashboard_settings" as any)
@@ -189,6 +194,26 @@ export default function DashboardSettings() {
     } finally {
       setSyncing(false);
     }
+  };
+
+  const applyTemplate = () => {
+    const template = SEGMENT_TEMPLATES.find((t) => t.id === selectedTemplateId);
+    if (!template) return;
+    // Se já houver rótulos, taxas ou metas configurados, confirma antes de sobrescrever.
+    const hasExisting =
+      Object.keys(stageLabels).length > 0 ||
+      reportRateStages.length > 0 ||
+      Object.keys(reportGoals).length > 0;
+    if (hasExisting && !window.confirm(
+      `Aplicar o template "${template.label}"? Isso substitui os rótulos das fases, as taxas do Relatório e as metas que ele define. Suas demais configurações não são afetadas. Nada é salvo até você clicar em Salvar.`
+    )) return;
+    const next = applyTemplateToSettings(template, { stageLabels, reportRateStages, reportGoals });
+    setStageLabels(next.stageLabels);
+    setReportRateStages(next.reportRateStages);
+    setReportGoals(next.reportGoals);
+    toast.success(`Template "${template.label}" aplicado`, {
+      description: "Revise os campos abaixo e clique em Salvar para confirmar.",
+    });
   };
 
   const togglePipeline = (kommo_id: string) => {
@@ -249,6 +274,56 @@ export default function DashboardSettings() {
           </Button>
         </div>
       </div>
+
+      {/* Template de segmento */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-primary" />
+            Template de segmento
+          </CardTitle>
+          <CardDescription>
+            Ponto de partida rápido: escolha o segmento do seu negócio para pré-preencher os
+            nomes das fases, as taxas do Relatório e as metas médias do setor. Tudo continua
+            editável abaixo e nada é salvo até você clicar em <strong>Salvar</strong>.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1 space-y-1">
+              <Label className="text-xs">Segmento</Label>
+              <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                <SelectTrigger><SelectValue placeholder="Selecione um segmento" /></SelectTrigger>
+                <SelectContent>
+                  {SEGMENT_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button variant="secondary" onClick={applyTemplate} disabled={!selectedTemplateId}>
+              <Sparkles className="w-4 h-4 mr-2" />
+              Aplicar template
+            </Button>
+          </div>
+          {(() => {
+            const t = SEGMENT_TEMPLATES.find((x) => x.id === selectedTemplateId);
+            if (!t) return null;
+            const labels = FUNNEL_BUCKETS.map((b) => t.stageLabels[b.key]).filter(Boolean);
+            const rates = t.reportRateStages.map((k) => t.stageLabels[k] || FUNNEL_BUCKETS.find((b) => b.key === k)?.label);
+            return (
+              <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
+                <p className="text-muted-foreground">{t.description}</p>
+                <p><span className="font-medium">Fases:</span> {labels.join(" → ")}</p>
+                {rates.length > 0 && (
+                  <p><span className="font-medium">Taxas no Relatório:</span> {rates.map((r) => `Taxa ${r}`).join(", ")}</p>
+                )}
+                <p><span className="font-medium">Metas pré-definidas:</span> {Object.keys(t.reportGoals).length}</p>
+              </div>
+            );
+          })()}
+        </CardContent>
+      </Card>
 
       {/* Pipeline padrão */}
       <Card>
