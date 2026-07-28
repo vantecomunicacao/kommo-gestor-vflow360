@@ -82,7 +82,10 @@ export default function Dashboard() {
         .eq("workspace_id", activeWorkspace.id)
         .maybeSingle();
       if (cancelled) return;
-      const defaultPipeline = (settings?.default_pipeline_ids || [])[0] ?? null;
+      // Vários funis marcados = escopo agregado (a edge function já restringe a eles);
+      // aí nenhum vem pré-selecionado no filtro. Um só = abre direto nele.
+      const defaultIds = settings?.default_pipeline_ids || [];
+      const defaultPipeline = defaultIds.length === 1 ? defaultIds[0] : null;
       setStageLabels(((settings as any)?.funnel_stage_labels as Record<string, string>) || {});
 
       // 1) Restaurar filtros salvos (período, vendedores, UTM…)

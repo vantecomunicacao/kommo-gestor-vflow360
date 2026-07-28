@@ -12,7 +12,7 @@ import { toast } from "sonner";
 import { Loader2, Save, RefreshCw, Sparkles } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { FUNNEL_BUCKETS, DATE_TYPES } from "@/lib/dashboard-funnel";
+import { FUNNEL_BUCKETS, DATE_TYPES, funnelStageKey, readStageBucket } from "@/lib/dashboard-funnel";
 import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
 
 interface Stage { id: string; name: string; }
@@ -330,34 +330,36 @@ export default function DashboardSettings() {
       {/* Pipeline padrão */}
       <Card>
         <CardHeader>
-          <CardTitle>Funil padrão</CardTitle>
-          <CardDescription>Selecione o funil que será aberto automaticamente no Dashboard.</CardDescription>
+          <CardTitle>Funis do Dashboard</CardTitle>
+          <CardDescription>
+            Marque os funis comerciais que devem entrar nas métricas. Funis administrativos
+            (base de contatos, fornecedores, roteamento interno) devem ficar desmarcados.
+            Nenhum marcado = todos entram. Com um único funil marcado, ele já vem
+            selecionado no filtro do Dashboard.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
           {pipelines.map((p) => (
             <label key={p.id} className="flex items-center gap-2 cursor-pointer">
               <input
-                type="radio"
-                name="defaultPipeline"
+                type="checkbox"
                 className="accent-primary"
-                checked={defaultPipelines[0] === p.kommo_id}
-                onChange={() => setDefaultPipelines([p.kommo_id])}
+                checked={defaultPipelines.includes(p.kommo_id)}
+                onChange={(e) =>
+                  setDefaultPipelines((prev) =>
+                    e.target.checked
+                      ? [...prev, p.kommo_id]
+                      : prev.filter((id) => id !== p.kommo_id))
+                }
               />
               <span>{p.name}</span>
               <span className="text-xs text-muted-foreground">({p.stages.length} etapas)</span>
             </label>
           ))}
-          {pipelines.length > 0 && (
-            <label className="flex items-center gap-2 cursor-pointer pt-1">
-              <input
-                type="radio"
-                name="defaultPipeline"
-                className="accent-primary"
-                checked={defaultPipelines.length === 0}
-                onChange={() => setDefaultPipelines([])}
-              />
-              <span className="text-sm text-muted-foreground">Sem padrão (mostrar todos)</span>
-            </label>
+          {pipelines.length > 0 && defaultPipelines.length === 0 && (
+            <p className="pt-1 text-sm text-muted-foreground">
+              Nenhum funil marcado — o Dashboard soma todos.
+            </p>
           )}
           {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Nenhum pipeline sincronizado.</p>}
         </CardContent>
@@ -415,12 +417,16 @@ export default function DashboardSettings() {
                 <div key={s.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center pl-1">
                   <div className="text-sm">{s.name}</div>
                   <Select
-                    value={stageMapping[s.id] || "__none__"}
+                    value={readStageBucket(stageMapping, p.kommo_id, s.id) || "__none__"}
                     onValueChange={(v) =>
                       setStageMapping((prev) => {
+                        // Grava sempre no formato novo (funil+etapa), que tem prioridade
+                        // sobre a regra legada global — por isso ela não precisa sair.
+                        // Em "Ignorar" a legada TEM que sair, senão voltaria a valer.
                         const next = { ...prev };
-                        if (v === "__none__") delete next[s.id];
-                        else next[s.id] = v;
+                        const key = funnelStageKey(p.kommo_id, s.id);
+                        if (v === "__none__") { delete next[key]; delete next[s.id]; }
+                        else next[key] = v;
                         return next;
                       })
                     }

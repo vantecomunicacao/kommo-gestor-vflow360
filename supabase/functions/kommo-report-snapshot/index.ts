@@ -9,6 +9,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
+import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -60,16 +61,15 @@ serve(async (req) => {
     };
     const funnelLabels = (settings?.funnel_stage_labels || {}) as Record<string, string>;
 
-    // status_id -> fase (bucket), a partir do mapeamento configurado. Ganho => venda_ganha.
-    const wonStatusIds = new Set<string>(["142"]);
-    const statusBucket = new Map<string, string>();
-    const rawMapping = (settings?.funnel_stage_mapping || {}) as Record<string, any>;
-    for (const [stageId, bucket] of Object.entries(rawMapping)) {
-      if (typeof bucket === "string" && bucket in BUCKET_ORDER) statusBucket.set(String(stageId), bucket);
-      if (bucket === "venda_ganha") wonStatusIds.add(String(stageId));
-    }
-    statusBucket.set("142", "venda_ganha");
-    const isWon = (l: any) => l.status === "won" || wonStatusIds.has(String(l.status_id));
+    // (funil, status_id) -> fase, a partir do mapeamento configurado. As chaves podem
+    // vir como "<pipelineId>:<statusId>" (atual) ou "<statusId>" (legado, vale p/ todos
+    // os funis) — ver _shared/kommo-funnel.ts. O par importa porque `142`/`143` são os
+    // mesmos ids em todo funil do Kommo.
+    const parsedMapping = parseFunnelMapping(settings?.funnel_stage_mapping as Record<string, unknown>);
+    const statusBucket = buildBucketResolver(parsedMapping);
+    // Ganho = status de sistema do Kommo (o 142) OU etapa mapeada como venda_ganha
+    // NAQUELE funil.
+    const isWon = (l: any) => l.status === "won" || statusBucket(l.pipeline_id, l.status_id) === "venda_ganha";
     const isLost = (l: any) => l.status === "lost";
 
     // Alvos = fases escolhidas (subconjunto das 4), com ordem e rótulo (custom ou padrão).
@@ -90,9 +90,9 @@ serve(async (req) => {
     const maxBucketByLead = new Map<string, number>();
     if (targets.length) {
       const evRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
-        .select("lead_id,after_status_id").eq("workspace_id", workspaceId).order("id").range(from, to));
+        .select("lead_id,pipeline_id,after_status_id").eq("workspace_id", workspaceId).order("id").range(from, to));
       for (const e of (evRows || []) as any[]) {
-        const b = statusBucket.get(String(e.after_status_id));
+        const b = statusBucket(e.pipeline_id, e.after_status_id);
         if (b == null || !e.lead_id) continue;
         const k = String(e.lead_id);
         maxBucketByLead.set(k, Math.max(maxBucketByLead.get(k) ?? -1, BUCKET_ORDER[b]));
@@ -101,7 +101,7 @@ serve(async (req) => {
     const reachedTargetIds = (l: any): string[] => {
       if (!targets.length) return [];
       if (isWon(l)) return targets.map((t) => t.id);
-      const curB = statusBucket.get(String(l.status_id));
+      const curB = statusBucket(l.pipeline_id, l.status_id);
       let maxOrder = maxBucketByLead.get(String(l.kommo_id)) ?? -1;
       if (curB != null) maxOrder = Math.max(maxOrder, BUCKET_ORDER[curB]);
       return targets.filter((t) => maxOrder >= t.order).map((t) => t.id);

@@ -122,6 +122,19 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-27 (`20260727190000_kommo_funnel_mapping_per_pipeline.sql`): migration de DADOS
+  (sem mudança estrutural) — `kommo.dashboard_settings.funnel_stage_mapping` passa a ser
+  indexado pelo PAR funil+etapa (`"<pipeline_kommo_id>:<status_id>"`) em vez de só pelo
+  status. Motivo: `142`/`143` são os mesmos ids em TODOS os funis do Kommo e são
+  renomeados por funil, então mapear uma etapa contaminava os outros funis. Cada chave
+  legada foi expandida para os funis que contêm aquele status (comportamento preservado;
+  0 chaves órfãs). O leitor novo (`_shared/kommo-funnel.ts`, usado por `kommo-dashboard` e
+  `kommo-report-snapshot`) aceita os dois formatos, então a ordem deploy×migration não
+  quebra. Nesta leva: some o `wonStageIds.add("142")` global (ganho agora = status `won`
+  do Kommo OU etapa mapeada como venda_ganha NAQUELE funil) e o card "Funil padrão" virou
+  "Funis do Dashboard" (checkbox multi-seleção; 1 marcado = pré-seleciona o filtro).
+  _(APLICADA em prod 2026-07-27: edges deployadas antes, migration depois, e os 4
+  workspaces com mapeamento conferidos antes/depois — funil, perdas e receita idênticos.)_
 - 2026-07-27 (`20260727180000_kommo_pipelines_is_deleted.sql`): adiciona coluna
   `kommo.pipelines.is_deleted boolean default false` + índice parcial
   `idx_kommo_pipelines_ws_alive`. Funil apagado no Kommo ficava para sempre na tabela

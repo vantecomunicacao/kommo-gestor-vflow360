@@ -9,6 +9,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
+import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -160,21 +161,24 @@ serve(async (req) => {
     const activeStages: KommoStatus[] = activePipelines.flatMap((p) => (Array.isArray(p.statuses) ? p.statuses : []) as KommoStatus[]);
     const activePipelineIds = new Set(activePipelines.map((p) => p.kommo_id));
 
-    // Funnel mapping (settings formato B {statusId: bucket} ou inferência)
+    // Funnel mapping: chaves "<pipelineId>:<statusId>" (atual) ou "<statusId>"
+    // (legado, vale p/ todos os funis). Ver _shared/kommo-funnel.ts.
+    const parsedMapping = parseFunnelMapping(settings?.funnel_stage_mapping as Record<string, unknown>);
+    // Inferência por nome preenche APENAS as fases que o usuário não configurou
+    // (comportamento histórico: mapeamento vazio => funil todo inferido).
     const inferred = inferFunnelMapping(activeStages);
-    const rawMapping = (settings?.funnel_stage_mapping || {}) as Record<string, any>;
-    const stageMap: Record<Bucket, string[]> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
-    let hasUserMapping = false;
-    for (const [stageId, bucket] of Object.entries(rawMapping)) {
-      if (typeof bucket === "string" && (VALID_BUCKETS as string[]).includes(bucket)) {
-        stageMap[bucket as Bucket].push(stageId); hasUserMapping = true;
-      }
+    const fallbackByStage = new Map<string, Bucket>();
+    for (const b of VALID_BUCKETS) {
+      if (parsedMapping.covered.has(b)) continue;
+      for (const id of inferred[b]) if (!fallbackByStage.has(id)) fallbackByStage.set(id, b);
     }
-    if (!hasUserMapping) for (const b of VALID_BUCKETS) stageMap[b] = inferred[b];
-    else for (const b of VALID_BUCKETS) if (!stageMap[b].length) stageMap[b] = inferred[b];
+    const bucketOf = buildBucketResolver(parsedMapping, fallbackByStage);
 
-    const wonStageIds = new Set<string>(stageMap.venda_ganha);
-    wonStageIds.add("142");
+    // Ganho = status de sistema do Kommo (`won`, que é o status_id 142 do funil)
+    // OU etapa mapeada como "Venda Ganha" NAQUELE funil. Antes havia um
+    // `add("142")` global aqui, que fazia o 142 de qualquer funil contar como
+    // venda — inclusive onde ele é outra coisa ("Cirurgia Realizada").
+    const isWonLead = (l: any) => l.status === "won" || bucketOf(l.pipeline_id, l.status_id) === "venda_ganha";
 
     // ===== Query leads (paginada — PostgREST corta em 1000 por resposta) =====
     const leadsRows = await fetchAllRows((from, to) => {
@@ -214,7 +218,7 @@ serve(async (req) => {
       // Data adicional de cada lead conforme o modo configurado.
       const additionalDateOf = (l: any): Date | null => {
         if (additionalDateFieldId === SENTINEL_WON) {
-          const isWon = l.status === "won" || wonStageIds.has(l.status_id);
+          const isWon = isWonLead(l);
           return isWon && l.closed_at ? new Date(l.closed_at as string) : null;
         }
         if (additionalDateFieldId === SENTINEL_LOST) {
@@ -236,11 +240,9 @@ serve(async (req) => {
     }
 
     const safeRate = (a: number, b: number) => (b > 0 ? (a / b) * 100 : 0);
-    const stageBucket = (statusId: string | null): Bucket | null => {
-      if (!statusId) return null;
-      for (const b of VALID_BUCKETS) if (stageMap[b].includes(statusId)) return b;
-      return null;
-    };
+    // A fase depende do PAR funil+etapa: `142`/`143` repetem em todos os funis.
+    const stageBucket = (pipelineId: string | null, statusId: string | null): Bucket | null =>
+      bucketOf(pipelineId, statusId) as Bucket | null;
 
     // ===== Tempo por etapa (a partir do histórico de eventos) =====
     // Para cada lead, reconstrói os trechos (status, entrada, saída) usando created_at
@@ -275,7 +277,7 @@ serve(async (req) => {
         }
         for (const [status, enter, exit] of segs) {
           if (!status || exit < enter || status === "143") continue;
-          const b = stageBucket(status);
+          const b = stageBucket(l.pipeline_id, status);
           if (b && b !== "venda_ganha") { acc[b].sum += (exit - enter); acc[b].n++; }
         }
       }
@@ -327,7 +329,7 @@ serve(async (req) => {
 
     // ===== Follow-up / Tarefas =====
     const leadIdSet = new Set(leads.map((l) => String(l.kommo_id)));
-    const openLeads = leads.filter((l) => l.status !== "won" && l.status !== "lost" && !wonStageIds.has(l.status_id));
+    const openLeads = leads.filter((l) => l.status !== "lost" && !isWonLead(l));
     const leadsSemProximaAcao = openLeads.filter((l) => !l.closest_task_at).length;
 
     const taskRows = await fetchAllRows((from, to) => db.from("tasks")
@@ -360,7 +362,7 @@ serve(async (req) => {
     };
 
     const totalLeads = leads.length;
-    const wonOpps = leads.filter((l) => l.status === "won" || wonStageIds.has(l.status_id));
+    const wonOpps = leads.filter((l) => isWonLead(l));
     const lostOpps = leads.filter((l) => l.status === "lost");
     const lostLeads = lostOpps.length;
 
@@ -369,7 +371,7 @@ serve(async (req) => {
     const leadsByBucket: Record<Bucket, Array<{ id: number; name: string }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
     for (const l of leads) {
       if (l.status === "lost") continue;
-      const b = stageBucket(l.status_id);
+      const b = stageBucket(l.pipeline_id, l.status_id);
       if (b) {
         counts[b]++;
         if (leadsByBucket[b].length < 200) leadsByBucket[b].push({ id: leadsByBucket[b].length, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}` });
@@ -398,7 +400,7 @@ serve(async (req) => {
     const sellersMap = new Map<string, any>();
     for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
     for (const l of leads) {
-      const b = stageBucket(l.status_id);
+      const b = stageBucket(l.pipeline_id, l.status_id);
       if (!b) continue;
       const key = l.responsible_user_id || "__unassigned__";
       let s = sellersMap.get(key);
@@ -477,7 +479,7 @@ serve(async (req) => {
     const lostMonetary = lostOpps.reduce((a, l) => a + (Number(l.price) || 0), 0);
     const negotiatingMonetary = leads.reduce((a, l) => {
       if (l.status === "lost") return a;
-      const b = stageBucket(l.status_id);
+      const b = stageBucket(l.pipeline_id, l.status_id);
       return (b === "proposta_enviada" || b === "fechamento") ? a + (Number(l.price) || 0) : a;
     }, 0);
 
@@ -500,7 +502,7 @@ serve(async (req) => {
     const nowMs = Date.now();
     const sellerName = new Map(usersList.map((u) => [u.kommo_id, u.name]));
     for (const l of leads) {
-      if (l.status === "won" || l.status === "lost" || wonStageIds.has(l.status_id)) continue;
+      if (l.status === "lost" || isWonLead(l)) continue;
       const base = l.kommo_updated_at || l.kommo_created_at;
       if (!base) continue;
       const days = (nowMs - new Date(base).getTime()) / DAY_MS;

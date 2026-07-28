@@ -25,4 +25,24 @@ export function resolveFunnelLabel(
   return custom || defaultFunnelLabel(key);
 }
 
-export const DATE_TYPES = ["DATE", "DATETIME", "DATE_TIME", "date", "datetime", "Date", "DateTime"];
+/**
+ * Chave do `funnel_stage_mapping`. O par funil+etapa é necessário porque os status
+ * de sistema do Kommo (`142` Venda ganha, `143` Venda perdida) têm o MESMO id em
+ * todos os funis e costumam ser renomeados por funil. O formato antigo (só o id da
+ * etapa) continua sendo lido como regra global — ver `readStageBucket` e
+ * `supabase/functions/_shared/kommo-funnel.ts`.
+ */
+export function funnelStageKey(pipelineId: string, stageId: string): string {
+  return `${pipelineId}:${stageId}`;
+}
+
+/** Fase configurada para (funil, etapa): chave nova tem prioridade sobre a legada. */
+export function readStageBucket(
+  mapping: Record<string, string>,
+  pipelineId: string,
+  stageId: string,
+): string | undefined {
+  return mapping[funnelStageKey(pipelineId, stageId)] ?? mapping[stageId];
+}
+
+export const DATE_TYPES =["DATE", "DATETIME", "DATE_TIME", "date", "datetime", "Date", "DateTime"];
