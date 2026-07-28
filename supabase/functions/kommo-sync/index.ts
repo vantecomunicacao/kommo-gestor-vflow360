@@ -134,12 +134,26 @@ serve(async (req) => {
         sort: p.sort ?? null,
         is_main: !!p.is_main,
         is_archive: !!p.is_archive,
+        is_deleted: false, // veio no snapshot → vivo (ressuscita funil antes marcado)
         statuses: (p?._embedded?.statuses ?? []).map((s: any) => ({
           id: String(s.id), name: s.name, sort: s.sort, type: s.type, color: s.color,
         })),
       }));
       const { error } = await db.from("pipelines").upsert(rows, { onConflict: "workspace_id,kommo_id" });
       if (error) throw error;
+
+      // Reconciliação de exclusão: o endpoint /leads/pipelines devolve SEMPRE o
+      // catálogo completo (não é incremental), então funil que não veio foi apagado
+      // no Kommo. Soft delete p/ não perder o nome no histórico dos leads antigos.
+      // Só roda quando a busca trouxe algo — resposta vazia é falha/timeout, e
+      // marcar tudo como apagado esvaziaria os seletores do cliente.
+      const aliveIds = rows.map((r) => r.kommo_id);
+      const { error: delError } = await db.from("pipelines")
+        .update({ is_deleted: true })
+        .eq("workspace_id", workspaceId)
+        .eq("is_deleted", false)
+        .not("kommo_id", "in", `(${aliveIds.map((id) => `"${id}"`).join(",")})`);
+      if (delError) throw delError;
     }
     counts.pipelines = pipelines.length;
 

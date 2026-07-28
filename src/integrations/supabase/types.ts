@@ -423,6 +423,7 @@ export type Database = {
           created_at: string
           id: string
           is_archive: boolean
+          is_deleted: boolean
           is_main: boolean
           kommo_id: string
           name: string
@@ -435,6 +436,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_archive?: boolean
+          is_deleted?: boolean
           is_main?: boolean
           kommo_id: string
           name: string
@@ -447,6 +449,7 @@ export type Database = {
           created_at?: string
           id?: string
           is_archive?: boolean
+          is_deleted?: boolean
           is_main?: boolean
           kommo_id?: string
           name?: string

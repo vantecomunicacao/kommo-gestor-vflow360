@@ -122,6 +122,19 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-07-27 (`20260727180000_kommo_pipelines_is_deleted.sql`): adiciona coluna
+  `kommo.pipelines.is_deleted boolean default false` + índice parcial
+  `idx_kommo_pipelines_ws_alive`. Funil apagado no Kommo ficava para sempre na tabela
+  (o passo de pipelines do `kommo-sync` só fazia upsert, sem reconciliação de exclusão)
+  e aparecia nos seletores. Agora o `kommo-sync` marca `is_deleted=true` nos funis que
+  não vieram no snapshot (`/leads/pipelines` é catálogo completo; só reconcilia se a
+  resposta não veio vazia) e `false` nos que voltaram. Soft delete porque os leads
+  históricos referenciam `pipeline_id` por texto. Leitores passaram a filtrar
+  `is_archive=false AND is_deleted=false`: `kommo-dashboard`, `kommo-ai-analyze`,
+  `/relatorios`, Configurações › Dashboard (`cooling-leads` filtra só `is_deleted`,
+  pois etapa de funil arquivado ainda é referenciada por lead antigo). Aditiva; sem
+  mudança de RLS. _(APLICADA em prod 2026-07-27 via db query; 4 edges redeployadas e
+  sync do workspace "Dr. Eduardo Townsend" rodado: 8 funis mortos marcados, 7 vivos.)_
 - 2026-07-22 (`20260722130000_kommo_dashboard_analyses_pinned.sql`): adiciona coluna
   `kommo.dashboard_analyses.pinned boolean default false` — favoritar/fixar análises no topo
   do histórico. Toggle/exclusão pela edge `kommo-ai-analyze` (modos `pin`/`delete`, service role).

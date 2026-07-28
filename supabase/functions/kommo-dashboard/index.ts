@@ -117,7 +117,9 @@ serve(async (req) => {
 
     // ===== Catálogos =====
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
-      db.from("pipelines").select("kommo_id,name,statuses,is_main,sort").eq("workspace_id", workspaceId),
+      // Só funis vivos: arquivado/apagado no Kommo não entra no seletor nem no cálculo.
+      db.from("pipelines").select("kommo_id,name,statuses,is_main,sort")
+        .eq("workspace_id", workspaceId).eq("is_archive", false).eq("is_deleted", false),
       db.from("users").select("kommo_id,name,is_active").eq("workspace_id", workspaceId),
       db.from("loss_reasons").select("kommo_id,name").eq("workspace_id", workspaceId),
       db.from("dashboard_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),

@@ -75,7 +75,9 @@ export default function DashboardSettings() {
     baselineRef.current = null; // recaptura o baseline após carregar (evita "sujo" ao trocar de conta)
     try {
       const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }] = await Promise.all([
-        supabase.from("pipelines" as any).select("*").eq("workspace_id", activeWorkspace.id),
+        // Só funis vivos: arquivado/apagado no Kommo não deve aparecer p/ configurar.
+        supabase.from("pipelines" as any).select("*")
+          .eq("workspace_id", activeWorkspace.id).eq("is_archive", false).eq("is_deleted", false),
         supabase.from("custom_fields" as any).select("id,kommo_id,name,code,field_type,entity_type").eq("workspace_id", activeWorkspace.id),
         supabase.from("dashboard_settings" as any).select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
         supabase.from("sync_status" as any).select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),

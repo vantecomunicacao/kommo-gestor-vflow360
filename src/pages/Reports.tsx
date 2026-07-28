@@ -155,7 +155,9 @@ export default function Reports() {
     queryKey: ["report-pipelines", wsId],
     enabled: !!wsId,
     queryFn: async () => {
-      const { data } = await supabase.from("pipelines").select("kommo_id,name").eq("workspace_id", wsId!);
+      // Só funis vivos no seletor (arquivado/apagado no Kommo fica de fora).
+      const { data } = await supabase.from("pipelines").select("kommo_id,name")
+        .eq("workspace_id", wsId!).eq("is_archive", false).eq("is_deleted", false);
       return (data || []) as { kommo_id: string; name: string }[];
     },
   });

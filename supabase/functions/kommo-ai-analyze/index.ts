@@ -191,7 +191,8 @@ serve(async (req) => {
 
     // Catálogo de funis (para a IA mapear nome → kommo_id e a UI montar o dropdown).
     const { data: pipeRows } = await dbKommo
-      .from("pipelines").select("kommo_id, name, is_main, sort").eq("workspace_id", workspaceId);
+      .from("pipelines").select("kommo_id, name, is_main, sort")
+      .eq("workspace_id", workspaceId).eq("is_archive", false).eq("is_deleted", false);
     const pipelines = (pipeRows || []) as Array<{ kommo_id: string; name: string; is_main?: boolean; sort?: number }>;
     const pipelineList = pipelines.map((p) => `- ${p.name} (id: ${p.kommo_id})`).join("\n") || "(nenhum funil cadastrado)";
 
