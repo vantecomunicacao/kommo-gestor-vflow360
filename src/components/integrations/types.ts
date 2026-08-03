@@ -30,5 +30,7 @@ export interface KommoUserOption {
 export interface KommoSync {
   last_sync_at?: string | null;
   last_sync_status?: string | null;
+  last_sync_error?: string | null;
+  last_sync_warning?: string | null;
   leads_count?: number | null;
 }

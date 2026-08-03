@@ -1,4 +1,4 @@
-import { CheckCircle, Clock, Download, Link2, Loader2, Sparkles, Users, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle, Clock, Download, Link2, Loader2, Sparkles, Users, XCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -123,6 +123,8 @@ export const KommoSection = ({
     ? `há ${formatDistanceToNow(new Date(sync.last_sync_at), { locale: ptBR })}`
     : "ainda não sincronizado";
   const leadsCount = typeof sync?.leads_count === "number" ? sync.leads_count : null;
+  const syncFailed = sync?.last_sync_status === "error" && !!sync?.last_sync_error;
+  const syncWarning = !syncFailed ? sync?.last_sync_warning : null;
 
   return (
     <motion.div
@@ -208,6 +210,26 @@ export const KommoSection = ({
               </span>
             )}
           </div>
+
+          {syncFailed && (
+            <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 flex items-start gap-2 text-sm text-destructive">
+              <XCircle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">A última sincronização falhou</p>
+                <p className="text-destructive/80">{sync?.last_sync_error}</p>
+              </div>
+            </div>
+          )}
+
+          {syncWarning && (
+            <div className="rounded-lg border border-warning/20 bg-warning/10 p-3 flex items-start gap-2 text-sm text-warning-ink">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">Sincronização concluída com ressalvas</p>
+                <p className="opacity-90">{syncWarning}</p>
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-2">
             {AI_COPILOT && (

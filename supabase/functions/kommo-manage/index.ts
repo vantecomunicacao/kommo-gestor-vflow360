@@ -148,7 +148,7 @@ serve(async (req) => {
       const { data: intg } = await db.from("integrations")
         .select("id,subdomain,account_id,status,updated_at").eq("workspace_id", workspaceId).eq("type", "kommo").maybeSingle();
       const { data: sync } = await db.from("sync_status")
-        .select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", workspaceId).maybeSingle();
+        .select("last_sync_at,last_sync_status,last_sync_error,last_sync_warning,leads_count").eq("workspace_id", workspaceId).maybeSingle();
       return new Response(JSON.stringify({
         success: true,
         connected: intg?.status === "connected",

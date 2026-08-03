@@ -123,6 +123,7 @@ serve(async (req) => {
     const counts: Record<string, number> = {};
     let stageEventsError: string | null = null;
     let tasksError: string | null = null;
+    const warnings: string[] = [];
 
     // === 1. Pipelines (+ statuses embutidos) ===
     const pipelines = await kommoFetchAll(creds, "/leads/pipelines", "pipelines", { maxPages: 5 });
@@ -201,7 +202,8 @@ serve(async (req) => {
     counts.custom_fields = cfRows.length;
 
     // === 5. Contacts (com phone/email extraídos dos custom fields) ===
-    const contacts = await kommoFetchAll(creds, `/contacts?limit=250${contactsSince}`, "contacts", { maxPages: 40 });
+    const CONTACTS_MAX_PAGES = 100, CONTACTS_PAGE = 250;
+    const contacts = await kommoFetchAll(creds, `/contacts?limit=${CONTACTS_PAGE}${contactsSince}`, "contacts", { maxPages: CONTACTS_MAX_PAGES });
     if (contacts.length) {
       const rows = contacts.map((c: any) => {
         const { phone, email } = extractContactPhoneEmail(c.custom_fields_values);
@@ -219,6 +221,12 @@ serve(async (req) => {
       await upsertChunked(db, "contacts", rows, "workspace_id,kommo_id");
     }
     counts.contacts = contacts.length;
+    const hitContactsPageCap = contacts.length >= CONTACTS_MAX_PAGES * CONTACTS_PAGE;
+    if (hitContactsPageCap) {
+      warnings.push(
+        `contacts: atingiu o teto de ${CONTACTS_MAX_PAGES * CONTACTS_PAGE} registros — pode haver contatos não sincronizados`,
+      );
+    }
 
     // === 6. Leads (entidade central do dashboard) ===
     const LEADS_MAX_PAGES = 60, LEADS_PAGE = 250;
@@ -260,6 +268,11 @@ serve(async (req) => {
     // dry_run: faz a varredura e reporta o que SERIA marcado, sem gravar nada.
     const dryRun = body.dry_run === true;
     const hitPageCap = leads.length >= LEADS_MAX_PAGES * LEADS_PAGE;
+    if (hitPageCap) {
+      warnings.push(
+        `leads: atingiu o teto de ${LEADS_MAX_PAGES * LEADS_PAGE} registros — pode haver leads não sincronizados`,
+      );
+    }
     if (leadsSince === "" && !hitPageCap) {
       const seen = new Set(leads.map((l: any) => String(l.id)));
       const { data: localLeads } = await db.from("leads")
@@ -345,11 +358,15 @@ serve(async (req) => {
       .select("kommo_id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId).neq("is_deleted", true);
 
+    if (stageEventsError) warnings.push(`eventos de etapa: ${stageEventsError}`);
+    if (tasksError) warnings.push(`tarefas: ${tasksError}`);
+
     await db.from("sync_status").upsert({
       workspace_id: workspaceId,
       is_running: false,
       last_sync_status: "success",
       last_sync_error: null,
+      last_sync_warning: warnings.length ? warnings.join(" | ").slice(0, 1000) : null,
       last_sync_at: new Date().toISOString(),
       last_sync_duration_ms: Date.now() - startTs,
       leads_count: totalLeadsCount ?? counts.leads ?? 0,
@@ -372,7 +389,7 @@ serve(async (req) => {
     await db.from("sync_watermarks").upsert(wmUpdate, { onConflict: "workspace_id" });
 
     return new Response(
-      JSON.stringify({ success: true, workspace_id: workspaceId, counts, stage_events_error: stageEventsError, tasks_error: tasksError, duration_ms: Date.now() - startTs }),
+      JSON.stringify({ success: true, workspace_id: workspaceId, counts, warnings, stage_events_error: stageEventsError, tasks_error: tasksError, duration_ms: Date.now() - startTs }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
@@ -391,6 +408,7 @@ serve(async (req) => {
           workspace_id: workspaceId, is_running: false, last_sync_status: "error", last_sync_error: msg.slice(0, 1000),
         }, { onConflict: "workspace_id" });
       } catch { /* ignora falha ao registrar o erro */ }
+      await notifySyncFailure(workspaceId, msg);
     }
     return new Response(
       JSON.stringify({ success: false, error: msg }),
@@ -398,6 +416,29 @@ serve(async (req) => {
     );
   }
 });
+
+// Aviso best-effort de falha real de sync (não dispara em erro de autorização —
+// isso é chamador sem permissão, não uma sincronização quebrada). Reusa o mesmo
+// webhook n8n que o frontend já usa em errorReporter.ts; nunca lança.
+async function notifySyncFailure(workspaceId: string, message: string): Promise<void> {
+  const webhookUrl = Deno.env.get("ERROR_WEBHOOK_URL") || "https://n8n-webhook.boliqf.easypanel.host/webhook/erro-lovable";
+  try {
+    await fetch(webhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project: "VFlowKommo",
+        level: "error",
+        source: "edge:kommo-sync",
+        message: `Sync do Kommo falhou (workspace ${workspaceId}): ${message}`,
+        workspace_id: workspaceId,
+        timestamp: new Date().toISOString(),
+      }),
+    });
+  } catch {
+    // nunca deixa a notificação derrubar a resposta do sync
+  }
+}
 
 /** Serializa Error, PostgrestError ({message,code,details,hint}) ou objeto qualquer. */
 function serializeErr(e: unknown): string {
