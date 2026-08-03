@@ -40,13 +40,18 @@ import DashboardAiAnalysis from "@/components/dashboard/DashboardAiAnalysis";
 type SavedFilters = {
   from?: string;
   to?: string;
-  pipelineId?: string | null;
+  pipelineId?: string | null; // legado (seleção única)
+  pipelineIds?: string[];
   stageId?: string | null; // legado (seleção única)
   stageIds?: string[];
   sellerId?: string | null; // legado (seleção única)
   sellerIds?: string[];
-  utmMedium?: string | null;
-  utmCampaign?: string | null;
+  utmMedium?: string | null; // legado (seleção única)
+  utmMediums?: string[];
+  utmCampaign?: string | null; // legado (seleção única)
+  utmCampaigns?: string[];
+  origin?: string | null; // legado (seleção única)
+  origins?: string[];
   dateBasis?: DateBasis;
 };
 
@@ -60,11 +65,12 @@ export default function Dashboard() {
     from: subDays(new Date(), 7),
     to: subDays(new Date(), 1),
   });
-  const [selectedPipelineId, setSelectedPipelineId] = useState<string | null>(null);
+  const [selectedPipelineIds, setSelectedPipelineIds] = useState<string[]>([]);
   const [selectedStageIds, setSelectedStageIds] = useState<string[]>([]);
   const [selectedSellerIds, setSelectedSellerIds] = useState<string[]>([]);
-  const [selectedUtmMedium, setSelectedUtmMedium] = useState<string | null>(null);
-  const [selectedUtmCampaign, setSelectedUtmCampaign] = useState<string | null>(null);
+  const [selectedUtmMediums, setSelectedUtmMediums] = useState<string[]>([]);
+  const [selectedUtmCampaigns, setSelectedUtmCampaigns] = useState<string[]>([]);
+  const [selectedOrigins, setSelectedOrigins] = useState<string[]>([]);
   const [dateBasis, setDateBasis] = useState<DateBasis>("criacao");
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({});
 
@@ -82,14 +88,13 @@ export default function Dashboard() {
         .eq("workspace_id", activeWorkspace.id)
         .maybeSingle();
       if (cancelled) return;
-      // Vários funis marcados = escopo agregado (a edge function já restringe a eles);
-      // aí nenhum vem pré-selecionado no filtro. Um só = abre direto nele.
-      const defaultIds = settings?.default_pipeline_ids || [];
-      const defaultPipeline = defaultIds.length === 1 ? defaultIds[0] : null;
+      // Funil(is) padrão do workspace — pré-selecionados na abertura (o filtro do
+      // Dashboard aceita múltiplos funis, igual esse campo de Configurações).
+      const defaultPipelineIds: string[] = settings?.default_pipeline_ids || [];
       setStageLabels(((settings as any)?.funnel_stage_labels as Record<string, string>) || {});
 
       // 1) Restaurar filtros salvos (período, vendedores, UTM…)
-      let restoredPipeline: string | null = null;
+      let restoredPipelineIds: string[] = [];
       let restored = false;
       try {
         const raw = localStorage.getItem(filtersStorageKey(activeWorkspace.id));
@@ -100,11 +105,12 @@ export default function Dashboard() {
               ? { from: new Date(saved.from), to: saved.to ? new Date(saved.to) : undefined }
               : { from: subDays(new Date(), 7), to: subDays(new Date(), 1) }
           );
-          restoredPipeline = saved.pipelineId ?? null;
+          restoredPipelineIds = saved.pipelineIds ?? (saved.pipelineId ? [saved.pipelineId] : []);
           setSelectedStageIds(saved.stageIds ?? (saved.stageId ? [saved.stageId] : []));
           setSelectedSellerIds(saved.sellerIds ?? (saved.sellerId ? [saved.sellerId] : []));
-          setSelectedUtmMedium(saved.utmMedium ?? null);
-          setSelectedUtmCampaign(saved.utmCampaign ?? null);
+          setSelectedUtmMediums(saved.utmMediums ?? (saved.utmMedium ? [saved.utmMedium] : []));
+          setSelectedUtmCampaigns(saved.utmCampaigns ?? (saved.utmCampaign ? [saved.utmCampaign] : []));
+          setSelectedOrigins(saved.origins ?? (saved.origin ? [saved.origin] : []));
           setDateBasis(saved.dateBasis === "fechamento" ? "fechamento" : "criacao");
           restored = true;
         }
@@ -116,19 +122,22 @@ export default function Dashboard() {
         // Reset padrão
         setDateRange({ from: subDays(new Date(), 7), to: subDays(new Date(), 1) });
         setSelectedSellerIds([]);
-        setSelectedUtmMedium(null);
-        setSelectedUtmCampaign(null);
+        setSelectedUtmMediums([]);
+        setSelectedUtmCampaigns([]);
+        setSelectedOrigins([]);
         setSelectedStageIds([]);
         setDateBasis("criacao");
       }
 
-      // 2) Pipeline: o funil padrão configurado vence na abertura. Se as etapas salvas
-      //    eram de outro funil, limpa (etapas são específicas de cada funil).
-      if (defaultPipeline) {
-        setSelectedPipelineId(defaultPipeline);
-        if (restored && restoredPipeline !== defaultPipeline) setSelectedStageIds([]);
+      // 2) Pipeline: o(s) funil(is) padrão configurado(s) vencem na abertura. Se as
+      //    etapas salvas eram de outro funil, limpa (etapas são específicas de um funil).
+      if (defaultPipelineIds.length) {
+        setSelectedPipelineIds(defaultPipelineIds);
+        const sameSelection = restoredPipelineIds.length === defaultPipelineIds.length
+          && restoredPipelineIds.every((id) => defaultPipelineIds.includes(id));
+        if (restored && !sameSelection) setSelectedStageIds([]);
       } else {
-        setSelectedPipelineId(restored ? restoredPipeline : null);
+        setSelectedPipelineIds(restored ? restoredPipelineIds : []);
       }
 
       if (!cancelled) setHydrated(true);
@@ -143,11 +152,12 @@ export default function Dashboard() {
     const payload: SavedFilters = {
       from: dateRange?.from ? dateRange.from.toISOString() : undefined,
       to: dateRange?.to ? dateRange.to.toISOString() : undefined,
-      pipelineId: selectedPipelineId,
+      pipelineIds: selectedPipelineIds,
       stageIds: selectedStageIds,
       sellerIds: selectedSellerIds,
-      utmMedium: selectedUtmMedium,
-      utmCampaign: selectedUtmCampaign,
+      utmMediums: selectedUtmMediums,
+      utmCampaigns: selectedUtmCampaigns,
+      origins: selectedOrigins,
       dateBasis,
     };
     try {
@@ -155,7 +165,7 @@ export default function Dashboard() {
     } catch {
       // ignora quota cheia
     }
-  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign, dateBasis]);
+  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, dateBasis]);
 
 
   const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 7)), [dateRange?.from]);
@@ -163,14 +173,15 @@ export default function Dashboard() {
 
   const filters: DashboardFilters = useMemo(() => ({
     startDate, endDate,
-    pipelineId: selectedPipelineId,
+    pipelineIds: selectedPipelineIds,
     stageIds: selectedStageIds,
     sellerIds: selectedSellerIds,
-    utmMedium: selectedUtmMedium,
-    utmCampaign: selectedUtmCampaign,
+    utmMediums: selectedUtmMediums,
+    utmCampaigns: selectedUtmCampaigns,
+    origins: selectedOrigins,
     workspaceId: activeWorkspace?.id || null,
     dateBasis,
-  }), [startDate, endDate, selectedPipelineId, selectedStageIds, selectedSellerIds, selectedUtmMedium, selectedUtmCampaign, activeWorkspace?.id, dateBasis]);
+  }), [startDate, endDate, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, activeWorkspace?.id, dateBasis]);
 
   const periodDays = useMemo(() => differenceInDays(endDate, startDate) + 1, [startDate, endDate]);
   const prevFilters: DashboardFilters = useMemo(() => ({
@@ -258,18 +269,21 @@ export default function Dashboard() {
         isLoading={isLoading}
         pipelines={data.pipelines}
         users={data.users}
-        selectedPipelineId={selectedPipelineId}
+        selectedPipelineIds={selectedPipelineIds}
         selectedStageIds={selectedStageIds}
         selectedSellerIds={selectedSellerIds}
         utmMediumValues={data.utmMediumValues || []}
         utmCampaignValues={data.utmCampaignValues || []}
-        selectedUtmMedium={selectedUtmMedium}
-        selectedUtmCampaign={selectedUtmCampaign}
-        onPipelineChange={(id) => { setSelectedPipelineId(id); setSelectedStageIds([]); }}
+        originValues={data.originValues || []}
+        selectedUtmMediums={selectedUtmMediums}
+        selectedUtmCampaigns={selectedUtmCampaigns}
+        selectedOrigins={selectedOrigins}
+        onPipelineIdsChange={(ids) => { setSelectedPipelineIds(ids); setSelectedStageIds([]); }}
         onStageIdsChange={setSelectedStageIds}
         onSellerIdsChange={setSelectedSellerIds}
-        onUtmMediumChange={setSelectedUtmMedium}
-        onUtmCampaignChange={setSelectedUtmCampaign}
+        onUtmMediumsChange={setSelectedUtmMediums}
+        onUtmCampaignsChange={setSelectedUtmCampaigns}
+        onOriginsChange={setSelectedOrigins}
         cachedAt={cachedAt}
       />
 

@@ -112,9 +112,14 @@ serve(async (req) => {
     const dateBasis: "criacao" | "fechamento" = payload.dateBasis === "fechamento" ? "fechamento" : "criacao";
     const additionalStartDate: string | null = payload.additionalStartDate || null;
     const additionalEndDate: string | null = payload.additionalEndDate || null;
-    const filterPipelineId: string | null = payload.pipelineId || null;
+    const rawFilterPipelineIds: string[] = Array.isArray(payload.pipelineId)
+      ? payload.pipelineId.filter((s: any) => typeof s === "string" && s)
+      : (typeof payload.pipelineId === "string" && payload.pipelineId ? [payload.pipelineId] : []);
     const filterStageIds: string[] = Array.isArray(payload.stageIds) ? payload.stageIds.filter((s: any) => typeof s === "string" && s) : [];
     const filterUserIds: string[] = Array.isArray(payload.sellerIds) ? payload.sellerIds.filter((s: any) => typeof s === "string" && s) : [];
+    const filterUtmMediums: string[] = Array.isArray(payload.utmMedium) ? payload.utmMedium.filter((s: any) => typeof s === "string" && s) : [];
+    const filterUtmCampaigns: string[] = Array.isArray(payload.utmCampaign) ? payload.utmCampaign.filter((s: any) => typeof s === "string" && s) : [];
+    const filterOrigins: string[] = Array.isArray(payload.origin) ? payload.origin.filter((s: any) => typeof s === "string" && s) : [];
 
     // ===== Catálogos =====
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
@@ -128,6 +133,11 @@ serve(async (req) => {
     ]);
 
     const allPipelines = (pipelinesRows || []) as Array<{ kommo_id: string; name: string; statuses: any; is_main: boolean; sort: number }>;
+    // Funil arquivado/apagado (fora de `allPipelines`, que já só traz vivos) não filtra
+    // leads — evita que um pipelineId salvo em localStorage de antes da migration
+    // is_deleted volte a vazar dado de um funil morto.
+    const allPipelineIds = new Set(allPipelines.map((p) => p.kommo_id));
+    const filterPipelineIds: string[] = rawFilterPipelineIds.filter((id) => allPipelineIds.has(id));
     const usersList = (usersRows || []) as Array<{ kommo_id: string; name: string; is_active?: boolean }>;
     // Só vendedores ativos alimentam o filtro e o seed da performance; o mapa de
     // nomes (sellerNameMap) segue completo p/ resolver quem já teve venda mas foi desativado.
@@ -154,9 +164,18 @@ serve(async (req) => {
     const additionalDateConfigured = isClosedSentinel || !!additionalDateDef;
     const additionalActive = additionalDateConfigured && !!(additionalStartDate || additionalEndDate);
 
+    // Field ids de UTM/Origem (usados tanto para filtrar leads quanto para as distribuições
+    // abaixo). "Origem do lead" tem prioridade sobre UTM Source — ver `getOrigin`.
+    const utmMediumField = settings?.utm_medium_field_id || "UTM_MEDIUM";
+    const utmCampaignField = settings?.utm_campaign_field_id || "UTM_CAMPAIGN";
+    const utmSourceField = settings?.utm_source_field_id || "UTM_SOURCE";
+    const originFieldName = settings?.origin_field_name || null; // ex: code de "Origem do lead"
+    const getOrigin = (l: any): string | null =>
+      extractCf(l.custom_fields, originFieldName) || extractCf(l.custom_fields, utmSourceField) || l.source || null;
+
     const defaultPipelineIds: string[] = Array.isArray(settings?.default_pipeline_ids) ? settings.default_pipeline_ids : [];
-    const activePipelines = filterPipelineId
-      ? allPipelines.filter((p) => p.kommo_id === filterPipelineId)
+    const activePipelines = filterPipelineIds.length
+      ? allPipelines.filter((p) => filterPipelineIds.includes(p.kommo_id))
       : (defaultPipelineIds.length ? allPipelines.filter((p) => defaultPipelineIds.includes(p.kommo_id)) : allPipelines);
     const activeStages: KommoStatus[] = activePipelines.flatMap((p) => (Array.isArray(p.statuses) ? p.statuses : []) as KommoStatus[]);
     const activePipelineIds = new Set(activePipelines.map((p) => p.kommo_id));
@@ -185,7 +204,8 @@ serve(async (req) => {
       let q = db.from("leads")
         .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at")
         .eq("workspace_id", workspaceId).eq("is_deleted", false);
-      if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
+      if (filterPipelineIds.length === 1) q = q.eq("pipeline_id", filterPipelineIds[0]);
+      else if (filterPipelineIds.length > 1) q = q.in("pipeline_id", filterPipelineIds);
       if (filterStageIds.length === 1) q = q.eq("status_id", filterStageIds[0]);
       else if (filterStageIds.length > 1) q = q.in("status_id", filterStageIds);
       if (filterUserIds.length === 1) q = q.eq("responsible_user_id", filterUserIds[0]);
@@ -203,9 +223,15 @@ serve(async (req) => {
       return q.order("kommo_id").range(from, to);
     });
     let leads = leadsRows as any[];
-    if (!filterPipelineId && activePipelineIds.size > 0) {
+    if (!filterPipelineIds.length && activePipelineIds.size > 0) {
       leads = leads.filter((l) => !l.pipeline_id || activePipelineIds.has(l.pipeline_id));
     }
+    // Snapshot ANTES de aplicar UTM Medium/Campanha/Origem: essas 3 listas de opções
+    // (dropdowns) não podem encolher conforme o próprio filtro é aplicado.
+    const leadsForFilterOptions = leads;
+    if (filterUtmMediums.length) leads = leads.filter((l) => filterUtmMediums.includes(extractCf(l.custom_fields, utmMediumField) || ""));
+    if (filterUtmCampaigns.length) leads = leads.filter((l) => filterUtmCampaigns.includes(extractCf(l.custom_fields, utmCampaignField) || ""));
+    if (filterOrigins.length) leads = leads.filter((l) => filterOrigins.includes(getOrigin(l) || ""));
 
     // ===== Filtro ADITIVO por data adicional (ex.: "Data da venda") =====
     // Como o SQL trouxe os leads SEM restrição de criação (additionalActive), aqui
@@ -301,7 +327,7 @@ serve(async (req) => {
     const velFrom = startDate ? new Date(startDate).getTime() : -Infinity;
     const velTo = endDate ? new Date(endDate).getTime() : Infinity;
     const pipeOk = (pid: string | null) =>
-      filterPipelineId ? pid === filterPipelineId : (activePipelineIds.size === 0 || !pid || activePipelineIds.has(pid));
+      filterPipelineIds.length ? (!!pid && filterPipelineIds.includes(pid)) : (activePipelineIds.size === 0 || !pid || activePipelineIds.has(pid));
     const movedLeads = new Set<string>();
     const advancedLeads = new Set<string>();
     let movimentacoes = 0, velGanhos = 0, velPerdidos = 0;
@@ -418,15 +444,7 @@ serve(async (req) => {
     }
     const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha > 0);
 
-    // ===== Origem / UTM (via field_code; defaults UTM_SOURCE/MEDIUM/CAMPAIGN) =====
-    const utmSourceField = settings?.utm_source_field_id || "UTM_SOURCE";
-    const utmMediumField = settings?.utm_medium_field_id || "UTM_MEDIUM";
-    const utmCampaignField = settings?.utm_campaign_field_id || "UTM_CAMPAIGN";
-    const originFieldName = settings?.origin_field_name || null; // ex: code de "Origem do lead"
-
-    const getOrigin = (l: any): string | null =>
-      extractCf(l.custom_fields, originFieldName) || extractCf(l.custom_fields, utmSourceField) || l.source || null;
-
+    // ===== Origem / UTM =====
     const buildDist = (getter: (l: any) => string | null, subset: any[]) => {
       const m = new Map<string, number>(); let filled = 0;
       for (const l of subset) { const v = getter(l); if (v) { filled++; m.set(v, (m.get(v) || 0) + 1); } }
@@ -435,8 +453,12 @@ serve(async (req) => {
     };
     const origem = buildDist(getOrigin, leads);
     const wonOrigem = buildDist(getOrigin, wonOpps);
-    const utmMedium = buildDist((l) => extractCf(l.custom_fields, utmMediumField), leads);
-    const utmCampaign = buildDist((l) => extractCf(l.custom_fields, utmCampaignField), leads);
+    // Listas de opções dos dropdowns (Tipo de origem/Campanha/Origem): calculadas sobre
+    // `leadsForFilterOptions` (ANTES do próprio filtro ser aplicado), senão escolher um
+    // valor faria a lista de opções encolher pra só ele mesmo na consulta seguinte.
+    const utmMedium = buildDist((l) => extractCf(l.custom_fields, utmMediumField), leadsForFilterOptions);
+    const utmCampaign = buildDist((l) => extractCf(l.custom_fields, utmCampaignField), leadsForFilterOptions);
+    const originOptions = buildDist(getOrigin, leadsForFilterOptions);
 
     // ===== Daily leads (7 dias) — agrupado por dia em horário de Brasília =====
     // O kommo_created_at é UTC; agrupar por UTC jogava leads da noite (BRT) para o
@@ -572,6 +594,7 @@ serve(async (req) => {
       // utm{Medium,Campaign}Values. (Duplicatas legadas removidas — 2026-07-21.)
       utmMediumValues: utmMedium.distribution.map((d) => d.name),
       utmCampaignValues: utmCampaign.distribution.map((d) => d.name),
+      originValues: originOptions.distribution.map((d) => d.name),
       leadsOriginDistribution: origem.distribution, leadsOriginFillRate: origem.fillRate,
       wonOriginDistribution: wonOrigem.distribution, wonOriginFillRate: wonOrigem.fillRate,
       utmConfigured: { source: true, medium: true, campaign: true, content: true, term: true },

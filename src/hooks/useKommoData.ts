@@ -99,6 +99,7 @@ export interface DashboardData {
   sellers: Seller[];
   utmMediumValues: string[];
   utmCampaignValues: string[];
+  originValues: string[];
   leadsOriginDistribution: LeadOrigin[];
   leadsOriginFillRate: number;
   wonOriginDistribution: LeadOrigin[];
@@ -130,11 +131,12 @@ export interface DashboardData {
 export interface DashboardFilters {
   startDate: Date;
   endDate: Date;
-  pipelineId: string | null;
+  pipelineIds: string[];
   stageIds: string[];
   sellerIds: string[];
-  utmMedium: string | null;
-  utmCampaign: string | null;
+  utmMediums: string[];
+  utmCampaigns: string[];
+  origins: string[];
   workspaceId: string | null;
   additionalStartDate?: Date | null;
   additionalEndDate?: Date | null;
@@ -167,11 +169,12 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.workspaceId,
       filters.startDate.getTime(),
       filters.endDate.getTime(),
-      filters.pipelineId,
+      [...filters.pipelineIds].sort().join(","),
       [...filters.stageIds].sort().join(","),
       [...filters.sellerIds].sort().join(","),
-      filters.utmMedium,
-      filters.utmCampaign,
+      [...filters.utmMediums].sort().join(","),
+      [...filters.utmCampaigns].sort().join(","),
+      [...filters.origins].sort().join(","),
       filters.additionalStartDate?.getTime() ?? null,
       filters.additionalEndDate?.getTime() ?? null,
       filters.dateBasis ?? "criacao",
@@ -180,11 +183,12 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.workspaceId,
       filters.startDate,
       filters.endDate,
-      filters.pipelineId,
+      filters.pipelineIds,
       filters.stageIds,
       filters.sellerIds,
-      filters.utmMedium,
-      filters.utmCampaign,
+      filters.utmMediums,
+      filters.utmCampaigns,
+      filters.origins,
       filters.additionalStartDate,
       filters.additionalEndDate,
       filters.dateBasis,
@@ -199,11 +203,12 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
           workspace_id: filters.workspaceId,
           startDate: filters.startDate.toISOString(),
           endDate: filters.endDate.toISOString(),
-          pipelineId: filters.pipelineId,
+          pipelineId: filters.pipelineIds,
           stageIds: filters.stageIds,
           sellerIds: filters.sellerIds,
-          utmMedium: filters.utmMedium,
-          utmCampaign: filters.utmCampaign,
+          utmMedium: filters.utmMediums,
+          utmCampaign: filters.utmCampaigns,
+          origin: filters.origins,
           additionalStartDate: filters.additionalStartDate ? filters.additionalStartDate.toISOString() : null,
           additionalEndDate: filters.additionalEndDate ? filters.additionalEndDate.toISOString() : null,
           dateBasis: filters.dateBasis ?? "criacao",
@@ -212,6 +217,14 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       if (functionError) throw new Error(functionError.message);
       const errMaybe = (responseData as { error?: string } | null)?.error;
       if (errMaybe) throw new Error(errMaybe);
+      // REMOVER: mock temporário só pra teste visual local dos filtros de UTM/Origem
+      // (não grava nada em produção — só preenche as listas de opções se vierem vazias).
+      if (import.meta.env.DEV) {
+        const d = responseData as DashboardData;
+        if (!d.utmMediumValues?.length) d.utmMediumValues = ["cpc", "social", "organic", "email"];
+        if (!d.utmCampaignValues?.length) d.utmCampaignValues = ["black-friday-2026", "lancamento-x", "remarketing-q1"];
+        if (!d.originValues?.length) d.originValues = ["Google Ads", "Instagram", "Indicação", "WhatsApp"];
+      }
       return responseData as DashboardData;
     },
     enabled: enabled && !!filters.workspaceId,

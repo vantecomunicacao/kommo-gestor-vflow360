@@ -10,7 +10,8 @@ import { formatBRL } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { FilterSelect, MultiFilterSelect } from "@/components/dashboard/Header";
+import { FilterSelect } from "@/components/filters/FilterSelect";
+import { MultiFilterSelect } from "@/components/filters/MultiFilterSelect";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AxisTabs } from "@/components/AxisTabs";
@@ -109,7 +110,9 @@ export default function Reports() {
   const [visibleIds, setVisibleIds] = useState<string[]>(DEFAULT_VISIBLE.fechamento);
   const [chartMetric, setChartMetric] = useState<string>("wonRevenue");
   const [chartMetric2, setChartMetric2] = useState<string>(""); // 2ª métrica (eixo direito), opcional
-  const [pipelineId, setPipelineId] = useState<string>("__all__");
+  // null = todos os funis (mesmo sentinel que o Dashboard usa). "__all__" só existe
+  // como valor gravado em `report_snapshots.pipeline_id` (contrato do useReportSnapshots).
+  const [pipelineId, setPipelineId] = useState<string | null>(null);
   const [sellerIds, setSellerIds] = useState<string[]>([]); // vazio = todos os vendedores
   const [hoveredCol, setHoveredCol] = useState<number | null>(null); // coluna (mês) em foco
   const [metricOrder, setMetricOrder] = useState<string[]>([]); // ordem custom das métricas (arrastar)
@@ -134,7 +137,8 @@ export default function Reports() {
         if (Array.isArray(v.visibleIds)) setVisibleIds(v.visibleIds);
         if (typeof v.chartMetric === "string") setChartMetric(v.chartMetric);
         if (typeof v.chartMetric2 === "string") setChartMetric2(v.chartMetric2);
-        if (typeof v.pipelineId === "string") setPipelineId(v.pipelineId);
+        // Compatível com visões salvas antigas ("__all__" = nenhum funil selecionado).
+        if (typeof v.pipelineId === "string") setPipelineId(v.pipelineId === "__all__" ? null : v.pipelineId);
         if (Array.isArray(v.sellerIds)) setSellerIds(v.sellerIds);
         if (Array.isArray(v.metricOrder)) setMetricOrder(v.metricOrder);
       }
@@ -211,7 +215,7 @@ export default function Reports() {
     }
   };
 
-  const { months: rawMonths, isLoading, error } = useReportSnapshots(wsId, dateBasis, pipelineId);
+  const { months: rawMonths, isLoading, error } = useReportSnapshots(wsId, dateBasis, pipelineId ?? "__all__");
 
   // Momento da foto atual (todas as linhas de um recompute compartilham o frozen_at).
   const lastFrozen = useMemo(() => {
@@ -382,7 +386,7 @@ export default function Reports() {
     setMetricOrder([]);
     setChartMetric("wonRevenue");
     setChartMetric2("");
-    setPipelineId("__all__");
+    setPipelineId(null);
     setSellerIds([]);
     toast.success("Visualização restaurada ao padrão");
   };
@@ -429,8 +433,8 @@ export default function Reports() {
           <div className="flex flex-col gap-1 shrink-0">
             <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80 px-0.5">Funil de vendas</span>
             <FilterSelect
-              value={pipelineId === "__all__" ? null : pipelineId}
-              onChange={(v) => setPipelineId(v ?? "__all__")}
+              value={pipelineId}
+              onChange={setPipelineId}
               placeholder="Funil"
               icon={GitBranch}
               options={pipelines.map((p) => ({ id: p.kommo_id, name: p.name }))}
@@ -508,7 +512,7 @@ export default function Reports() {
           <p className="text-sm text-muted-foreground mt-0.5">{activeWorkspace.name}</p>
           <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground max-w-2xl">
             <span><strong className="text-foreground font-medium">Período:</strong> {shown.length > 0 ? `${monthLabel(shown[0].month)} – ${monthLabel(shown[shown.length - 1].month)} (${rangeMonths} meses)` : "—"}</span>
-            <span><strong className="text-foreground font-medium">Funil:</strong> {pipelineId === "__all__" ? "Todos os funis" : (pipelineName.get(pipelineId) || pipelineId)}</span>
+            <span><strong className="text-foreground font-medium">Funil:</strong> {pipelineId ? (pipelineName.get(pipelineId) || pipelineId) : "Todos os funis"}</span>
             <span><strong className="text-foreground font-medium">Vendedor:</strong> {sellerIds.length === 0 ? "Todos" : sellerIds.map((id) => sellerOptions.find((s) => s.id === id)?.name || id).join(", ")}</span>
             <span><strong className="text-foreground font-medium">Emitido em:</strong> {format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
           </div>

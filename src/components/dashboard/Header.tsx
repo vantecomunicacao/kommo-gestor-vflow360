@@ -1,9 +1,8 @@
-import { CalendarDays, Filter, Users, GitBranch, ChevronDown, Layers, X, Megaphone, Target, Check } from "lucide-react";
+import { CalendarDays, Filter, Users, GitBranch, ChevronDown, Layers, X, Megaphone, Target, Check, Compass } from "lucide-react";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -12,6 +11,8 @@ import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
 import { Pipeline, User } from "@/hooks/useKommoData";
 import { cn } from "@/lib/utils";
+import { MultiFilterSelect } from "@/components/filters/MultiFilterSelect";
+import { countActiveFilters } from "@/lib/dashboard-filters";
 
 interface HeaderProps {
   dateRange: DateRange | undefined;
@@ -20,18 +21,21 @@ interface HeaderProps {
   isLoading?: boolean;
   pipelines: Pipeline[];
   users: User[];
-  selectedPipelineId: string | null;
+  selectedPipelineIds: string[];
   selectedStageIds?: string[];
   selectedSellerIds?: string[];
   utmMediumValues?: string[];
   utmCampaignValues?: string[];
-  selectedUtmMedium?: string | null;
-  selectedUtmCampaign?: string | null;
-  onPipelineChange: (id: string | null) => void;
+  originValues?: string[];
+  selectedUtmMediums?: string[];
+  selectedUtmCampaigns?: string[];
+  selectedOrigins?: string[];
+  onPipelineIdsChange: (ids: string[]) => void;
   onStageIdsChange?: (ids: string[]) => void;
   onSellerIdsChange?: (ids: string[]) => void;
-  onUtmMediumChange?: (v: string | null) => void;
-  onUtmCampaignChange?: (v: string | null) => void;
+  onUtmMediumsChange?: (v: string[]) => void;
+  onUtmCampaignsChange?: (v: string[]) => void;
+  onOriginsChange?: (v: string[]) => void;
   cachedAt?: string | null;
   additionalDateRange?: DateRange | undefined;
   onAdditionalDateRangeChange?: (r: DateRange | undefined) => void;
@@ -192,154 +196,44 @@ function DateRangePicker({
   );
 }
 
-export function FilterSelect({
-  value, onChange, placeholder, icon: Icon, options, className,
-}: {
-  value: string | null;
-  onChange: (v: string | null) => void;
-  placeholder: string;
-  icon: typeof Users;
-  options: { id: string; name: string }[];
-  className?: string;
-}) {
-  const selected = options.find((o) => o.id === value);
-  return (
-    <Select value={value || "all"} onValueChange={(v) => onChange(v === "all" ? null : v)}>
-      <SelectTrigger
-        className={cn(
-          "h-8 text-xs font-medium border-border/60 hover:bg-accent/50 gap-2 px-3 w-auto min-w-[130px] max-w-[200px]",
-          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
-          selected && "border-primary/40 bg-primary/5 text-foreground",
-          className
-        )}
-      >
-        <Icon className={cn("w-3.5 h-3.5 shrink-0", selected ? "text-primary-ink" : "text-muted-foreground")} />
-        <SelectValue placeholder={placeholder} />
-      </SelectTrigger>
-      <SelectContent className="rounded-lg">
-        <SelectItem value="all">Todos</SelectItem>
-        {options.map((o) => <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  );
-}
-
-export function MultiFilterSelect({
-  values, onChange, placeholder, pluralLabel, icon: Icon, options, className,
-}: {
-  values: string[];
-  onChange: (v: string[]) => void;
-  placeholder: string;
-  pluralLabel: string;
-  icon: typeof Users;
-  options: { id: string; name: string }[];
-  className?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  // Rascunho local: edita várias etapas com o menu aberto e só aplica ao fechar.
-  const [draft, setDraft] = useState<string[]>(values);
-  const hasSelection = values.length > 0;
-  const toggle = (id: string) => {
-    setDraft((d) => (d.includes(id) ? d.filter((v) => v !== id) : [...d, id]));
-  };
-  const handleOpenChange = (next: boolean) => {
-    if (next) {
-      setDraft(values); // sincroniza ao abrir
-    } else {
-      const changed = draft.length !== values.length || draft.some((v) => !values.includes(v));
-      if (changed) onChange(draft); // aplica (e atualiza dashboard) só ao fechar
-    }
-    setOpen(next);
-  };
-  const label = !hasSelection
-    ? placeholder
-    : values.length === 1
-      ? (options.find((o) => o.id === values[0])?.name ?? placeholder)
-      : `${values.length} ${pluralLabel}`;
-
-  return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className={cn(
-            "h-8 text-xs font-medium border-border/60 hover:bg-accent/50 gap-2 px-3 w-auto min-w-[130px] max-w-[200px] justify-between",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-1",
-            hasSelection && "border-primary/40 bg-primary/5 text-foreground",
-            className
-          )}
-        >
-          <span className="flex items-center gap-2 truncate">
-            <Icon className={cn("w-3.5 h-3.5 shrink-0", hasSelection ? "text-primary-ink" : "text-muted-foreground")} />
-            <span className={cn("truncate", !hasSelection && "text-muted-foreground")}>{label}</span>
-          </span>
-          <ChevronDown className="w-3 h-3 opacity-50 shrink-0" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent className="p-1 rounded-lg w-[220px]" align="start">
-        <div className="flex items-center justify-between px-2 py-1.5">
-          <span className="text-[10px] uppercase tracking-wider font-semibold text-muted-foreground">{placeholder}</span>
-          {draft.length > 0 && (
-            <button
-              type="button"
-              className="text-[10px] text-muted-foreground hover:text-foreground"
-              onClick={() => setDraft([])}
-            >
-              Limpar
-            </button>
-          )}
-        </div>
-        <div className="max-h-[260px] overflow-y-auto">
-          {options.map((o) => {
-            const checked = draft.includes(o.id);
-            return (
-              <button
-                type="button"
-                key={o.id}
-                onClick={() => toggle(o.id)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-accent/60 text-left"
-              >
-                <span className={cn(
-                  "w-4 h-4 rounded border flex items-center justify-center shrink-0",
-                  checked ? "bg-primary border-primary text-primary-foreground" : "border-border"
-                )}>
-                  {checked && <Check className="w-3 h-3" />}
-                </span>
-                <span className="truncate">{o.name}</span>
-              </button>
-            );
-          })}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 export function Header({
   dateRange, onDateRangeChange, onRefresh, isLoading,
   pipelines, users,
-  selectedPipelineId, selectedStageIds = [], selectedSellerIds = [],
-  utmMediumValues = [], utmCampaignValues = [],
-  selectedUtmMedium = null, selectedUtmCampaign = null,
-  onPipelineChange, onStageIdsChange, onSellerIdsChange,
-  onUtmMediumChange, onUtmCampaignChange,
+  selectedPipelineIds, selectedStageIds = [], selectedSellerIds = [],
+  utmMediumValues = [], utmCampaignValues = [], originValues = [],
+  selectedUtmMediums = [], selectedUtmCampaigns = [], selectedOrigins = [],
+  onPipelineIdsChange, onStageIdsChange, onSellerIdsChange,
+  onUtmMediumsChange, onUtmCampaignsChange, onOriginsChange,
   cachedAt,
   additionalDateRange, onAdditionalDateRangeChange, additionalDateLabel,
 }: HeaderProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const hasAdditionalRange = !!additionalDateRange?.from;
-  const activeFilterCount = [selectedPipelineId, selectedStageIds.length > 0, selectedSellerIds.length > 0, selectedUtmMedium, selectedUtmCampaign, hasAdditionalRange].filter(Boolean).length;
+  const activeFilterCount = countActiveFilters({
+    pipelineIds: selectedPipelineIds,
+    stageIds: selectedStageIds,
+    sellerIds: selectedSellerIds,
+    utmMediums: selectedUtmMediums,
+    utmCampaigns: selectedUtmCampaigns,
+    origins: selectedOrigins,
+    hasAdditionalRange,
+  });
   const showAdditional = !!additionalDateLabel && !!onAdditionalDateRangeChange;
-  const selectedPipeline = pipelines.find((p) => p.id === selectedPipelineId);
-  const stages = selectedPipeline?.stages || [];
+  // Etapa só faz sentido com EXATAMENTE 1 funil selecionado: os ids de etapa se
+  // repetem entre funis (ver funnel_stage_mapping) — combinar vários funis tornaria
+  // a lista de etapas ambígua, então escondemos o filtro nesse caso.
+  const singlePipeline = selectedPipelineIds.length === 1
+    ? pipelines.find((p) => p.id === selectedPipelineIds[0])
+    : undefined;
+  const stages = singlePipeline?.stages || [];
 
   const clearAll = () => {
-    onPipelineChange(null);
+    onPipelineIdsChange([]);
     onStageIdsChange?.([]);
     onSellerIdsChange?.([]);
-    onUtmMediumChange?.(null);
-    onUtmCampaignChange?.(null);
+    onUtmMediumsChange?.([]);
+    onUtmCampaignsChange?.([]);
+    onOriginsChange?.([]);
     onAdditionalDateRangeChange?.(undefined);
   };
 
@@ -361,16 +255,17 @@ export function Header({
       <Separator orientation="vertical" className="h-10 hidden md:block self-end mb-1" />
 
       <Field label="Funil de vendas">
-        <FilterSelect
-          value={selectedPipelineId}
-          onChange={onPipelineChange}
+        <MultiFilterSelect
+          values={selectedPipelineIds}
+          onChange={onPipelineIdsChange}
           placeholder="Funil"
+          pluralLabel="funis"
           icon={GitBranch}
           options={pipelines.map((p) => ({ id: p.id, name: p.name }))}
         />
       </Field>
 
-      {selectedPipelineId && stages.length > 0 && onStageIdsChange && (
+      {singlePipeline && stages.length > 0 && onStageIdsChange && (
         <Field label="Etapa">
           <MultiFilterSelect
             values={selectedStageIds}
@@ -396,26 +291,41 @@ export function Header({
         </Field>
       )}
 
-      {onUtmMediumChange && utmMediumValues.length > 0 && (
+      {onUtmMediumsChange && utmMediumValues.length > 0 && (
         <Field label="Tipo de origem">
-          <FilterSelect
-            value={selectedUtmMedium}
-            onChange={onUtmMediumChange}
+          <MultiFilterSelect
+            values={selectedUtmMediums}
+            onChange={onUtmMediumsChange}
             placeholder="Tipo"
+            pluralLabel="tipos"
             icon={Megaphone}
             options={utmMediumValues.map((v) => ({ id: v, name: v }))}
           />
         </Field>
       )}
 
-      {onUtmCampaignChange && utmCampaignValues.length > 0 && (
+      {onUtmCampaignsChange && utmCampaignValues.length > 0 && (
         <Field label="Campanha">
-          <FilterSelect
-            value={selectedUtmCampaign}
-            onChange={onUtmCampaignChange}
+          <MultiFilterSelect
+            values={selectedUtmCampaigns}
+            onChange={onUtmCampaignsChange}
             placeholder="Campanha"
+            pluralLabel="campanhas"
             icon={Target}
             options={utmCampaignValues.map((v) => ({ id: v, name: v }))}
+          />
+        </Field>
+      )}
+
+      {onOriginsChange && originValues.length > 0 && (
+        <Field label="Origem">
+          <MultiFilterSelect
+            values={selectedOrigins}
+            onChange={onOriginsChange}
+            placeholder="Origem"
+            pluralLabel="origens"
+            icon={Compass}
+            options={originValues.map((v) => ({ id: v, name: v }))}
           />
         </Field>
       )}

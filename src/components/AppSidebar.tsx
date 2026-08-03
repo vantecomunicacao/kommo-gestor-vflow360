@@ -24,7 +24,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const navigate = useNavigate();
-  const { signOut } = useAuth();
+  const { signOut, loading: authLoading } = useAuth();
   const { displayName, email, initial } = useProfile();
   const { permissions } = usePermissions();
   const { isAdmin, viewSuggestions, viewIntegrations, viewSettings } = permissions;
@@ -84,7 +84,7 @@ export function AppSidebar() {
       </div>
 
       {/* Workspace Selector */}
-      <div className="px-3 pb-3">
+      <div className="border-b border-sidebar-border px-3 pb-3">
         <WorkspaceSelector collapsed={collapsed} />
       </div>
 
@@ -98,10 +98,10 @@ export function AppSidebar() {
                     <NavLink
                       to={item.url}
                       end={item.end !== false}
-                      className="flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-                      activeClassName="gradient-primary text-white font-bold shadow-brand"
+                      className="group flex items-center gap-3 px-3 py-2 rounded-md border-l-2 border-transparent text-sidebar-foreground transition-colors hover:border-sidebar-primary/40 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      activeClassName="border-sidebar-primary bg-sidebar-accent text-sidebar-primary font-semibold"
                     >
-                      <item.icon className="w-5 h-5 shrink-0" />
+                      <item.icon className="w-5 h-5 shrink-0 transition-colors group-aria-[current=page]:text-sidebar-primary" />
                       {!collapsed && <span>{item.title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
@@ -112,27 +112,37 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-3 gap-2">
+      <SidebarFooter className="gap-2 border-t border-sidebar-border p-3 pt-3">
         {/* Usuário logado */}
         <div
           className={
             collapsed
               ? "flex justify-center"
-              : "flex items-center gap-3 px-2 py-2 rounded-md bg-sidebar-accent/40"
+              : "flex items-center gap-3 rounded-md border border-sidebar-border bg-sidebar-accent/40 px-2 py-2"
           }
           title={collapsed ? displayName : undefined}
         >
-          <div className="w-8 h-8 rounded-full gradient-primary text-white flex items-center justify-center text-sm font-semibold shrink-0">
-            {initial}
-          </div>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-sidebar-foreground truncate">{displayName}</p>
-              {email && email !== displayName && (
-                <p className="text-xs text-sidebar-foreground/75 truncate">{email}</p>
-              )}
+          {authLoading ? (
+            <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-sidebar-foreground/15" />
+          ) : (
+            <div className="w-8 h-8 rounded-full gradient-primary text-white flex items-center justify-center text-sm font-semibold shrink-0">
+              {initial}
             </div>
           )}
+          {!collapsed &&
+            (authLoading ? (
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="h-3 w-24 animate-pulse rounded bg-sidebar-foreground/15" />
+                <div className="h-2.5 w-32 animate-pulse rounded bg-sidebar-foreground/10" />
+              </div>
+            ) : (
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-sidebar-foreground truncate">{displayName}</p>
+                {email && email !== displayName && (
+                  <p className="text-xs text-sidebar-foreground/75 truncate">{email}</p>
+                )}
+              </div>
+            ))}
         </div>
         <div className={collapsed ? "flex justify-center" : "px-1"}>
           <ThemeToggle placement="inline" />
@@ -144,10 +154,10 @@ export function AppSidebar() {
                 <NavLink
                   to="/settings"
                   end={false}
-                  className="flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors"
-                  activeClassName="bg-sidebar-accent text-sidebar-primary font-medium"
+                  className="group flex items-center gap-3 rounded-md border-l-2 border-transparent px-3 py-2 text-sidebar-foreground transition-colors hover:border-sidebar-primary/40 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  activeClassName="border-sidebar-primary bg-sidebar-accent text-sidebar-primary font-semibold"
                 >
-                  <Settings className="w-5 h-5 shrink-0" />
+                  <Settings className="w-5 h-5 shrink-0 transition-colors group-aria-[current=page]:text-sidebar-primary" />
                   {!collapsed && <span>Configurações</span>}
                 </NavLink>
               </SidebarMenuButton>

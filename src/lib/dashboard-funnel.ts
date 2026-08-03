@@ -36,13 +36,30 @@ export function funnelStageKey(pipelineId: string, stageId: string): string {
   return `${pipelineId}:${stageId}`;
 }
 
-/** Fase configurada para (funil, etapa): chave nova tem prioridade sobre a legada. */
+const FUNNEL_BUCKET_KEYS: readonly string[] = FUNNEL_BUCKETS.map((b) => b.key);
+const FUNNEL_KEY_SEP = ":";
+
+/**
+ * Fase configurada para (funil, etapa): chave nova ("<pipeline>:<etapa>") tem
+ * prioridade sobre a legada ("<etapa>", valendo p/ qualquer funil). Espelha
+ * `parseFunnelMapping`/`buildBucketResolver` de `supabase/functions/_shared/kommo-funnel.ts`
+ * (se mudar a prioridade ou a normalização aqui, replicar lá e vice-versa):
+ * valores fora de `FUNNEL_BUCKETS` são ignorados, e uma chave legada mal-formada
+ * como ":142" é tratada igual a "142" (prefixo de separador removido).
+ */
 export function readStageBucket(
   mapping: Record<string, string>,
   pipelineId: string,
   stageId: string,
 ): string | undefined {
-  return mapping[funnelStageKey(pipelineId, stageId)] ?? mapping[stageId];
+  const exact = mapping[funnelStageKey(pipelineId, stageId)];
+  if (exact && FUNNEL_BUCKET_KEYS.includes(exact)) return exact;
+  for (const [key, value] of Object.entries(mapping)) {
+    if (key.indexOf(FUNNEL_KEY_SEP) > 0) continue; // formato novo (par funil+etapa), já tratado acima
+    if (!value || !FUNNEL_BUCKET_KEYS.includes(value)) continue;
+    if (key.replace(FUNNEL_KEY_SEP, "") === stageId) return value;
+  }
+  return undefined;
 }
 
 export const DATE_TYPES =["DATE", "DATETIME", "DATE_TIME", "date", "datetime", "Date", "DateTime"];
