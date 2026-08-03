@@ -217,14 +217,6 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       if (functionError) throw new Error(functionError.message);
       const errMaybe = (responseData as { error?: string } | null)?.error;
       if (errMaybe) throw new Error(errMaybe);
-      // REMOVER: mock temporário só pra teste visual local dos filtros de UTM/Origem
-      // (não grava nada em produção — só preenche as listas de opções se vierem vazias).
-      if (import.meta.env.DEV) {
-        const d = responseData as DashboardData;
-        if (!d.utmMediumValues?.length) d.utmMediumValues = ["cpc", "social", "organic", "email"];
-        if (!d.utmCampaignValues?.length) d.utmCampaignValues = ["black-friday-2026", "lancamento-x", "remarketing-q1"];
-        if (!d.originValues?.length) d.originValues = ["Google Ads", "Instagram", "Indicação", "WhatsApp"];
-      }
       return responseData as DashboardData;
     },
     enabled: enabled && !!filters.workspaceId,
