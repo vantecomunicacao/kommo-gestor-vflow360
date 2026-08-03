@@ -1,14 +1,17 @@
-project_id = "xcrfbpyhyznyufijrdry"
+# Projeto "Kommo VFlow360 Gestor" (fjncmmqvmocwykpshgsh) — isolado do GHL desde
+# 2026-08-02 (infraestrutura própria, não é mais o projeto compartilhado antigo
+# xcrfbpyhyznyufijrdry). Só existe schema `kommo` aqui; não há tabelas/functions
+# `ghl_*`/`ghl-*` neste projeto.
+project_id = "fjncmmqvmocwykpshgsh"
 
-# PostgREST só serve schemas expostos. O app Kommo vive no schema dedicado `kommo`.
+# PostgREST só serve schemas expostos. O app Kommo vive no schema dedicado `kommo`
+# (nome mantido por herança do projeto antigo compartilhado; não há mais motivo
+# técnico pra não ser `public`, mas renomear agora não compensa o risco/esforço).
 # NOTA: isto afeta o stack LOCAL (supabase start). No projeto HOSPEDADO é preciso
 # adicionar `kommo` em Dashboard → Settings → API → Exposed schemas.
 [api]
 schemas = ["public", "graphql_public", "kommo"]
 extra_search_path = ["public", "extensions", "kommo"]
-
-[functions.ghl-sync]
-verify_jwt = false
 
 # Kommo (M2): sem verify_jwt para o teste de sync. Endurecer auth no M4 (connect/Vault).
 [functions.kommo-sync]

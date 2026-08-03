@@ -3,12 +3,39 @@
 Instruções persistentes para o Claude Code neste projeto (VFlow360 / Kommo).
 Leia antes de qualquer alteração.
 
+## Infraestrutura Supabase — DOIS projetos (desde 2026-08-02)
+
+O Kommo foi migrado pra um **projeto Supabase próprio, isolado do GHL**. Não é
+mais o banco compartilhado original. Isso muda o que significa "GHL" nas regras
+abaixo — leia com atenção:
+
+| | Projeto ATUAL do app | Projeto ANTIGO (compartilhado) |
+| --- | --- | --- |
+| Nome | Kommo VFlow360 Gestor | (sem nome fixo — o de sempre) |
+| Ref | `fjncmmqvmocwykpshgsh` | `xcrfbpyhyznyufijrdry` |
+| O que tem | só schema `kommo`, isolado, **zero GHL** | `kommo` (legado, pendente de descomissionar) + tudo do GHL (`public`/`ghl_*`) |
+| `.env` do repo (`VITE_SUPABASE_URL` etc.) | ✅ aponta pra cá | — |
+| Coolify (`kommo-gestor-vflow360-prod`) | ✅ builda apontando pra cá | — |
+| Pode escrever? | Sim, é o produto vivo | **Só leitura**, exceto o que a Regra #1 abaixo permitir |
+
+**Pendência conhecida:** o projeto antigo ainda guarda os dados originais do
+Kommo (leads/contacts/workspaces pré-migração) e 3 crons `kommo-*` que foram só
+**pausados** (não apagados) em 2026-08-02, aguardando o usuário migrar
+manualmente o restante dos workspaces pro projeto novo. Só desligar
+(`cron.unschedule`) ou remover algo do lado Kommo desse projeto antigo com
+autorização explícita — mesmo sendo "nosso", é código morto pendente, não órfão.
+
 ## Regras invioláveis
 
 ### 1. NÃO alterar nada do GHL (GoHighLevel) no Supabase
 
+Aplica-se ao **projeto antigo** (`xcrfbpyhyznyufijrdry`) — é lá que o GHL roda de
+verdade hoje, compartilhando infra com os resquícios do Kommo pré-migração. O
+projeto novo (`fjncmmqvmocwykpshgsh`) não tem nada de GHL, então esta regra não
+tem o que proteger lá — mas também não há razão pra criar algo `ghl_*` nele.
+
 É **proibido** criar, modificar, renomear, mover ou excluir qualquer recurso do
-Supabase relacionado ao GHL. Isso inclui — mas não se limita a:
+Supabase relacionado ao GHL (no projeto antigo). Isso inclui — mas não se limita a:
 
 - **Edge functions:** `ghl-manage`, `ghl-sync`, `ghl-dashboard`,
   `ghl-conversations-sync`, `ghl-messages-sync`, `ghl-enrich-attachments`
@@ -52,15 +79,20 @@ O Coolify (`http://72.60.248.166:8000`) é **compartilhado** com a produção do
 
 ## Onde ficam as tabelas (schemas do Supabase)
 
-O Supabase é compartilhado, mas dividido em "andares" (schemas):
+Desde a separação de infra (2026-08-02), o schema `kommo` vive no **projeto
+Supabase próprio** (`fjncmmqvmocwykpshgsh`), não mais compartilhado com o GHL.
+É aqui que se cria, altera e exclui tabelas — o app aponta pra cá por padrão
+(`src/integrations/supabase/client.ts` → `db: { schema: "kommo" }`). O nome do
+schema (`kommo`, em vez de `public`) é herança do banco antigo compartilhado;
+hoje é só convenção, sem função de isolamento real, mas não vale a pena renomear
+só por estética (ver conversa arquivada sobre o assunto).
 
-- **`kommo`** → schema **DESTE sistema** (VFlow360 Kommo). É aqui que se cria,
-  altera e exclui tabelas. O app aponta para cá por padrão
-  (`src/integrations/supabase/client.ts` → `db: { schema: "kommo" }`).
-- **`public`** → schema do sistema **antigo / GHL**. Pode ser **lido/consultado**
-  quando a tarefa exigir, mas **alterações ficam restritas**: nunca tocar em
-  tabelas `ghl_*` nem em outras tabelas do `public` sem autorização explícita
-  (ver Regra #1). Mudança de estrutura no `public` → **pare e pergunte**.
+O **projeto antigo** (`xcrfbpyhyznyufijrdry`) continua existindo e é onde o GHL
+roda de verdade — regras normais (Regra #1) se aplicam lá. Ele também tem um
+schema `kommo` residual (dados pré-migração, pendente de descomissionar — ver
+seção "Infraestrutura Supabase" acima). Ler esse projeto antigo é permitido
+quando a tarefa exigir; escrever nele exige cuidado redobrado mesmo do lado
+Kommo, porque ele é compartilhado com produção viva do GHL.
 
 ### Tabelas do Kommo (schema `kommo`) — inventário oficial
 
@@ -122,6 +154,20 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-08-02: **separação de infraestrutura** — o schema `kommo` (todas as 21
+  tabelas até aqui) foi replicado do projeto Supabase antigo compartilhado
+  (`xcrfbpyhyznyufijrdry`) para o projeto novo e isolado
+  (`fjncmmqvmocwykpshgsh`, "Kommo VFlow360 Gestor"), aplicando as 24 migrations
+  `kommo_*` em sequência. App (Coolify) e edge functions redeployados apontando
+  pro projeto novo. Ver seção "Infraestrutura Supabase" no topo deste arquivo.
+  _(dados/usuários pré-migração ainda pendentes de portar manualmente do
+  projeto antigo — cada workspace precisa reconectar a integração Kommo.)_
+- 2026-08-03 (`20260803120000_kommo_sync_status_warning.sql`): adiciona coluna
+  `kommo.sync_status.last_sync_warning text` — sync pode terminar `success` com
+  ressalva registrada (ex.: teto de páginas de `contacts`/`leads` atingido,
+  falha não-fatal em eventos/tarefas). Exibida na tela de Integrações. Aditiva;
+  sem mudança de RLS. _(APLICADA no projeto novo 2026-08-03; edges `kommo-sync`
+  e `kommo-manage` redeployadas.)_
 - 2026-07-27 (`20260727190000_kommo_funnel_mapping_per_pipeline.sql`): migration de DADOS
   (sem mudança estrutural) — `kommo.dashboard_settings.funnel_stage_mapping` passa a ser
   indexado pelo PAR funil+etapa (`"<pipeline_kommo_id>:<status_id>"`) em vez de só pelo
