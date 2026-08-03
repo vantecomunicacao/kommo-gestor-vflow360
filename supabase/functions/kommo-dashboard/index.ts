@@ -7,9 +7,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://esm.sh/zod@3.23.8";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
+import { KommoDashboardPayloadSchema } from "../_shared/schemas.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -95,31 +97,28 @@ serve(async (req) => {
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
-    const payload = await req.json().catch(() => ({} as any));
-    const workspaceId = payload.workspace_id as string;
-    if (!workspaceId) throw new Error("workspace_id is required");
+    const payload = KommoDashboardPayloadSchema.parse(await req.json().catch(() => ({})));
+    const workspaceId = payload.workspace_id;
 
     // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
     // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
     await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
 
-    const startDate: string | null = payload.startDate || null;
-    const endDate: string | null = payload.endDate || null;
+    const startDate = payload.startDate;
+    const endDate = payload.endDate;
     // Eixo de data do período principal:
     //   - "criacao"    (default) → filtra por kommo_created_at  → aba Comercial
     //   - "fechamento"           → filtra por closed_at (ganho+perdido) → aba Financeiro
     // Sem o parâmetro, o comportamento é idêntico ao histórico (criação).
-    const dateBasis: "criacao" | "fechamento" = payload.dateBasis === "fechamento" ? "fechamento" : "criacao";
-    const additionalStartDate: string | null = payload.additionalStartDate || null;
-    const additionalEndDate: string | null = payload.additionalEndDate || null;
-    const rawFilterPipelineIds: string[] = Array.isArray(payload.pipelineId)
-      ? payload.pipelineId.filter((s: any) => typeof s === "string" && s)
-      : (typeof payload.pipelineId === "string" && payload.pipelineId ? [payload.pipelineId] : []);
-    const filterStageIds: string[] = Array.isArray(payload.stageIds) ? payload.stageIds.filter((s: any) => typeof s === "string" && s) : [];
-    const filterUserIds: string[] = Array.isArray(payload.sellerIds) ? payload.sellerIds.filter((s: any) => typeof s === "string" && s) : [];
-    const filterUtmMediums: string[] = Array.isArray(payload.utmMedium) ? payload.utmMedium.filter((s: any) => typeof s === "string" && s) : [];
-    const filterUtmCampaigns: string[] = Array.isArray(payload.utmCampaign) ? payload.utmCampaign.filter((s: any) => typeof s === "string" && s) : [];
-    const filterOrigins: string[] = Array.isArray(payload.origin) ? payload.origin.filter((s: any) => typeof s === "string" && s) : [];
+    const dateBasis = payload.dateBasis;
+    const additionalStartDate = payload.additionalStartDate;
+    const additionalEndDate = payload.additionalEndDate;
+    const rawFilterPipelineIds = payload.pipelineId;
+    const filterStageIds = payload.stageIds;
+    const filterUserIds = payload.sellerIds;
+    const filterUtmMediums = payload.utmMedium;
+    const filterUtmCampaigns = payload.utmCampaign;
+    const filterOrigins = payload.origin;
 
     // ===== Catálogos =====
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
@@ -202,7 +201,7 @@ serve(async (req) => {
     // ===== Query leads (paginada — PostgREST corta em 1000 por resposta) =====
     const leadsRows = await fetchAllRows((from, to) => {
       let q = db.from("leads")
-        .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at")
+        .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at,contact_name")
         .eq("workspace_id", workspaceId).eq("is_deleted", false);
       if (filterPipelineIds.length === 1) q = q.eq("pipeline_id", filterPipelineIds[0]);
       else if (filterPipelineIds.length > 1) q = q.in("pipeline_id", filterPipelineIds);
@@ -394,13 +393,19 @@ serve(async (req) => {
 
     // ===== Funnel (4 buckets, exclui perdidos) =====
     const counts = { contato_inicial: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
-    const leadsByBucket: Record<Bucket, Array<{ id: number; name: string }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
+    const leadsByBucket: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
     for (const l of leads) {
       if (l.status === "lost") continue;
       const b = stageBucket(l.pipeline_id, l.status_id);
       if (b) {
         counts[b]++;
-        if (leadsByBucket[b].length < 200) leadsByBucket[b].push({ id: leadsByBucket[b].length, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}` });
+        if (leadsByBucket[b].length < 200) {
+          leadsByBucket[b].push({
+            id: leadsByBucket[b].length + 1,
+            name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`,
+            contactName: l.contact_name || null,
+          });
+        }
       }
     }
     const passage = {
@@ -587,7 +592,7 @@ serve(async (req) => {
 
     return new Response(JSON.stringify({
       totalLeads, lostLeads,
-      lostLeadsDetail: lostOpps.slice(0, 200).map((l, i) => ({ id: i, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}` })),
+      lostLeadsDetail: lostOpps.slice(0, 200).map((l, i) => ({ id: i + 1, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`, contactName: l.contact_name || null })),
       funnelStages, conversionRates, sellers,
       // Origens/UTM: só os campos realmente consumidos. Os cards de origem usam
       // leadsOriginDistribution/wonOriginDistribution; os selects de filtro usam
@@ -615,6 +620,12 @@ serve(async (req) => {
       cachedAt: new Date().toISOString(),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
+    // Body fora do formato esperado (ex.: sem workspace_id) → 400 com mensagem clara.
+    if (err instanceof z.ZodError) {
+      const msg = err.errors.map((e) => `${e.path.join(".") || "body"}: ${e.message}`).join("; ");
+      console.error("kommo-dashboard payload inválido:", msg);
+      return new Response(JSON.stringify({ error: msg }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const msg = err instanceof Error ? err.message : (err && typeof err === "object" && (err as any).message ? `${(err as any).message} | ${(err as any).code ?? ""}` : String(err));
     console.error("kommo-dashboard error:", msg);
     // Acesso negado → 403 (consistente com kommo-sync); demais falhas → 500.

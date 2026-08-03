@@ -7,9 +7,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://esm.sh/zod@3.23.8";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
+import { KommoReportSnapshotPayloadSchema } from "../_shared/schemas.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -38,10 +40,9 @@ serve(async (req) => {
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
-    const payload = await req.json().catch(() => ({} as any));
-    const workspaceId = payload.workspace_id as string;
-    if (!workspaceId) throw new Error("workspace_id is required");
-    const months: number = Number.isFinite(payload.months) ? Math.max(1, Math.min(36, payload.months)) : 12;
+    const payload = KommoReportSnapshotPayloadSchema.parse(await req.json().catch(() => ({})));
+    const workspaceId = payload.workspace_id;
+    const months = payload.months;
 
     // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
     // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
@@ -232,6 +233,12 @@ serve(async (req) => {
       frozenAt, quality,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
+    // Body fora do formato esperado (ex.: sem workspace_id) → 400 com mensagem clara.
+    if (err instanceof z.ZodError) {
+      const msg = err.errors.map((e) => `${e.path.join(".") || "body"}: ${e.message}`).join("; ");
+      console.error("kommo-report-snapshot payload inválido:", msg);
+      return new Response(JSON.stringify({ error: msg }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     const msg = err instanceof Error
       ? err.message
       : (err && typeof err === "object")

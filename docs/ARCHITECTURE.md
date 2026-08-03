@@ -41,6 +41,9 @@ O sistema está **migrado para o Kommo** e opera como um **painel de gestão/ana
   compartilhado (`xcrfbpyhyznyufijrdry`, onde o GHL ainda roda) segue existindo à
   parte — regras de não-interferência do `../CLAUDE.md` se aplicam a ele. Detalhe
   completo em `../CLAUDE.md` → "Infraestrutura Supabase".
+- **Filtros do Dashboard:** contrato de filtro (Funil/Etapa/Vendedor/UTM/Origem, todos
+  multi-seleção), deep link via URL params e a validação zod do body das edge
+  functions estão documentados em `plano-filtros-dashboard.md`.
 
 ---
 

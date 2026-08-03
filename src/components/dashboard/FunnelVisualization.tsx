@@ -36,7 +36,12 @@ function LeadListDialog({ open, onOpenChange, title, leads }: {
               {leads.map((lead) => (
                 <TableRow key={lead.id}>
                   <TableCell className="font-mono text-xs text-muted-foreground">{lead.id}</TableCell>
-                  <TableCell className="font-medium">{lead.name}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{lead.name}</div>
+                    {lead.contactName && (
+                      <div className="text-xs text-muted-foreground">{lead.contactName}</div>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
               {leads.length === 0 && (

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { subDays, startOfDay, endOfDay, differenceInDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Users, TrendingUp, TrendingDown, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AxisTabs } from "@/components/AxisTabs";
@@ -57,9 +57,14 @@ type SavedFilters = {
 
 const filtersStorageKey = (workspaceId: string) => `dashboard:filters:${workspaceId}`;
 
+// Filtros aceitos como query param (deep link) — arrays viram string separada por
+// vírgula. Ver docs/plano-filtros-dashboard.md § "Fase 5" pro design completo.
+const parseCsvParam = (v: string | null): string[] => (v ? v.split(",").filter(Boolean) : []);
+
 export default function Dashboard() {
   const { activeWorkspace } = useWorkspace();
   const { permissions } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [hydrated, setHydrated] = useState(false);
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: subDays(new Date(), 7),
@@ -88,10 +93,43 @@ export default function Dashboard() {
         .eq("workspace_id", activeWorkspace.id)
         .maybeSingle();
       if (cancelled) return;
+      setStageLabels(((settings as any)?.funnel_stage_labels as Record<string, string>) || {});
+
+      // Deep link: se a URL já tem algum filtro, ela vence — inclusive sobre o funil
+      // padrão do workspace, porque um link compartilhado é uma intenção explícita de
+      // quem gerou o link. Não olha localStorage nesse caso.
+      const urlPipelines = parseCsvParam(searchParams.get("pipelines"));
+      const urlStages = parseCsvParam(searchParams.get("stages"));
+      const urlSellers = parseCsvParam(searchParams.get("sellers"));
+      const urlUtmMediums = parseCsvParam(searchParams.get("utmMedium"));
+      const urlUtmCampaigns = parseCsvParam(searchParams.get("utmCampaign"));
+      const urlOrigins = parseCsvParam(searchParams.get("origin"));
+      const urlAxis = searchParams.get("axis");
+      const urlFrom = searchParams.get("from");
+      const urlTo = searchParams.get("to");
+      const hasUrlFilters = !!(urlPipelines.length || urlStages.length || urlSellers.length
+        || urlUtmMediums.length || urlUtmCampaigns.length || urlOrigins.length || urlAxis || urlFrom || urlTo);
+
+      if (hasUrlFilters) {
+        setDateRange(
+          urlFrom
+            ? { from: new Date(urlFrom), to: urlTo ? new Date(urlTo) : undefined }
+            : { from: subDays(new Date(), 7), to: subDays(new Date(), 1) }
+        );
+        setSelectedPipelineIds(urlPipelines);
+        setSelectedStageIds(urlStages);
+        setSelectedSellerIds(urlSellers);
+        setSelectedUtmMediums(urlUtmMediums);
+        setSelectedUtmCampaigns(urlUtmCampaigns);
+        setSelectedOrigins(urlOrigins);
+        setDateBasis(urlAxis === "fechamento" ? "fechamento" : "criacao");
+        if (!cancelled) setHydrated(true);
+        return;
+      }
+
       // Funil(is) padrão do workspace — pré-selecionados na abertura (o filtro do
       // Dashboard aceita múltiplos funis, igual esse campo de Configurações).
       const defaultPipelineIds: string[] = settings?.default_pipeline_ids || [];
-      setStageLabels(((settings as any)?.funnel_stage_labels as Record<string, string>) || {});
 
       // 1) Restaurar filtros salvos (período, vendedores, UTM…)
       let restoredPipelineIds: string[] = [];
@@ -144,6 +182,10 @@ export default function Dashboard() {
     })();
 
     return () => { cancelled = true; };
+    // searchParams de propósito fora das deps: só deve ler a URL na abertura/troca de
+    // workspace, não a cada vez que o efeito de persistência abaixo a reescreve
+    // (senão vira loop de hidratação).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspace?.id]);
 
   // Persistir filtros no localStorage por workspace
@@ -165,7 +207,21 @@ export default function Dashboard() {
     } catch {
       // ignora quota cheia
     }
-  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, dateBasis]);
+
+    // Mantém a URL como espelho do filtro atual (deep link) — replace pra não
+    // empilhar histórico de navegação a cada clique de filtro.
+    const nextParams = new URLSearchParams();
+    if (selectedPipelineIds.length) nextParams.set("pipelines", selectedPipelineIds.join(","));
+    if (selectedStageIds.length) nextParams.set("stages", selectedStageIds.join(","));
+    if (selectedSellerIds.length) nextParams.set("sellers", selectedSellerIds.join(","));
+    if (selectedUtmMediums.length) nextParams.set("utmMedium", selectedUtmMediums.join(","));
+    if (selectedUtmCampaigns.length) nextParams.set("utmCampaign", selectedUtmCampaigns.join(","));
+    if (selectedOrigins.length) nextParams.set("origin", selectedOrigins.join(","));
+    if (dateBasis === "fechamento") nextParams.set("axis", "fechamento");
+    if (dateRange?.from) nextParams.set("from", format(dateRange.from, "yyyy-MM-dd"));
+    if (dateRange?.to) nextParams.set("to", format(dateRange.to, "yyyy-MM-dd"));
+    setSearchParams(nextParams, { replace: true });
+  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, dateBasis, setSearchParams]);
 
 
   const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 7)), [dateRange?.from]);

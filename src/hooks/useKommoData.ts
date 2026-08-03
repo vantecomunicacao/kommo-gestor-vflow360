@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
-export interface StageLead { id: number; name: string; }
+export interface StageLead { id: number; name: string; contactName?: string | null; }
 export interface FunnelStage { id: string; name: string; count: number; currentCount?: number; leads?: StageLead[]; }
 export interface Seller {
   id?: string;
