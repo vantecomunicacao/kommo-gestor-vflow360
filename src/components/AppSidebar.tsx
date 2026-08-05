@@ -42,7 +42,7 @@ export function AppSidebar() {
   const navItems: { title: string; url: string; icon: typeof LayoutDashboard; show: boolean; end?: boolean }[] = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: gestor },
     { title: "Relatórios", url: "/relatorios", icon: BarChart3, show: gestor },
-    { title: "Leads esfriando", url: "/cooling-leads", icon: Snowflake, show: viewSuggestions || isAdmin },
+    { title: "Leads esfriando", url: "/leads-esfriando", icon: Snowflake, show: viewSuggestions || isAdmin },
     { title: "Integrações", url: "/integrations", icon: Plug, show: viewIntegrations },
     { title: "Admin", url: "/admin", icon: ShieldCheck, show: isAdmin },
   ].filter((i) => i.show);
@@ -98,10 +98,10 @@ export function AppSidebar() {
                     <NavLink
                       to={item.url}
                       end={item.end !== false}
-                      className="group flex items-center gap-3 px-3 py-2 rounded-md border-l-2 border-transparent text-sidebar-foreground transition-colors hover:border-sidebar-primary/40 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                      activeClassName="border-sidebar-primary bg-sidebar-accent text-sidebar-primary font-semibold"
+                      className="group flex items-center gap-3 px-3 py-2 rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      activeClassName="bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-sm hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
                     >
-                      <item.icon className="w-5 h-5 shrink-0 transition-colors group-aria-[current=page]:text-sidebar-primary" />
+                      <item.icon className="w-5 h-5 shrink-0 transition-colors" />
                       {!collapsed && <span>{item.title}</span>}
                     </NavLink>
                   </SidebarMenuButton>
@@ -154,10 +154,10 @@ export function AppSidebar() {
                 <NavLink
                   to="/settings"
                   end={false}
-                  className="group flex items-center gap-3 rounded-md border-l-2 border-transparent px-3 py-2 text-sidebar-foreground transition-colors hover:border-sidebar-primary/40 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                  activeClassName="border-sidebar-primary bg-sidebar-accent text-sidebar-primary font-semibold"
+                  className="group flex items-center gap-3 rounded-md px-3 py-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                  activeClassName="bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-sm hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
                 >
-                  <Settings className="w-5 h-5 shrink-0 transition-colors group-aria-[current=page]:text-sidebar-primary" />
+                  <Settings className="w-5 h-5 shrink-0 transition-colors" />
                   {!collapsed && <span>Configurações</span>}
                 </NavLink>
               </SidebarMenuButton>

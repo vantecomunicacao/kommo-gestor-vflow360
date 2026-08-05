@@ -2,18 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { Button } from "@/components/ui/button";
-
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Loader2, Save, RefreshCw, Sparkles } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { FUNNEL_BUCKETS, DATE_TYPES, funnelStageKey, readStageBucket } from "@/lib/dashboard-funnel";
+import { FUNNEL_BUCKETS } from "@/lib/dashboard-funnel";
 import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
+import { CustomMetric, customMetricsListSchema } from "@/lib/custom-metrics";
+import FunnelTab from "./dashboard/FunnelTab";
+import OriginUtmTab from "./dashboard/OriginUtmTab";
+import MetricsReportTab from "./dashboard/MetricsReportTab";
+import PreferencesTab from "./dashboard/PreferencesTab";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
@@ -46,15 +49,18 @@ export default function DashboardSettings() {
   const [reportRateStages, setReportRateStages] = useState<string[]>([]); // etapas p/ taxas do relatório
   const [reportGoals, setReportGoals] = useState<Record<string, number>>({}); // metas do relatório ("<eixo>:<metricId>" -> valor)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+  const [customMetrics, setCustomMetrics] = useState<CustomMetric[]>([]);
 
   // Detecção de alterações não salvas (baseline capturado ao carregar / após salvar).
   const editable = useMemo(() => JSON.stringify({
     defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
     chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
+    customMetrics,
   }), [defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
-    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals]);
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
+    customMetrics]);
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
@@ -111,6 +117,9 @@ export default function DashboardSettings() {
         setReportRateStages(((settings as any).report_rate_stages || []).filter((x: string) =>
           FUNNEL_BUCKETS.some((b) => b.key === x)));
         setReportGoals(((settings as any).report_goals as any) || {});
+        // Descarta entradas malformadas em vez de quebrar a tela (ex.: editado direto no banco).
+        const parsedMetrics = customMetricsListSchema.safeParse((settings as any).custom_metrics ?? []);
+        setCustomMetrics(parsedMetrics.success ? parsedMetrics.data : []);
       }
     } catch (e) {
       toast.error("Erro ao carregar", { description: (e as Error).message });
@@ -121,6 +130,13 @@ export default function DashboardSettings() {
 
   const save = async () => {
     if (!activeWorkspace?.id) return;
+    const metricsCheck = customMetricsListSchema.safeParse(customMetrics);
+    if (!metricsCheck.success) {
+      toast.error("Métricas Personalizadas com erro", {
+        description: metricsCheck.error.errors[0]?.message || "Revise os campos das métricas.",
+      });
+      return;
+    }
     setSaving(true);
     try {
       const payload = {
@@ -142,6 +158,7 @@ export default function DashboardSettings() {
         funnel_stage_labels: stageLabels,
         report_rate_stages: reportRateStages,
         report_goals: reportGoals,
+        custom_metrics: customMetrics,
       };
       const { error } = await supabase
         .from("dashboard_settings" as any)
@@ -216,30 +233,6 @@ export default function DashboardSettings() {
     toast.success(`Template "${template.label}" aplicado`, {
       description: "Revise os campos abaixo e clique em Salvar para confirmar.",
     });
-  };
-
-  const togglePipeline = (kommo_id: string) => {
-    setDefaultPipelines((prev) =>
-      prev.includes(kommo_id) ? prev.filter((p) => p !== kommo_id) : [...prev, kommo_id]
-    );
-  };
-
-  const toggleField = (kommo_id: string) => {
-    setVisibleFields((prev) => {
-      const willRemove = prev.includes(kommo_id);
-      if (willRemove) {
-        // Campo não visível não pode ter pizza: tira do chart também.
-        setChartFields((cf) => cf.filter((p) => p !== kommo_id));
-        return prev.filter((p) => p !== kommo_id);
-      }
-      return [...prev, kommo_id];
-    });
-  };
-
-  const toggleChartField = (kommo_id: string) => {
-    setChartFields((prev) =>
-      prev.includes(kommo_id) ? prev.filter((p) => p !== kommo_id) : [...prev, kommo_id]
-    );
   };
 
   if (loading) {
@@ -327,372 +320,70 @@ export default function DashboardSettings() {
         </CardContent>
       </Card>
 
-      {/* Pipeline padrão */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Funis do Dashboard</CardTitle>
-          <CardDescription>
-            Marque os funis comerciais que devem entrar nas métricas. Funis administrativos
-            (base de contatos, fornecedores, roteamento interno) devem ficar desmarcados.
-            Nenhum marcado = todos entram. Com um único funil marcado, ele já vem
-            selecionado no filtro do Dashboard.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {pipelines.map((p) => (
-            <label key={p.id} className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                className="accent-primary"
-                checked={defaultPipelines.includes(p.kommo_id)}
-                onChange={(e) =>
-                  setDefaultPipelines((prev) =>
-                    e.target.checked
-                      ? [...prev, p.kommo_id]
-                      : prev.filter((id) => id !== p.kommo_id))
-                }
-              />
-              <span>{p.name}</span>
-              <span className="text-xs text-muted-foreground">({p.stages.length} etapas)</span>
-            </label>
-          ))}
-          {pipelines.length > 0 && defaultPipelines.length === 0 && (
-            <p className="pt-1 text-sm text-muted-foreground">
-              Nenhum funil marcado — o Dashboard soma todos.
-            </p>
-          )}
-          {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Nenhum pipeline sincronizado.</p>}
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="funil" className="space-y-6">
+        <TabsList>
+          <TabsTrigger value="funil">Funil</TabsTrigger>
+          <TabsTrigger value="origem">Origem &amp; UTM</TabsTrigger>
+          <TabsTrigger value="metricas">Métricas &amp; Relatório</TabsTrigger>
+          <TabsTrigger value="preferencias">Preferências</TabsTrigger>
+        </TabsList>
 
-      {/* Nomes das etapas do funil */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Nomes das etapas do funil</CardTitle>
-          <CardDescription>
-            Personalize como cada uma das 4 fases aparece no card "Visão Geral - Funil de Passagem"
-            do Dashboard. Deixe em branco para usar o nome padrão.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {FUNNEL_BUCKETS.map((b) => (
-            <div key={b.key} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
-              <Label className="text-sm font-medium text-muted-foreground">{b.label}</Label>
-              <div className="md:col-span-2">
-                <Input
-                  value={stageLabels[b.key] ?? ""}
-                  placeholder={b.label}
-                  onChange={(e) =>
-                    setStageLabels((prev) => {
-                      const next = { ...prev };
-                      const v = e.target.value;
-                      if (v.trim()) next[b.key] = v;
-                      else delete next[b.key];
-                      return next;
-                    })
-                  }
-                />
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+        <TabsContent value="funil" className="space-y-6 mt-0">
+          <FunnelTab
+            pipelines={pipelines}
+            defaultPipelines={defaultPipelines}
+            setDefaultPipelines={setDefaultPipelines}
+            stageLabels={stageLabels}
+            setStageLabels={setStageLabels}
+            stageMapping={stageMapping}
+            setStageMapping={setStageMapping}
+            wonStageKeys={wonStageKeys}
+            setWonStageKeys={setWonStageKeys}
+          />
+        </TabsContent>
 
-      {/* Mapeamento do funil */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Mapeamento do funil</CardTitle>
-          <CardDescription>
-            Associe cada etapa do CRM a uma das 4 fases do funil analítico. Etapas sem mapeamento são ignoradas.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {pipelines.map((p) => (
-            <div key={p.id} className="space-y-2">
-              <h4 className="text-sm font-semibold text-foreground border-b pb-1">
-                {p.name}
-                <span className="ml-2 text-xs font-normal text-muted-foreground">({p.stages.length} etapas)</span>
-              </h4>
-              {p.stages.map((s) => (
-                <div key={s.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center pl-1">
-                  <div className="text-sm">{s.name}</div>
-                  <Select
-                    value={readStageBucket(stageMapping, p.kommo_id, s.id) || "__none__"}
-                    onValueChange={(v) =>
-                      setStageMapping((prev) => {
-                        // Grava sempre no formato novo (funil+etapa), que tem prioridade
-                        // sobre a regra legada global — por isso ela não precisa sair.
-                        // Em "Ignorar" a legada TEM que sair, senão voltaria a valer.
-                        const next = { ...prev };
-                        const key = funnelStageKey(p.kommo_id, s.id);
-                        if (v === "__none__") { delete next[key]; delete next[s.id]; }
-                        else next[key] = v;
-                        return next;
-                      })
-                    }
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">Ignorar</SelectItem>
-                      {FUNNEL_BUCKETS.map((b) => (
-                        <SelectItem key={b.key} value={b.key}>{b.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              ))}
-            </div>
-          ))}
-          {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Sincronize pipelines primeiro.</p>}
-        </CardContent>
-      </Card>
+        <TabsContent value="origem" className="space-y-6 mt-0">
+          <OriginUtmTab
+            customFields={customFields}
+            originFieldName={originFieldName}
+            setOriginFieldName={setOriginFieldName}
+            utmSourceField={utmSourceField}
+            setUtmSourceField={setUtmSourceField}
+            utmMediumField={utmMediumField}
+            setUtmMediumField={setUtmMediumField}
+            utmCampaignField={utmCampaignField}
+            setUtmCampaignField={setUtmCampaignField}
+            utmContentField={utmContentField}
+            setUtmContentField={setUtmContentField}
+            utmTermField={utmTermField}
+            setUtmTermField={setUtmTermField}
+          />
+        </TabsContent>
 
-      {/* Taxas de fase do Relatório */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Taxas de fase (Relatório)</CardTitle>
-          <CardDescription>
-            Escolha uma ou mais das 4 fases do funil para virarem taxas no Relatório (aba
-            Comercial), ex.: "Taxa de Agendamento". Cada taxa = leads da safra do mês que
-            alcançaram a fase ÷ leads criados no mês. Como as 4 fases são comuns a todos os
-            funis, a taxa funciona corretamente inclusive em "Todos os funis". Use os nomes
-            personalizados acima ("Nomes das etapas do funil") para adequar ao seu negócio.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {FUNNEL_BUCKETS.map((b) => (
-            <label key={b.key} className="flex items-center gap-2 pl-1 text-sm cursor-pointer">
-              <Checkbox
-                checked={reportRateStages.includes(b.key)}
-                onCheckedChange={(c) =>
-                  setReportRateStages((prev) => c ? [...prev, b.key] : prev.filter((x) => x !== b.key))
-                }
-              />
-              {stageLabels[b.key] || b.label}
-            </label>
-          ))}
-        </CardContent>
-      </Card>
+        <TabsContent value="metricas" className="space-y-6 mt-0">
+          <MetricsReportTab
+            pipelines={pipelines}
+            customFields={customFields}
+            customMetrics={customMetrics}
+            setCustomMetrics={setCustomMetrics}
+            stageLabels={stageLabels}
+            reportRateStages={reportRateStages}
+            setReportRateStages={setReportRateStages}
+            visibleFields={visibleFields}
+            setVisibleFields={setVisibleFields}
+            chartFields={chartFields}
+            setChartFields={setChartFields}
+          />
+        </TabsContent>
 
-      {/* Etapas "ganhas" */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Etapas consideradas como "Ganho"</CardTitle>
-          <CardDescription>Quais buckets do funil contam como Venda Ganha</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {FUNNEL_BUCKETS.map((b) => (
-            <label key={b.key} className="flex items-center gap-2 cursor-pointer">
-              <Checkbox
-                checked={wonStageKeys.includes(b.key)}
-                onCheckedChange={() =>
-                  setWonStageKeys((prev) =>
-                    prev.includes(b.key) ? prev.filter((k) => k !== b.key) : [...prev, b.key]
-                  )
-                }
-              />
-              <span>{b.label}</span>
-            </label>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Origem do lead */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Origem do lead (opcional)</CardTitle>
-          <CardDescription>
-            Campo personalizado que indica a origem do lead. Quando configurado, ele tem prioridade sobre o UTM Source
-            nos gráficos "Origem dos leads" e "Origem das vendas". Se não configurar, a origem cai no UTM Source.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Select value={originFieldName || "__none__"} onValueChange={(v) => setOriginFieldName(v === "__none__" ? "" : v)}>
-            <SelectTrigger><SelectValue placeholder="— não configurado —" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">— não configurado —</SelectItem>
-              {customFields
-                .filter((f) => (f.entity_type || "").toLowerCase() === "leads")
-                .map((f) => (
-                  <SelectItem key={f.id} value={f.code || f.kommo_id}>{f.name}</SelectItem>
-                ))}
-            </SelectContent>
-          </Select>
-        </CardContent>
-      </Card>
-
-      {/* Campos UTM */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Campos UTM</CardTitle>
-          <CardDescription>
-            Mapeie quais campos personalizados do Kommo correspondem aos parâmetros UTM. Source e Campaign alimentam os pies "Origem dos leads" e "Origem das vendas" no dashboard. Medium é usado como filtro. Content e Term ficam disponíveis para análises detalhadas.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {[
-            { key: "source", label: "UTM Source", value: utmSourceField, setter: setUtmSourceField, hint: "Plataforma (ex.: google, facebook, instagram)" },
-            { key: "medium", label: "UTM Medium", value: utmMediumField, setter: setUtmMediumField, hint: "Tipo de mídia (ex.: cpc, social, organic, email)" },
-            { key: "campaign", label: "UTM Campaign", value: utmCampaignField, setter: setUtmCampaignField, hint: "Campanha específica (ex.: black-friday, lançamento-x)" },
-            { key: "content", label: "UTM Content", value: utmContentField, setter: setUtmContentField, hint: "Variação criativa / anúncio (ex.: video-30s-v2, carrossel-azul)" },
-            { key: "term", label: "UTM Term", value: utmTermField, setter: setUtmTermField, hint: "Público-alvo, palavra-chave ou segmentação (ex.: lookalike-1pct)" },
-          ].map((utm) => (
-            <div key={utm.key} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center">
-              <div>
-                <Label className="text-sm font-medium">{utm.label}</Label>
-                <p className="text-xs text-muted-foreground">{utm.hint}</p>
-              </div>
-              <div className="md:col-span-2">
-                <Select value={utm.value || "__none__"} onValueChange={(v) => utm.setter(v === "__none__" ? "" : v)}>
-                  <SelectTrigger><SelectValue placeholder="Selecione um campo" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">— não configurado —</SelectItem>
-                    {customFields
-                      .filter((f) => (f.entity_type || "").toLowerCase() === "leads")
-                      .map((f) => (
-                        <SelectItem key={f.id} value={f.code || f.kommo_id}>{f.name}</SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
-
-      {/* Campos visíveis */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Campos customizados visíveis</CardTitle>
-          <CardDescription>
-            Quais campos contam na seção de Qualidade dos Dados. Apenas campos de <strong>Lead</strong> são exibidos
-            — campos de Contato não são salvos nos leads do CRM e apareceriam sempre como 0% preenchidos.
-            Marque <strong>"Gráfico de pizza"</strong> em um campo visível para também exibir a distribuição dos seus
-            valores como um gráfico de pizza no dashboard.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 max-h-96 overflow-y-auto">
-          {(() => {
-            const leadFields = customFields.filter((f) => (f.entity_type || "").toLowerCase() === "leads");
-            if (leadFields.length === 0) {
-              return <p className="text-sm text-muted-foreground">Nenhum campo personalizado de lead sincronizado.</p>;
-            }
-            return leadFields.map((f) => {
-              const isVisible = visibleFields.includes(f.kommo_id);
-              const hasChart = chartFields.includes(f.kommo_id);
-              return (
-                <div key={f.id} className="flex items-center justify-between gap-4 py-1">
-                  <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                    <Checkbox
-                      checked={isVisible}
-                      onCheckedChange={() => toggleField(f.kommo_id)}
-                    />
-                    <span className="truncate">{f.name}</span>
-                    {f.code && <span className="text-xs text-muted-foreground hidden sm:inline">({f.code})</span>}
-                    {f.field_type && <span className="text-xs text-muted-foreground hidden sm:inline">[{f.field_type}]</span>}
-                  </label>
-                  {isVisible && (
-                    <label className="flex items-center gap-2 cursor-pointer shrink-0 text-xs text-muted-foreground">
-                      <Checkbox
-                        checked={hasChart}
-                        onCheckedChange={() => toggleChartField(f.kommo_id)}
-                      />
-                      <span>Gráfico de pizza</span>
-                    </label>
-                  )}
-                </div>
-              );
-            });
-          })()}
-          {visibleFields.some((id) => {
-            const f = customFields.find((c) => c.kommo_id === id);
-            return f && (f.entity_type || "").toLowerCase() !== "leads";
-          }) && (
-            <p className="text-xs text-warning-ink mt-3">
-              ⚠ Há campos de Contato selecionados nas suas configurações antigas. Eles aparecerão sempre como 0%. Remova-os e selecione campos de Lead.
-            </p>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Horário comercial (tempo de resposta) */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Horário comercial (tempo de resposta)</CardTitle>
-          <CardDescription>
-            Período em que sua equipe está disponível. O cálculo de "Tempo médio de resposta" do dashboard
-            ignora o tempo fora desse intervalo (ex: cliente manda mensagem de madrugada e o vendedor responde de manhã).
-            {" "}<strong>Por padrão, sábados, domingos e feriados nacionais brasileiros não são contabilizados.</strong>
-            {" "}Para expediente que vira a noite (ex: 18h às 09h), basta inverter os horários.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-wrap items-end gap-4">
-          <div className="space-y-1">
-            <Label htmlFor="bh-start" className="text-xs">Início</Label>
-            <input
-              id="bh-start"
-              type="time"
-              value={businessStart}
-              onChange={(e) => setBusinessStart(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-input bg-background text-sm"
-            />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="bh-end" className="text-xs">Fim</Label>
-            <input
-              id="bh-end"
-              type="time"
-              value={businessEnd}
-              onChange={(e) => setBusinessEnd(e.target.value)}
-              className="h-10 px-3 rounded-xl border border-input bg-background text-sm"
-            />
-          </div>
-          <p className="text-xs text-muted-foreground basis-full">
-            Atual: <span className="font-bold">{businessStart || "09:00"}</span> às <span className="font-bold">{businessEnd || "18:00"}</span>
-          </p>
-        </CardContent>
-      </Card>
-
-      {/* Campo de data adicional */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Campo de data adicional (opcional)</CardTitle>
-          <CardDescription>
-            Quando configurado, o dashboard ganha um segundo filtro de período (somado ao período principal).
-            Recomendado: <strong>Data da venda (fechamento ganho)</strong> — usa a data nativa do Kommo, sem
-            precisar de campo personalizado nem preenchimento manual.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(() => {
-            const dateFields = customFields.filter((f) =>
-              f.field_type ? DATE_TYPES.includes(f.field_type) : false
-            );
-            return (
-              <Select
-                value={additionalDateField || "__none__"}
-                onValueChange={(v) => setAdditionalDateField(v === "__none__" ? "" : v)}
-              >
-                <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">Nenhum</SelectItem>
-                  {/* Nativos do Kommo (closed_at) — não exigem campo personalizado */}
-                  <SelectItem value="__closed_won__">Data da venda (fechamento ganho)</SelectItem>
-                  <SelectItem value="__closed_lost__">Data da perda (fechamento perdido)</SelectItem>
-                  {dateFields.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel>Campos personalizados (data)</SelectLabel>
-                      {dateFields.map((f) => (
-                        <SelectItem key={f.id} value={f.kommo_id}>{f.name}</SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                </SelectContent>
-              </Select>
-            );
-          })()}
-        </CardContent>
-      </Card>
+        <TabsContent value="preferencias" className="space-y-6 mt-0">
+          <PreferencesTab
+            customFields={customFields}
+            additionalDateField={additionalDateField}
+            setAdditionalDateField={setAdditionalDateField}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Barra flutuante de salvar — aparece quando há alterações não salvas */}
       {dirty && (
