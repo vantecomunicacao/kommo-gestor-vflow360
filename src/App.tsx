@@ -74,7 +74,7 @@ const App = () => (
                 <Route path="/dashboard" element={<GestorGuard>{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</GestorGuard>} />
                 <Route path="/relatorios" element={<GestorGuard>{lazyRoute(<Reports />, <GenericPageSkeleton />)}</GestorGuard>} />
                 <Route
-                  path="/cooling-leads"
+                  path="/leads-esfriando"
                   element={<PermissionGuard require="viewSuggestions">{lazyRoute(<CoolingLeads />, <GenericPageSkeleton />)}</PermissionGuard>}
                 />
                 <Route

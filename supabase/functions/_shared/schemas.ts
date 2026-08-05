@@ -34,6 +34,30 @@ export const KommoDashboardPayloadSchema = z.object({
 });
 export type KommoDashboardPayload = z.infer<typeof KommoDashboardPayloadSchema>;
 
+// ===== Métricas Personalizadas (kommo.dashboard_settings.custom_metrics) =====
+// Validado tanto na leitura (kommo-dashboard, ignora entradas malformadas em vez
+// de derrubar a request) quanto na escrita (Configurações do Dashboard, no save).
+const stageRef = z.object({
+  pipelineId: z.string().min(1),
+  statusId: z.string().min(1),
+});
+// Mesma lista de chaves de src/lib/custom-metrics.ts (CUSTOM_METRIC_ICON_KEYS) —
+// o backend só precisa validar/repassar a string, quem desenha o ícone é o front.
+const CUSTOM_METRIC_ICON_KEYS = [
+  "sparkles", "star", "repeat", "gauge", "clock", "trending-up", "percent", "users",
+  "target", "award", "heart", "zap", "phone", "calendar", "thumbs-up", "message-circle",
+] as const;
+export const CustomMetricSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(60),
+  format: z.enum(["percent", "number"]),
+  icon: z.enum(CUSTOM_METRIC_ICON_KEYS).catch("sparkles"),
+  numerator: z.array(stageRef).min(1).max(3),
+  denominator: z.array(stageRef).max(3),
+});
+export type CustomMetric = z.infer<typeof CustomMetricSchema>;
+export const CustomMetricsListSchema = z.array(CustomMetricSchema).max(3);
+
 export const KommoReportSnapshotPayloadSchema = z.object({
   workspace_id: z.string().min(1),
   // Clamp tolerante (não integer-only, igual ao comportamento manual anterior).

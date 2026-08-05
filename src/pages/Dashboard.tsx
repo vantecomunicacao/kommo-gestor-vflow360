@@ -30,8 +30,8 @@ import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
 import { FunnelVelocity } from "@/components/dashboard/FunnelVelocity";
+import { CustomMetricsCard } from "@/components/dashboard/CustomMetricsCard";
 import { FollowUpCard } from "@/components/dashboard/FollowUpCard";
-import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
@@ -433,30 +433,36 @@ export default function Dashboard() {
 
 
       {isFinance ? (
-        <AnimatedSection delay={0.05}>
-          <FunnelCycles
-            cycleToWonDays={data.cycleToWonDays ?? 0}
-            cycleToWonSample={data.cycleToWonSample ?? 0}
-            cycleToLostDays={data.cycleToLostDays ?? 0}
-            cycleToLostSample={data.cycleToLostSample ?? 0}
-          />
+        <AnimatedSection className="grid grid-cols-1 lg:grid-cols-4 gap-5 lg:gap-6 items-start" delay={0.05}>
+          <div className="lg:col-span-3">
+            <FunnelCycles
+              cycleToWonDays={data.cycleToWonDays ?? 0}
+              cycleToWonSample={data.cycleToWonSample ?? 0}
+              cycleToLostDays={data.cycleToLostDays ?? 0}
+              cycleToLostSample={data.cycleToLostSample ?? 0}
+            />
+          </div>
+          <CustomMetricsCard metrics={data.customMetrics ?? []} />
         </AnimatedSection>
       ) : (
-        <AnimatedSection delay={0.05}>
-          <FunnelVisualization
-            funnelStages={funnelStagesLabeled}
-            conversionRates={data.conversionRates}
-            lostLeads={data.lostLeads || 0}
-            lostLeadsDetail={data.lostLeadsDetail || []}
-            belowLostCard={
-              <FunnelCycles
-                cycleToWonDays={data.cycleToWonDays ?? 0}
-                cycleToWonSample={data.cycleToWonSample ?? 0}
-                cycleToLostDays={data.cycleToLostDays ?? 0}
-                cycleToLostSample={data.cycleToLostSample ?? 0}
-              />
-            }
-          />
+        <AnimatedSection className="grid grid-cols-1 lg:grid-cols-4 gap-5 lg:gap-6 items-start" delay={0.05}>
+          <div className="lg:col-span-3">
+            <FunnelVisualization
+              funnelStages={funnelStagesLabeled}
+              conversionRates={data.conversionRates}
+              lostLeads={data.lostLeads || 0}
+              lostLeadsDetail={data.lostLeadsDetail || []}
+              belowLostCard={
+                <FunnelCycles
+                  cycleToWonDays={data.cycleToWonDays ?? 0}
+                  cycleToWonSample={data.cycleToWonSample ?? 0}
+                  cycleToLostDays={data.cycleToLostDays ?? 0}
+                  cycleToLostSample={data.cycleToLostSample ?? 0}
+                />
+              }
+            />
+          </div>
+          <CustomMetricsCard metrics={data.customMetrics ?? []} />
         </AnimatedSection>
       )}
 
@@ -508,12 +514,6 @@ export default function Dashboard() {
             onSellerToggle={(id) => setSelectedSellerIds((prev) => prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id])}
             onClearSellers={() => setSelectedSellerIds([])}
           />
-        </AnimatedSection>
-      )}
-
-      {!isFinance && (
-        <AnimatedSection delay={0.05}>
-          <CoolingLeadsCard data={data.coolingLeads} />
         </AnimatedSection>
       )}
 

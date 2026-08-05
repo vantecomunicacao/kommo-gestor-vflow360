@@ -44,7 +44,7 @@ de forma confiável e retroativa. Caminhos a investigar (em ordem de probabilida
    campo, valor, ganho/perdido via API Kommo). **Só após aprovação humana.**
 5. **Frontend** → religar as rotas removidas na Fase 1 (`/suggestions`, `/conversations`,
    `/assistant`) e os itens de menu em `AppSidebar.tsx`; reverter os redirects de
-   `landingPath`/`GestorGuard` de `/cooling-leads` para `/suggestions`.
+   `landingPath`/`GestorGuard` de `/leads-esfriando` para `/suggestions`.
 6. **Observabilidade** → migrar `log-event` + página de Logs/Sistema para o schema
    `kommo` (hoje fora do menu).
 

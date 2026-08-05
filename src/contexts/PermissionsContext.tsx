@@ -34,10 +34,10 @@ export function isSuggestionsOnly(p: Permissions): boolean {
 }
 
 // Rota de destino conforme o perfil. Fase 1 (produto de analytics): Sugestoes saiu
-// do produto, entao o perfil "so sugestoes" cai em /cooling-leads (unica pagina que
+// do produto, entao o perfil "so sugestoes" cai em /leads-esfriando (unica pagina que
 // ele enxerga). Demais -> Dashboard. Ver docs/ROADMAP_FASE2_COPILOTO.md.
 export function landingPath(p: Permissions): string {
-  return isSuggestionsOnly(p) ? "/cooling-leads" : "/dashboard";
+  return isSuggestionsOnly(p) ? "/leads-esfriando" : "/dashboard";
 }
 
 export const PermissionsProvider = ({ children }: { children: ReactNode }) => {

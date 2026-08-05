@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
 export interface StageLead { id: number; name: string; contactName?: string | null; }
+export interface CustomMetricResult { id: string; name: string; format: "percent" | "number"; icon?: string; value: number | null; }
 export interface FunnelStage { id: string; name: string; count: number; currentCount?: number; leads?: StageLead[]; }
 export interface Seller {
   id?: string;
@@ -70,6 +71,8 @@ export interface CoolingLead {
   responsible_user_id?: string | null;
   taskDone?: boolean; // já tem tarefa (criada pelo vflow ou tarefa aberta no Kommo)
   tagDone?: boolean;  // tag já aplicada pelo vflow
+  pipeline?: string | null;
+  stage?: string | null;
 }
 export interface CoolingLeads {
   warning: number;  // 7–9 dias parado
@@ -125,7 +128,7 @@ export interface DashboardData {
   negotiatingMonetary?: number;
   cachedAt?: string;
   responseTime?: ResponseTime | null;
-  coolingLeads?: CoolingLeads | null;
+  customMetrics?: CustomMetricResult[];
 }
 
 export interface DashboardFilters {

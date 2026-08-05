@@ -3,7 +3,7 @@ import { usePermissions, isSuggestionsOnly } from "@/contexts/PermissionsContext
 import { Loader2 } from "lucide-react";
 
 // Bloqueia usuarios "so sugestoes" (vendedor) das rotas de gestor, redirecionando
-// para /cooling-leads (Sugestoes saiu do produto na Fase 1). Gestores/admins passam.
+// para /leads-esfriando (Sugestoes saiu do produto na Fase 1). Gestores/admins passam.
 const GestorGuard = ({ children }: { children: React.ReactNode }) => {
   const { permissions, loading } = usePermissions();
   if (loading) {
@@ -14,7 +14,7 @@ const GestorGuard = ({ children }: { children: React.ReactNode }) => {
     );
   }
   if (isSuggestionsOnly(permissions)) {
-    return <Navigate to="/cooling-leads" replace />;
+    return <Navigate to="/leads-esfriando" replace />;
   }
   return <>{children}</>;
 };

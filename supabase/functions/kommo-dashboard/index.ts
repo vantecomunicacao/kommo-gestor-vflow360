@@ -2,8 +2,8 @@
 // Agrega kommo.leads (+ pipelines/users/loss_reasons/custom_fields/settings) em
 // DashboardData (mesmo formato do ghl-dashboard, para o frontend reusar sem mudança).
 // Schema `kommo`, isolado. Partes que dependem de conversas/mensagens (tempo de
-// resposta, cooling por mensagem) ficam zeradas até a Fase 2 — aqui há um cooling
-// simples por inatividade do lead (now - kommo_updated_at).
+// resposta) ficam zeradas até a Fase 2. "Leads esfriando" NÃO é calculado aqui —
+// vive isolado na edge function `cooling-leads` (tela dedicada /leads-esfriando).
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -11,7 +11,7 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
-import { KommoDashboardPayloadSchema } from "../_shared/schemas.ts";
+import { KommoDashboardPayloadSchema, CustomMetricsListSchema } from "../_shared/schemas.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -523,23 +523,6 @@ serve(async (req) => {
     const cycleToWon = cycleDays(wonOpps);
     const cycleToLost = cycleDays(lostOpps);
 
-    // ===== Cooling simples por inatividade (now - kommo_updated_at) para leads abertos =====
-    const COOLING = { warning: 7, alert: 10, critical: 14 };
-    const cooling = { warning: 0, alert: 0, critical: 0, total: 0, thresholds: COOLING, leads: { warning: [] as any[], alert: [] as any[], critical: [] as any[] } };
-    const nowMs = Date.now();
-    const sellerName = new Map(usersList.map((u) => [u.kommo_id, u.name]));
-    for (const l of leads) {
-      if (l.status === "lost" || isWonLead(l)) continue;
-      const base = l.kommo_updated_at || l.kommo_created_at;
-      if (!base) continue;
-      const days = (nowMs - new Date(base).getTime()) / DAY_MS;
-      if (days < COOLING.warning) continue;
-      const bucket = days >= COOLING.critical ? "critical" : days >= COOLING.alert ? "alert" : "warning";
-      cooling.total++; (cooling as any)[bucket]++;
-      cooling.leads[bucket].push({ name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`, seller: l.responsible_user_id ? (sellerName.get(l.responsible_user_id) || null) : null, days: Math.floor(days) });
-    }
-    for (const k of ["warning", "alert", "critical"] as const) { cooling.leads[k].sort((a, b) => b.days - a.days); cooling.leads[k] = cooling.leads[k].slice(0, 100); }
-
     // ===== Qualidade de preenchimento dos campos personalizados (de lead) =====
     // visible_custom_fields guarda kommo_id; casa no lead por field_id OU field_code.
     const leadFieldDefs = customFieldDefs.filter((d) => (d.entity_type || "").toLowerCase() === "leads");
@@ -590,6 +573,44 @@ serve(async (req) => {
       })
       .filter((d): d is NonNullable<typeof d> => d !== null);
 
+    // ===== Métricas Personalizadas (kommo.dashboard_settings.custom_metrics) =====
+    // Config validada na leitura: entradas malformadas (ex.: editadas direto no banco)
+    // são descartadas em vez de derrubar a request inteira.
+    const customMetricsParsed = CustomMetricsListSchema.safeParse(settings?.custom_metrics ?? []);
+    const customMetricsConfig = customMetricsParsed.success ? customMetricsParsed.data : [];
+    // "Está em": lead cujo status atual é uma das etapas configuradas.
+    const countCurrentlyIn = (refs: { pipelineId: string; statusId: string }[]) => {
+      const keys = new Set(refs.map((r) => `${r.pipelineId}:${r.statusId}`));
+      let n = 0;
+      for (const l of leads) {
+        if (l.pipeline_id && l.status_id && keys.has(`${l.pipeline_id}:${l.status_id}`)) n++;
+      }
+      return n;
+    };
+    // "Passou por": lead que está atualmente na etapa OU tem, no histórico real
+    // (lead_stage_events, já carregado acima), um evento de entrada nela. Igual ao
+    // resto do arquivo, resolve a etapa pelo pipeline ATUAL do lead (não por
+    // pipeline gravado no evento) — evita colisão de status_id repetido entre funis.
+    const countPassedThrough = (refs: { pipelineId: string; statusId: string }[]) => {
+      if (refs.length === 0) return 0;
+      let n = 0;
+      for (const l of leads) {
+        if (!l.pipeline_id) continue;
+        const targetStatusIds = new Set(refs.filter((r) => r.pipelineId === l.pipeline_id).map((r) => r.statusId));
+        if (targetStatusIds.size === 0) continue;
+        if (l.status_id && targetStatusIds.has(l.status_id)) { n++; continue; }
+        const evs = eventsByLead.get(String(l.kommo_id)) || [];
+        if (evs.some((e) => e.after && targetStatusIds.has(e.after))) n++;
+      }
+      return n;
+    };
+    const customMetrics = customMetricsConfig.map((m) => {
+      const passed = countPassedThrough(m.numerator);
+      if (m.format === "number") return { id: m.id, name: m.name, format: m.format, icon: m.icon, value: passed };
+      const base = countCurrentlyIn(m.denominator);
+      return { id: m.id, name: m.name, format: m.format, icon: m.icon, value: base > 0 ? (passed / base) * 100 : null };
+    });
+
     return new Response(JSON.stringify({
       totalLeads, lostLeads,
       lostLeadsDetail: lostOpps.slice(0, 200).map((l, i) => ({ id: i + 1, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`, contactName: l.contact_name || null })),
@@ -616,7 +637,7 @@ serve(async (req) => {
       totalMonetary, wonMonetary, lostMonetary, negotiatingMonetary,
       // Fase 2 (dependem de conversas/mensagens):
       responseTime: { averageMinutes: 0, responseCount: 0, conversationsAnalyzed: 0, conversationsWithInbound: 0, businessHoursStart: settings?.business_hours_start || "09:00", businessHoursEnd: settings?.business_hours_end || "18:00", unanswered: [] },
-      coolingLeads: cooling,
+      customMetrics,
       cachedAt: new Date().toISOString(),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

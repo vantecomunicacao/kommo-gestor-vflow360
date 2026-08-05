@@ -204,9 +204,15 @@ serve(async (req) => {
     // === 5. Contacts (com phone/email extraídos dos custom fields) ===
     const CONTACTS_MAX_PAGES = 100, CONTACTS_PAGE = 250;
     const contacts = await kommoFetchAll(creds, `/contacts?limit=${CONTACTS_PAGE}${contactsSince}`, "contacts", { maxPages: CONTACTS_MAX_PAGES });
+    // Mapa id→dados usado abaixo para denormalizar contact_name/phone/email em
+    // kommo.leads (evita join no dashboard). Num sync incremental (contactsSince
+    // ativo) só cobre contatos alterados no período — os demais leads mantêm o
+    // que já está gravado no upsert anterior.
+    const contactById = new Map<string, { name: string | null; phone: string | null; email: string | null }>();
     if (contacts.length) {
       const rows = contacts.map((c: any) => {
         const { phone, email } = extractContactPhoneEmail(c.custom_fields_values);
+        contactById.set(String(c.id), { name: c.name ?? null, phone, email });
         return {
           workspace_id: workspaceId,
           kommo_id: String(c.id),
@@ -232,8 +238,28 @@ serve(async (req) => {
     const LEADS_MAX_PAGES = 60, LEADS_PAGE = 250;
     const leads = await kommoFetchAll(creds, `/leads?limit=${LEADS_PAGE}&with=contacts${leadsSince}`, "leads", { maxPages: LEADS_MAX_PAGES });
     if (leads.length) {
+      // Num sync incremental, `contactById` só tem os contatos alterados neste
+      // tick — busca no banco os IDs que faltam pra não gravar contact_name/
+      // phone/email como null e apagar o que já estava denormalizado em leads.
+      const missingContactIds = Array.from(new Set(
+        leads
+          .map((l: any) => l?._embedded?.contacts?.[0]?.id)
+          .filter((id: unknown) => id != null)
+          .map((id: unknown) => String(id))
+          .filter((id: string) => !contactById.has(id)),
+      ));
+      if (missingContactIds.length) {
+        const { data: existingContacts } = await db.from("contacts")
+          .select("kommo_id,name,phone,email")
+          .eq("workspace_id", workspaceId)
+          .in("kommo_id", missingContactIds);
+        for (const c of (existingContacts || []) as any[]) {
+          contactById.set(String(c.kommo_id), { name: c.name ?? null, phone: c.phone ?? null, email: c.email ?? null });
+        }
+      }
       const rows = leads.map((l: any) => {
         const mainContactId = l?._embedded?.contacts?.[0]?.id ?? null;
+        const contact = mainContactId != null ? contactById.get(String(mainContactId)) : undefined;
         return {
           workspace_id: workspaceId,
           kommo_id: String(l.id),
@@ -246,6 +272,9 @@ serve(async (req) => {
           loss_reason_id: l.loss_reason_id != null ? String(l.loss_reason_id) : null,
           source: null,
           contact_id: mainContactId != null ? String(mainContactId) : null,
+          contact_name: contact?.name ?? null,
+          contact_phone: contact?.phone ?? null,
+          contact_email: contact?.email ?? null,
           custom_fields: l.custom_fields_values ?? {},
           is_deleted: !!l.is_deleted,
           kommo_created_at: unixToIso(l.created_at),

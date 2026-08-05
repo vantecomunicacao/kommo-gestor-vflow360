@@ -260,6 +260,11 @@ export function CoolingLeadsCard({ data }: CoolingLeadsCardProps) {
                       <User className="w-3 h-3 shrink-0" />
                       {lead.seller || "Não atribuído"}
                     </p>
+                    {(lead.pipeline || lead.stage) && (
+                      <p className="text-[11px] text-muted-foreground/80 truncate mt-0.5">
+                        {lead.pipeline}{lead.pipeline && lead.stage ? " · " : ""}{lead.stage}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap mr-1">

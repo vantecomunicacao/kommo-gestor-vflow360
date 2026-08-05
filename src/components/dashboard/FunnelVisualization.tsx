@@ -74,7 +74,11 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
   ];
 
   const topPassage = funnelStages[0]?.count ?? 0;
-  const lostPercentage = topPassage > 0 ? (lostLeads / topPassage) * 100 : 0;
+  // Total de leads que entraram no funil no período = os que seguem vivos/ganharam
+  // (topPassage) + os perdidos. Dividir só por topPassage (como era antes) inflava
+  // a taxa acima de 100% quando havia mais perdas do que leads em aberto no topo.
+  const totalEnteredFunnel = topPassage + lostLeads;
+  const lostPercentage = totalEnteredFunnel > 0 ? (lostLeads / totalEnteredFunnel) * 100 : 0;
 
   // Tapering widths to keep the funnel feel without trapezoidal shapes
   const stageWidths = ["w-full", "w-[92%]", "w-[80%]", "w-[66%]"];

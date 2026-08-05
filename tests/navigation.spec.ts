@@ -10,7 +10,7 @@ import { installSupabaseMocks, loginAs } from "./helpers/supabaseMock";
 // Analista) e observabilidade (Logs/Sistema) saíram do produto — ver
 // docs/ROADMAP_FASE2_COPILOTO.md.
 const routes: { link: string; exact?: boolean; url: RegExp }[] = [
-  { link: "Leads esfriando", url: /\/cooling-leads$/ },
+  { link: "Leads esfriando", url: /\/leads-esfriando$/ },
   { link: "Integrações", url: /\/integrations$/ },
   { link: "Admin", exact: true, url: /\/admin$/ },
   { link: "Configurações", url: /\/settings\/account$/ },

@@ -44,7 +44,8 @@ serve(async (req) => {
     const payload = await req.json().catch(() => ({} as any));
     const workspaceId = payload.workspace_id as string;
     if (!workspaceId) throw new Error("workspace_id is required");
-    const filterPipelineId: string | null = payload.pipelineId || null;
+    const filterPipelineIds: string[] = Array.isArray(payload.pipelineIds) ? payload.pipelineIds.filter(Boolean) : [];
+    const filterSellerIds: string[] = Array.isArray(payload.sellerIds) ? payload.sellerIds.filter(Boolean) : [];
 
     // Auth: exige usuário válido no JWT + membership no workspace.
     // getClaims em try/catch (não derruba com 500 nas API keys novas), mas o
@@ -66,15 +67,21 @@ serve(async (req) => {
     // Stages "ganhas" para excluir do "aberto" (por nome + status_id 142 do Kommo).
     const [{ data: pipelinesRows }, { data: usersRows }] = await Promise.all([
       // Arquivado entra (lead antigo ainda referencia a etapa); apagado no Kommo, não.
-      db.from("pipelines").select("kommo_id,statuses").eq("workspace_id", workspaceId).eq("is_deleted", false),
+      db.from("pipelines").select("kommo_id,name,statuses").eq("workspace_id", workspaceId).eq("is_deleted", false),
       db.from("users").select("kommo_id,name").eq("workspace_id", workspaceId),
     ]);
 
     const wonStageIds = new Set<string>(["142"]); // 142 = "Venda ganha" (status de sistema Kommo)
+    const pipelineNameById = new Map<string, string>();
+    // Nome da etapa por par "pipeline:status" — status_id se repete entre funis (ex.: 142/143
+    // são os mesmos ids em todos os funis), então mapear só por status seria ambíguo.
+    const stageNameByPipelineStatus = new Map<string, string>();
     for (const p of (pipelinesRows || []) as any[]) {
+      pipelineNameById.set(String(p.kommo_id), p.name);
       const stages = Array.isArray(p.statuses) ? p.statuses : [];
       for (const s of stages) {
         if (isWonName(s.name)) wonStageIds.add(String(s.id));
+        stageNameByPipelineStatus.set(`${p.kommo_id}:${s.id}`, s.name);
       }
     }
 
@@ -100,15 +107,18 @@ serve(async (req) => {
       if (t.lead_id) taskDoneSet.add(String(t.lead_id));
     }
 
-    // Leads abertos (sem filtro de data; aplica pipeline opcional). Exclui deletados.
+    // Leads abertos (sem filtro de data; aplica funil/vendedor opcionais). Exclui deletados.
     // Paginado — PostgREST corta a resposta em 1000 linhas.
     const leadRows = await fetchAllRows((from, to) => {
       let q = db
         .from("leads")
-        .select("kommo_id,name,status,status_id,responsible_user_id,kommo_updated_at,kommo_created_at")
+        .select("kommo_id,name,status,status_id,responsible_user_id,pipeline_id,kommo_updated_at,kommo_created_at")
         .eq("workspace_id", workspaceId)
         .neq("is_deleted", true);
-      if (filterPipelineId) q = q.eq("pipeline_id", filterPipelineId);
+      if (filterPipelineIds.length === 1) q = q.eq("pipeline_id", filterPipelineIds[0]);
+      else if (filterPipelineIds.length > 1) q = q.in("pipeline_id", filterPipelineIds);
+      if (filterSellerIds.length === 1) q = q.eq("responsible_user_id", filterSellerIds[0]);
+      else if (filterSellerIds.length > 1) q = q.in("responsible_user_id", filterSellerIds);
       return q.order("kommo_id").range(from, to);
     });
 
@@ -120,12 +130,15 @@ serve(async (req) => {
       return true;
     };
 
-    type CoolingLead = { name: string; seller: string | null; days: number; kommo_id: string; responsible_user_id: string | null; taskDone: boolean; tagDone: boolean };
+    type CoolingLead = { name: string; seller: string | null; days: number; kommo_id: string; responsible_user_id: string | null; taskDone: boolean; tagDone: boolean; pipeline: string | null; stage: string | null };
     const result = {
       warning: 0, alert: 0, critical: 0, total: 0,
       thresholds: COOLING_THRESHOLDS,
       leads: { warning: [] as CoolingLead[], alert: [] as CoolingLead[], critical: [] as CoolingLead[] },
       scope: "workspace" as const,
+      // Opções pros filtros da tela (sempre a lista completa do workspace, não filtrada).
+      pipelines: (pipelinesRows || []).map((p: any) => ({ id: String(p.kommo_id), name: p.name })),
+      users: (usersRows || []).map((u: any) => ({ id: String(u.kommo_id), name: u.name })),
     };
 
     for (const l of (leadRows || [])) {
@@ -150,6 +163,10 @@ serve(async (req) => {
         responsible_user_id: (l as any).responsible_user_id ? String((l as any).responsible_user_id) : null,
         taskDone: taskDoneSet.has(String((l as any).kommo_id)),
         tagDone: tagDoneSet.has(String((l as any).kommo_id)),
+        pipeline: (l as any).pipeline_id ? (pipelineNameById.get(String((l as any).pipeline_id)) || null) : null,
+        stage: (l as any).pipeline_id && (l as any).status_id
+          ? (stageNameByPipelineStatus.get(`${(l as any).pipeline_id}:${(l as any).status_id}`) || null)
+          : null,
       });
     }
     for (const k of ["warning", "alert", "critical"] as const) {
