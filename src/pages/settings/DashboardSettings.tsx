@@ -13,10 +13,12 @@ import { ptBR } from "date-fns/locale";
 import { FUNNEL_BUCKETS } from "@/lib/dashboard-funnel";
 import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
 import { CustomMetric, customMetricsListSchema } from "@/lib/custom-metrics";
+import { CustomFilter, customFiltersListSchema } from "@/lib/custom-filters";
 import FunnelTab from "./dashboard/FunnelTab";
 import OriginUtmTab from "./dashboard/OriginUtmTab";
 import MetricsReportTab from "./dashboard/MetricsReportTab";
 import PreferencesTab from "./dashboard/PreferencesTab";
+import CustomFiltersTab from "./dashboard/CustomFiltersTab";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
@@ -50,17 +52,18 @@ export default function DashboardSettings() {
   const [reportGoals, setReportGoals] = useState<Record<string, number>>({}); // metas do relatório ("<eixo>:<metricId>" -> valor)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [customMetrics, setCustomMetrics] = useState<CustomMetric[]>([]);
+  const [customFilters, setCustomFilters] = useState<CustomFilter[]>([]);
 
   // Detecção de alterações não salvas (baseline capturado ao carregar / após salvar).
   const editable = useMemo(() => JSON.stringify({
     defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
     chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
-    customMetrics,
+    customMetrics, customFilters,
   }), [defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
     chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
-    customMetrics]);
+    customMetrics, customFilters]);
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
   useEffect(() => {
@@ -120,6 +123,8 @@ export default function DashboardSettings() {
         // Descarta entradas malformadas em vez de quebrar a tela (ex.: editado direto no banco).
         const parsedMetrics = customMetricsListSchema.safeParse((settings as any).custom_metrics ?? []);
         setCustomMetrics(parsedMetrics.success ? parsedMetrics.data : []);
+        const parsedFilters = customFiltersListSchema.safeParse((settings as any).custom_filters ?? []);
+        setCustomFilters(parsedFilters.success ? parsedFilters.data : []);
       }
     } catch (e) {
       toast.error("Erro ao carregar", { description: (e as Error).message });
@@ -134,6 +139,13 @@ export default function DashboardSettings() {
     if (!metricsCheck.success) {
       toast.error("Métricas Personalizadas com erro", {
         description: metricsCheck.error.errors[0]?.message || "Revise os campos das métricas.",
+      });
+      return;
+    }
+    const filtersCheck = customFiltersListSchema.safeParse(customFilters);
+    if (!filtersCheck.success) {
+      toast.error("Filtros Personalizados com erro", {
+        description: filtersCheck.error.errors[0]?.message || "Revise os campos dos filtros.",
       });
       return;
     }
@@ -159,6 +171,7 @@ export default function DashboardSettings() {
         report_rate_stages: reportRateStages,
         report_goals: reportGoals,
         custom_metrics: customMetrics,
+        custom_filters: customFilters,
       };
       const { error } = await supabase
         .from("dashboard_settings" as any)
@@ -325,6 +338,7 @@ export default function DashboardSettings() {
           <TabsTrigger value="funil">Funil</TabsTrigger>
           <TabsTrigger value="origem">Origem &amp; UTM</TabsTrigger>
           <TabsTrigger value="metricas">Métricas &amp; Relatório</TabsTrigger>
+          <TabsTrigger value="filtros">Filtros</TabsTrigger>
           <TabsTrigger value="preferencias">Preferências</TabsTrigger>
         </TabsList>
 
@@ -373,6 +387,14 @@ export default function DashboardSettings() {
             setVisibleFields={setVisibleFields}
             chartFields={chartFields}
             setChartFields={setChartFields}
+          />
+        </TabsContent>
+
+        <TabsContent value="filtros" className="space-y-6 mt-0">
+          <CustomFiltersTab
+            customFields={customFields}
+            customFilters={customFilters}
+            setCustomFilters={setCustomFilters}
           />
         </TabsContent>
 

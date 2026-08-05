@@ -18,7 +18,7 @@ export function FunnelVelocity({ velocity }: FunnelVelocityProps) {
     <div className="dashboard-section animate-slide-up">
       <h2 className="section-title">
         <Gauge className="w-5 h-5 text-primary-ink" />
-        Velocidade do Funil
+        Movimentação do Funil
         <SectionTooltip text="Movimentação do funil no período selecionado: quantos leads avançaram de etapa, total de mudanças, e fechamentos (ganhos/perdidos). Baseado no histórico real de eventos do CRM." />
       </h2>
 

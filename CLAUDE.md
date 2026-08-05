@@ -25,6 +25,15 @@ manualmente o restante dos workspaces pro projeto novo. Só desligar
 (`cron.unschedule`) ou remover algo do lado Kommo desse projeto antigo com
 autorização explícita — mesmo sendo "nosso", é código morto pendente, não órfão.
 
+**`supabase db push` está QUEBRADO no projeto novo** (confirmado 2026-08-05): a
+tabela de histórico de migrations do projeto novo não bate com o que já existe
+no banco (herança da replicação em bloco de 2026-08-02), então `db push` tenta
+reaplicar migrations antigas do zero — inclusive coisas do schema `public`/GHL
+que nem deveriam estar aqui — e quebra em `relation already exists`. **Não usar
+`db push` neste projeto.** Para aplicar uma migration nova, rodar o SQL direto
+via `supabase db query --linked "<SQL>"` (mesmo padrão já usado em várias
+migrations do changelog abaixo).
+
 ## Regras invioláveis
 
 ### 1. NÃO alterar nada do GHL (GoHighLevel) no Supabase
@@ -128,6 +137,13 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
+- `20260805120000_kommo_custom_filters.sql` — adiciona coluna
+  `kommo.dashboard_settings.custom_filters jsonb` (até 4 filtros extras por workspace,
+  `{id, label, fieldId}`, editados na tela Configurações → aba "Filtros"). Cada filtro
+  mapeia um campo personalizado de lead pra um dropdown extra na barra do Dashboard
+  (`kommo-dashboard` lê a config, filtra `leads` e monta as opções distintas; payload
+  novo `customFilters: {filterId: string[]}`). Aditiva; sem mudança de RLS.
+
 - `20260709160000_kommo_report_goals.sql` — adiciona coluna
   `kommo.dashboard_settings.report_goals jsonb` (metas fixas mensais por métrica do
   Relatório; chave `"<eixo>:<metricId>"`, ex.: `{"fechamento:won":30}`). Editada/gravada
@@ -154,6 +170,17 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-08-05 (`20260805120000_kommo_custom_filters.sql`): adiciona coluna
+  `kommo.dashboard_settings.custom_filters jsonb` — até 4 filtros personalizados por
+  workspace (`{id, label, fieldId}`), configurados em Configurações → aba "Filtros"
+  (novo `CustomFiltersTab.tsx`, mesmo padrão de `custom_metrics`). Cada filtro mapeia
+  um campo personalizado de LEAD pra um dropdown extra na barra de filtros do Dashboard
+  (`Header.tsx`), com opções = valores distintos daquele campo. `kommo-dashboard` ganhou
+  o payload `customFilters: Record<filterId, string[]>` e retorna `customFilterDefs`
+  (id/label) + `customFilterValues` (opções). Aditiva; sem mudança de RLS. _(APLICADA em
+  prod 2026-08-05 via `supabase db query --linked` — `db push` falhou tentando replayar
+  todo o histórico de migrations antigo/GHL por causa da separação de infra de
+  2026-08-02; edge `kommo-dashboard` redeployada.)_
 - 2026-08-02: **separação de infraestrutura** — o schema `kommo` (todas as 21
   tabelas até aqui) foi replicado do projeto Supabase antigo compartilhado
   (`xcrfbpyhyznyufijrdry`) para o projeto novo e isolado

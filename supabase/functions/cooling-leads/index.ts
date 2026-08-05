@@ -112,7 +112,7 @@ serve(async (req) => {
     const leadRows = await fetchAllRows((from, to) => {
       let q = db
         .from("leads")
-        .select("kommo_id,name,status,status_id,responsible_user_id,pipeline_id,kommo_updated_at,kommo_created_at")
+        .select("kommo_id,name,status,status_id,responsible_user_id,pipeline_id,kommo_updated_at,kommo_created_at,price")
         .eq("workspace_id", workspaceId)
         .neq("is_deleted", true);
       if (filterPipelineIds.length === 1) q = q.eq("pipeline_id", filterPipelineIds[0]);
@@ -133,6 +133,7 @@ serve(async (req) => {
     type CoolingLead = { name: string; seller: string | null; days: number; kommo_id: string; responsible_user_id: string | null; taskDone: boolean; tagDone: boolean; pipeline: string | null; stage: string | null };
     const result = {
       warning: 0, alert: 0, critical: 0, total: 0,
+      revenue: { warning: 0, alert: 0, critical: 0, total: 0 },
       thresholds: COOLING_THRESHOLDS,
       leads: { warning: [] as CoolingLead[], alert: [] as CoolingLead[], critical: [] as CoolingLead[] },
       scope: "workspace" as const,
@@ -155,6 +156,9 @@ serve(async (req) => {
         : days >= COOLING_THRESHOLDS.alert ? "alert"
         : "warning";
       result[bucket]++;
+      const price = Number((l as any).price) || 0;
+      result.revenue[bucket] += price;
+      result.revenue.total += price;
       result.leads[bucket].push({
         name: (l as any).name || `Lead ${String((l as any).kommo_id).slice(0, 6)}`,
         seller: (l as any).responsible_user_id ? (sellerNameById.get((l as any).responsible_user_id) || null) : null,

@@ -31,8 +31,26 @@ export const KommoDashboardPayloadSchema = z.object({
   utmMedium: stringArray,
   utmCampaign: stringArray,
   origin: stringArray,
+  // Valores selecionados por filtro personalizado, chaveado pelo `id` do filtro
+  // (ver CustomFilterSchema abaixo). Objeto malformado vira {} em vez de derrubar a request.
+  customFilters: z.preprocess(
+    (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {}),
+    z.record(stringArray),
+  ),
 });
 export type KommoDashboardPayload = z.infer<typeof KommoDashboardPayloadSchema>;
+
+// ===== Filtros Personalizados (kommo.dashboard_settings.custom_filters) =====
+// Igual ao padrão de custom_metrics: validado na leitura (ignora entradas malformadas)
+// e na escrita (Configurações do Dashboard). `fieldId` é o kommo_id/code do campo
+// personalizado de lead cujos valores distintos viram as opções do dropdown.
+export const CustomFilterSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1).max(40),
+  fieldId: z.string().min(1),
+});
+export type CustomFilter = z.infer<typeof CustomFilterSchema>;
+export const CustomFiltersListSchema = z.array(CustomFilterSchema).max(4);
 
 // ===== Métricas Personalizadas (kommo.dashboard_settings.custom_metrics) =====
 // Validado tanto na leitura (kommo-dashboard, ignora entradas malformadas em vez

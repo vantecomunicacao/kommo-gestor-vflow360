@@ -11,7 +11,7 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
-import { KommoDashboardPayloadSchema, CustomMetricsListSchema } from "../_shared/schemas.ts";
+import { KommoDashboardPayloadSchema, CustomMetricsListSchema, CustomFiltersListSchema } from "../_shared/schemas.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -119,6 +119,7 @@ serve(async (req) => {
     const filterUtmMediums = payload.utmMedium;
     const filterUtmCampaigns = payload.utmCampaign;
     const filterOrigins = payload.origin;
+    const filterCustomFilters = payload.customFilters;
 
     // ===== Catálogos =====
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
@@ -171,6 +172,12 @@ serve(async (req) => {
     const originFieldName = settings?.origin_field_name || null; // ex: code de "Origem do lead"
     const getOrigin = (l: any): string | null =>
       extractCf(l.custom_fields, originFieldName) || extractCf(l.custom_fields, utmSourceField) || l.source || null;
+
+    // ===== Filtros Personalizados (kommo.dashboard_settings.custom_filters) =====
+    // Config validada na leitura: entradas malformadas são descartadas em vez de
+    // derrubar a request. Cada filtro mapeia um campo de lead p/ um dropdown extra.
+    const customFiltersParsed = CustomFiltersListSchema.safeParse(settings?.custom_filters ?? []);
+    const customFilterDefs = customFiltersParsed.success ? customFiltersParsed.data : [];
 
     const defaultPipelineIds: string[] = Array.isArray(settings?.default_pipeline_ids) ? settings.default_pipeline_ids : [];
     const activePipelines = filterPipelineIds.length
@@ -231,6 +238,10 @@ serve(async (req) => {
     if (filterUtmMediums.length) leads = leads.filter((l) => filterUtmMediums.includes(extractCf(l.custom_fields, utmMediumField) || ""));
     if (filterUtmCampaigns.length) leads = leads.filter((l) => filterUtmCampaigns.includes(extractCf(l.custom_fields, utmCampaignField) || ""));
     if (filterOrigins.length) leads = leads.filter((l) => filterOrigins.includes(getOrigin(l) || ""));
+    for (const def of customFilterDefs) {
+      const selected = filterCustomFilters[def.id];
+      if (selected?.length) leads = leads.filter((l) => selected.includes(extractCf(l.custom_fields, def.fieldId) || ""));
+    }
 
     // ===== Filtro ADITIVO por data adicional (ex.: "Data da venda") =====
     // Como o SQL trouxe os leads SEM restrição de criação (additionalActive), aqui
@@ -464,6 +475,12 @@ serve(async (req) => {
     const utmMedium = buildDist((l) => extractCf(l.custom_fields, utmMediumField), leadsForFilterOptions);
     const utmCampaign = buildDist((l) => extractCf(l.custom_fields, utmCampaignField), leadsForFilterOptions);
     const originOptions = buildDist(getOrigin, leadsForFilterOptions);
+    // Opções dos dropdowns dos filtros personalizados — mesma lógica (snapshot pré-filtro).
+    const customFilterValues: Record<string, string[]> = {};
+    for (const def of customFilterDefs) {
+      customFilterValues[def.id] = buildDist((l) => extractCf(l.custom_fields, def.fieldId), leadsForFilterOptions)
+        .distribution.map((d) => d.name);
+    }
 
     // ===== Daily leads (7 dias) — agrupado por dia em horário de Brasília =====
     // O kommo_created_at é UTC; agrupar por UTC jogava leads da noite (BRT) para o
@@ -474,21 +491,29 @@ serve(async (req) => {
     // Eixo do gráfico segue o dateBasis: criação (Comercial) ou fechamento (Financeiro).
     const dailyDateOf = (l: any): string | null =>
       dateBasis === "fechamento" ? (l.closed_at || null) : (l.kommo_created_at || null);
-    const leadsByDay = new Map<string, number>();
+    // `total` = todos os leads do dia (usado pelo Comercial). No Financeiro, `leads`
+    // já só contém fechados (won/lost) então total === won+lost; no Comercial há
+    // leads ainda abertos, então total > won+lost — por isso contamos os 3 à parte.
+    const leadsByDay = new Map<string, { total: number; won: number; lost: number }>();
     for (const l of leads) {
       const ref = dailyDateOf(l);
       if (!ref) continue;
       const iso = brtDate(new Date(ref as string));
-      leadsByDay.set(iso, (leadsByDay.get(iso) || 0) + 1);
+      const bucket = leadsByDay.get(iso) || { total: 0, won: 0, lost: 0 };
+      bucket.total++;
+      if (isWonLead(l)) bucket.won++;
+      else if (l.status === "lost") bucket.lost++;
+      leadsByDay.set(iso, bucket);
     }
     // Últimos 7 dias terminando no dia BRT de endRef (aritmética de calendário em UTC puro)
     const [ey, em, ed] = brtDate(endRef).split("-").map(Number);
-    const dailyLeads: Array<{ date: string; count: number; dayName: string }> = [];
+    const dailyLeads: Array<{ date: string; count: number; won: number; lost: number; dayName: string }> = [];
     for (let i = 6; i >= 0; i--) {
       const d = new Date(Date.UTC(ey, em - 1, ed));
       d.setUTCDate(d.getUTCDate() - i);
       const iso = d.toISOString().slice(0, 10);
-      dailyLeads.push({ date: iso, count: leadsByDay.get(iso) || 0, dayName: dayLabels[d.getUTCDay()] });
+      const bucket = leadsByDay.get(iso) || { total: 0, won: 0, lost: 0 };
+      dailyLeads.push({ date: iso, count: bucket.total, won: bucket.won, lost: bucket.lost, dayName: dayLabels[d.getUTCDay()] });
     }
 
     // ===== Loss reasons =====
@@ -509,6 +534,29 @@ serve(async (req) => {
       const b = stageBucket(l.pipeline_id, l.status_id);
       return (b === "proposta_enviada" || b === "fechamento") ? a + (Number(l.price) || 0) : a;
     }, 0);
+
+    // ===== Receita em pipeline aberto (foto do estado ATUAL, independente do período) =====
+    // "Receita Ganha/Perdida" acima são cortes por período (data de criação ou fechamento);
+    // isso aqui é "quanto está aberto agora", então busca de novo sem filtro de data, só
+    // respeitando os mesmos filtros de funil/vendedor da tela.
+    const openLeadsRows = await fetchAllRows((from, to) => {
+      let q = db.from("leads")
+        .select("pipeline_id,status_id,status,price,responsible_user_id")
+        .eq("workspace_id", workspaceId).eq("is_deleted", false).neq("status", "lost");
+      if (filterPipelineIds.length === 1) q = q.eq("pipeline_id", filterPipelineIds[0]);
+      else if (filterPipelineIds.length > 1) q = q.in("pipeline_id", filterPipelineIds);
+      if (filterUserIds.length === 1) q = q.eq("responsible_user_id", filterUserIds[0]);
+      else if (filterUserIds.length > 1) q = q.in("responsible_user_id", filterUserIds);
+      return q.order("kommo_id").range(from, to);
+    });
+    let openPipelineRevenue = 0;
+    let openPipelineCount = 0;
+    for (const l of (openLeadsRows || []) as any[]) {
+      if (isWonLead(l)) continue;
+      if (!filterPipelineIds.length && activePipelineIds.size > 0 && l.pipeline_id && !activePipelineIds.has(l.pipeline_id)) continue;
+      openPipelineRevenue += Number(l.price) || 0;
+      openPipelineCount++;
+    }
 
     // ===== Ciclos (criação → fechamento) =====
     const cycleDays = (subset: any[]) => {
@@ -624,6 +672,8 @@ serve(async (req) => {
       leadsOriginDistribution: origem.distribution, leadsOriginFillRate: origem.fillRate,
       wonOriginDistribution: wonOrigem.distribution, wonOriginFillRate: wonOrigem.fillRate,
       utmConfigured: { source: true, medium: true, campaign: true, content: true, term: true },
+      customFilterDefs: customFilterDefs.map((d) => ({ id: d.id, label: d.label })),
+      customFilterValues,
       customFields, customFieldDistributions,
       averageTimePerStage,
       funnelVelocity,
@@ -634,7 +684,7 @@ serve(async (req) => {
       pipelines: allPipelines.map((p) => ({ id: p.kommo_id, name: p.name, stages: Array.isArray(p.statuses) ? p.statuses : [] })),
       users: activeUsers.map((u) => ({ id: u.kommo_id, name: u.name })),
       overallFillRate, lossReasons,
-      totalMonetary, wonMonetary, lostMonetary, negotiatingMonetary,
+      totalMonetary, wonMonetary, lostMonetary, negotiatingMonetary, openPipelineRevenue, openPipelineCount,
       // Fase 2 (dependem de conversas/mensagens):
       responseTime: { averageMinutes: 0, responseCount: 0, conversationsAnalyzed: 0, conversationsWithInbound: 0, businessHoursStart: settings?.business_hours_start || "09:00", businessHoursEnd: settings?.business_hours_end || "18:00", unanswered: [] },
       customMetrics,

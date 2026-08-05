@@ -98,7 +98,7 @@ export function LossReasons({ lossReasons, totalLost }: LossReasonsProps) {
                     boxShadow: "var(--shadow-2)",
                     fontSize: 13,
                   }}
-                  formatter={(v: number, name: string) => [`${v} opps`, name]}
+                  formatter={(v: number, name: string) => [`${v} perdido${v === 1 ? "" : "s"}`, name]}
                 />
               </PieChart>
             </ResponsiveContainer>

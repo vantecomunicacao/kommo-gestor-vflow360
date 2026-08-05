@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { FunnelStage, ConversionRates, StageLead } from "@/hooks/useKommoData";
-import { TrendingUp, ArrowDown, XCircle } from "lucide-react";
+import { TrendingUp, ArrowDown } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { LeadListDialog } from "./LeadListDialog";
+import { LostOpportunitiesCard } from "./LostOpportunitiesCard";
 
 interface FunnelVisualizationProps {
   funnelStages: FunnelStage[];
@@ -16,46 +15,6 @@ interface FunnelVisualizationProps {
 }
 
 const formatPercentage = (v: number) => `${v.toFixed(1)}%`;
-
-function LeadListDialog({ open, onOpenChange, title, leads }: {
-  open: boolean; onOpenChange: (o: boolean) => void; title: string; leads: StageLead[];
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>{title} ({leads.length})</DialogTitle></DialogHeader>
-        <ScrollArea className="max-h-[400px]">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-20">#</TableHead>
-                <TableHead>Oportunidade</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {leads.map((lead) => (
-                <TableRow key={lead.id}>
-                  <TableCell className="font-mono text-xs text-muted-foreground">{lead.id}</TableCell>
-                  <TableCell>
-                    <div className="font-medium">{lead.name}</div>
-                    {lead.contactName && (
-                      <div className="text-xs text-muted-foreground">{lead.contactName}</div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {leads.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={2} className="text-center text-muted-foreground py-8">Nenhuma oportunidade nesta etapa</TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </ScrollArea>
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 const stageAccents = [
   { bg: "bg-funnel-1", border: "border-funnel-1/40", icon: "text-funnel-1-ink" },
@@ -153,52 +112,7 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
 
         {/* Lost Opportunities Card */}
         <div className="lg:col-span-2">
-          <div
-            className="relative bg-card border border-border rounded-2xl p-5 shadow-sm overflow-hidden cursor-pointer hover:shadow-md transition-shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
-            role="button"
-            tabIndex={0}
-            aria-label={`Ver ${lostLeads} oportunidades perdidas`}
-            onClick={() => setSelectedStage({ title: "Oportunidades Perdidas", leads: lostLeadsDetail })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                setSelectedStage({ title: "Oportunidades Perdidas", leads: lostLeadsDetail });
-              }
-            }}
-          >
-            <div className="absolute -top-12 -right-12 w-32 h-32 bg-destructive/10 blur-3xl rounded-full pointer-events-none"></div>
-
-            <div className="relative">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="w-8 h-8 rounded-lg bg-destructive/10 flex items-center justify-center">
-                  <XCircle className="w-5 h-5 text-destructive" />
-                </div>
-                <h3 className="font-bold text-foreground">Oportunidades Perdidas</h3>
-                <SectionTooltip text="Refere-se a leads que saíram do funil antes de atingir a etapa de Venda Ganha." />
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <div className="text-xs text-muted-foreground mb-0.5">Total acumulado</div>
-                  <div className="text-3xl font-black text-destructive tabular-nums leading-none">{lostLeads}</div>
-                </div>
-
-                <div className="pt-4 border-t border-border">
-                  <div className="flex justify-between items-end mb-1.5">
-                    <span className="text-xs font-medium text-muted-foreground">Taxa de perda</span>
-                    <span className="text-lg font-bold text-foreground tabular-nums leading-none">{formatPercentage(lostPercentage)}</span>
-                  </div>
-                  <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-destructive rounded-full transition-all"
-                      style={{ width: `${Math.min(100, Math.max(2, lostPercentage))}%` }}
-                    />
-                  </div>
-                </div>
-
-              </div>
-            </div>
-          </div>
+          <LostOpportunitiesCard total={lostLeads} ratePercentage={lostPercentage} leadsDetail={lostLeadsDetail} />
 
           {belowLostCard && <div className="mt-4">{belowLostCard}</div>}
         </div>

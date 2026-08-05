@@ -3,7 +3,7 @@ import { subDays, startOfDay, endOfDay, differenceInDays, format } from "date-fn
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
 import { Link, useSearchParams } from "react-router-dom";
-import { Users, TrendingUp, TrendingDown, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal, BarChart3 } from "lucide-react";
+import { Users, TrendingUp, TrendingDown, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal, BarChart3, Wallet, Snowflake, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AxisTabs } from "@/components/AxisTabs";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,7 @@ import { DateBasis } from "@/lib/report-axis";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
+import { useCoolingLeads } from "@/hooks/useCoolingLeads";
 import { resolveFunnelLabel } from "@/lib/dashboard-funnel";
 import { calcTrend, invertTrend, winRate, ticketAverage } from "@/lib/dashboard-metrics";
 import { supabase } from "@/integrations/supabase/client";
@@ -25,12 +26,13 @@ import { OriginsCard } from "@/components/dashboard/OriginsCard";
 import { groupTopN } from "@/lib/group-top-n";
 import { buildPieColorMap } from "@/lib/pie-palette";
 import { FunnelCycles } from "@/components/dashboard/FunnelCycles";
+import { LostOpportunitiesCard } from "@/components/dashboard/LostOpportunitiesCard";
 import { DataQuality } from "@/components/dashboard/DataQuality";
 import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
 import { FunnelVelocity } from "@/components/dashboard/FunnelVelocity";
-import { CustomMetricsCard } from "@/components/dashboard/CustomMetricsCard";
+import { formatCustomMetricValue, getCustomMetricIcon } from "@/lib/custom-metrics";
 import { FollowUpCard } from "@/components/dashboard/FollowUpCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
@@ -52,6 +54,7 @@ type SavedFilters = {
   utmCampaigns?: string[];
   origin?: string | null; // legado (seleção única)
   origins?: string[];
+  customFilters?: Record<string, string[]>;
   dateBasis?: DateBasis;
 };
 
@@ -60,6 +63,20 @@ const filtersStorageKey = (workspaceId: string) => `dashboard:filters:${workspac
 // Filtros aceitos como query param (deep link) — arrays viram string separada por
 // vírgula. Ver docs/plano-filtros-dashboard.md § "Fase 5" pro design completo.
 const parseCsvParam = (v: string | null): string[] => (v ? v.split(",").filter(Boolean) : []);
+// Filtros personalizados: quantidade/ids são dinâmicos (definidos em Configurações),
+// então viram um único param JSON em vez de um param fixo por filtro.
+const parseCustomFiltersParam = (v: string | null): Record<string, string[]> => {
+  if (!v) return {};
+  try {
+    const parsed = JSON.parse(v);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [k, val] of Object.entries(parsed)) {
+      if (Array.isArray(val)) out[k] = val.filter((s) => typeof s === "string" && s);
+    }
+    return out;
+  } catch { return {}; }
+};
 
 export default function Dashboard() {
   const { activeWorkspace } = useWorkspace();
@@ -76,6 +93,7 @@ export default function Dashboard() {
   const [selectedUtmMediums, setSelectedUtmMediums] = useState<string[]>([]);
   const [selectedUtmCampaigns, setSelectedUtmCampaigns] = useState<string[]>([]);
   const [selectedOrigins, setSelectedOrigins] = useState<string[]>([]);
+  const [selectedCustomFilters, setSelectedCustomFilters] = useState<Record<string, string[]>>({});
   const [dateBasis, setDateBasis] = useState<DateBasis>("criacao");
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({});
 
@@ -104,11 +122,13 @@ export default function Dashboard() {
       const urlUtmMediums = parseCsvParam(searchParams.get("utmMedium"));
       const urlUtmCampaigns = parseCsvParam(searchParams.get("utmCampaign"));
       const urlOrigins = parseCsvParam(searchParams.get("origin"));
+      const urlCustomFilters = parseCustomFiltersParam(searchParams.get("cf"));
       const urlAxis = searchParams.get("axis");
       const urlFrom = searchParams.get("from");
       const urlTo = searchParams.get("to");
       const hasUrlFilters = !!(urlPipelines.length || urlStages.length || urlSellers.length
-        || urlUtmMediums.length || urlUtmCampaigns.length || urlOrigins.length || urlAxis || urlFrom || urlTo);
+        || urlUtmMediums.length || urlUtmCampaigns.length || urlOrigins.length
+        || Object.keys(urlCustomFilters).length || urlAxis || urlFrom || urlTo);
 
       if (hasUrlFilters) {
         setDateRange(
@@ -122,6 +142,7 @@ export default function Dashboard() {
         setSelectedUtmMediums(urlUtmMediums);
         setSelectedUtmCampaigns(urlUtmCampaigns);
         setSelectedOrigins(urlOrigins);
+        setSelectedCustomFilters(urlCustomFilters);
         setDateBasis(urlAxis === "fechamento" ? "fechamento" : "criacao");
         if (!cancelled) setHydrated(true);
         return;
@@ -149,6 +170,7 @@ export default function Dashboard() {
           setSelectedUtmMediums(saved.utmMediums ?? (saved.utmMedium ? [saved.utmMedium] : []));
           setSelectedUtmCampaigns(saved.utmCampaigns ?? (saved.utmCampaign ? [saved.utmCampaign] : []));
           setSelectedOrigins(saved.origins ?? (saved.origin ? [saved.origin] : []));
+          setSelectedCustomFilters(saved.customFilters ?? {});
           setDateBasis(saved.dateBasis === "fechamento" ? "fechamento" : "criacao");
           restored = true;
         }
@@ -163,6 +185,7 @@ export default function Dashboard() {
         setSelectedUtmMediums([]);
         setSelectedUtmCampaigns([]);
         setSelectedOrigins([]);
+        setSelectedCustomFilters({});
         setSelectedStageIds([]);
         setDateBasis("criacao");
       }
@@ -200,6 +223,7 @@ export default function Dashboard() {
       utmMediums: selectedUtmMediums,
       utmCampaigns: selectedUtmCampaigns,
       origins: selectedOrigins,
+      customFilters: selectedCustomFilters,
       dateBasis,
     };
     try {
@@ -217,11 +241,13 @@ export default function Dashboard() {
     if (selectedUtmMediums.length) nextParams.set("utmMedium", selectedUtmMediums.join(","));
     if (selectedUtmCampaigns.length) nextParams.set("utmCampaign", selectedUtmCampaigns.join(","));
     if (selectedOrigins.length) nextParams.set("origin", selectedOrigins.join(","));
+    const nonEmptyCustomFilters = Object.fromEntries(Object.entries(selectedCustomFilters).filter(([, v]) => v.length));
+    if (Object.keys(nonEmptyCustomFilters).length) nextParams.set("cf", JSON.stringify(nonEmptyCustomFilters));
     if (dateBasis === "fechamento") nextParams.set("axis", "fechamento");
     if (dateRange?.from) nextParams.set("from", format(dateRange.from, "yyyy-MM-dd"));
     if (dateRange?.to) nextParams.set("to", format(dateRange.to, "yyyy-MM-dd"));
     setSearchParams(nextParams, { replace: true });
-  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, dateBasis, setSearchParams]);
+  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, selectedCustomFilters, dateBasis, setSearchParams]);
 
 
   const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 7)), [dateRange?.from]);
@@ -235,9 +261,10 @@ export default function Dashboard() {
     utmMediums: selectedUtmMediums,
     utmCampaigns: selectedUtmCampaigns,
     origins: selectedOrigins,
+    customFilters: selectedCustomFilters,
     workspaceId: activeWorkspace?.id || null,
     dateBasis,
-  }), [startDate, endDate, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, activeWorkspace?.id, dateBasis]);
+  }), [startDate, endDate, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, selectedCustomFilters, activeWorkspace?.id, dateBasis]);
 
   const periodDays = useMemo(() => differenceInDays(endDate, startDate) + 1, [startDate, endDate]);
   const prevFilters: DashboardFilters = useMemo(() => ({
@@ -248,6 +275,9 @@ export default function Dashboard() {
 
   const { data, isLoading, isFetching, error, refetch, cachedAt } = useKommoData(filters);
   const { data: prevData } = useKommoData(prevFilters, { enabled: !!data });
+  // Receita esfriando: mesmos filtros de funil/vendedor da tela, mas sem corte de
+  // período (é uma foto do estado atual, igual à tela dedicada /leads-esfriando).
+  const { data: coolingData } = useCoolingLeads(activeWorkspace?.id || null, selectedPipelineIds, selectedSellerIds, { enabled: dateBasis === "fechamento" });
 
   // Mapa nome→cor compartilhado entre os cards de origem (leads e vendas), para
   // que a MESMA origem apareça na MESMA cor nos dois gráficos. Usa o mesmo
@@ -309,6 +339,14 @@ export default function Dashboard() {
   const prevLostRevenue = prevData?.lostMonetary ?? 0;
   // Perder MENOS dinheiro é positivo → invertemos o sinal da tendência.
   const lostRevenueTrend = invertTrend(prevData ? calcTrend(lostRevenue, prevLostRevenue) : undefined);
+  const currentLost = data.lostLeads || 0;
+
+  // Receita em pipeline aberto e esfriando.
+  const openPipelineRevenue = data.openPipelineRevenue ?? 0;
+  const openPipelineCount = data.openPipelineCount ?? 0;
+  const openTicketAvg = ticketAverage(openPipelineRevenue, openPipelineCount);
+  const coolingRevenue = coolingData?.revenue?.total ?? 0;
+  const coolingLeadsTotal = coolingData?.total ?? 0;
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -334,12 +372,16 @@ export default function Dashboard() {
         selectedUtmMediums={selectedUtmMediums}
         selectedUtmCampaigns={selectedUtmCampaigns}
         selectedOrigins={selectedOrigins}
+        customFilterDefs={data.customFilterDefs || []}
+        customFilterValues={data.customFilterValues || {}}
+        selectedCustomFilters={selectedCustomFilters}
         onPipelineIdsChange={(ids) => { setSelectedPipelineIds(ids); setSelectedStageIds([]); }}
         onStageIdsChange={setSelectedStageIds}
         onSellerIdsChange={setSelectedSellerIds}
         onUtmMediumsChange={setSelectedUtmMediums}
         onUtmCampaignsChange={setSelectedUtmCampaigns}
         onOriginsChange={setSelectedOrigins}
+        onCustomFilterChange={(id, values) => setSelectedCustomFilters((prev) => ({ ...prev, [id]: values }))}
         cachedAt={cachedAt}
       />
 
@@ -431,22 +473,50 @@ export default function Dashboard() {
         <MetricCard title="Ticket Médio" value={formatBRL(ticketAvg)} icon={Receipt} variant="default" tooltip="Receita ganha dividida pela quantidade de vendas ganhas no período." trend={ticketTrend} />
       </AnimatedSection>
 
-
       {isFinance ? (
-        <AnimatedSection className="grid grid-cols-1 lg:grid-cols-4 gap-5 lg:gap-6 items-start" delay={0.05}>
-          <div className="lg:col-span-3">
-            <FunnelCycles
-              cycleToWonDays={data.cycleToWonDays ?? 0}
-              cycleToWonSample={data.cycleToWonSample ?? 0}
-              cycleToLostDays={data.cycleToLostDays ?? 0}
-              cycleToLostSample={data.cycleToLostSample ?? 0}
-            />
+        <AnimatedSection className="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 items-stretch" delay={0.05}>
+          <div className="w-full lg:w-[44%] flex flex-col sm:flex-row gap-3 sm:gap-4 lg:gap-5 shrink-0">
+            <div className="flex-1">
+              <FunnelCycles
+                cycleToWonDays={data.cycleToWonDays ?? 0}
+                cycleToWonSample={data.cycleToWonSample ?? 0}
+                cycleToLostDays={data.cycleToLostDays ?? 0}
+                cycleToLostSample={data.cycleToLostSample ?? 0}
+              />
+            </div>
+            <div className="flex-1">
+              <LostOpportunitiesCard
+                total={currentLost}
+                ratePercentage={100 - currentWinRate}
+                leadsDetail={data.lostLeadsDetail || []}
+              />
+            </div>
           </div>
-          <CustomMetricsCard metrics={data.customMetrics ?? []} />
+          <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 lg:gap-5 auto-rows-min">
+            <MetricCard title="Receita em Pipeline Aberto" value={formatBRL(openPipelineRevenue)} icon={Wallet} variant="accent" tooltip="Soma dos negócios abertos agora (não ganhos nem perdidos), sem filtro de período — foto do estado atual." />
+            <MetricCard title="Ticket Médio em Aberto" value={formatBRL(openTicketAvg)} icon={Receipt} variant="accent" tooltip="Receita em pipeline aberto dividida pela quantidade de negócios abertos agora." />
+            <MetricCard title="Receita Esfriando" value={formatBRL(coolingRevenue)} icon={Snowflake} variant="warning" tooltip={`Soma dos negócios abertos há 7+ dias sem atividade${coolingLeadsTotal > 0 ? ` (${coolingLeadsTotal} lead${coolingLeadsTotal === 1 ? "" : "s"})` : ""}.`} />
+            {data.customMetrics && data.customMetrics.length > 0 && (
+              <div className="col-span-full flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pt-1 mt-1 border-t border-border">
+                <Sparkles className="w-3 h-3 text-primary-ink" />
+                Métricas Personalizadas
+              </div>
+            )}
+            {data.customMetrics?.slice(0, 8).map((m) => (
+              <MetricCard
+                key={m.id}
+                title={m.name}
+                value={formatCustomMetricValue(m.value, m.format)}
+                icon={getCustomMetricIcon(m.icon)}
+                variant="accent"
+                tooltip="Métrica que você criou para o seu negócio, configurável em Personalizar."
+              />
+            ))}
+          </div>
         </AnimatedSection>
       ) : (
-        <AnimatedSection className="grid grid-cols-1 lg:grid-cols-4 gap-5 lg:gap-6 items-start" delay={0.05}>
-          <div className="lg:col-span-3">
+        <AnimatedSection className="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 items-stretch" delay={0.05}>
+          <div className="flex-1">
             <FunnelVisualization
               funnelStages={funnelStagesLabeled}
               conversionRates={data.conversionRates}
@@ -462,7 +532,24 @@ export default function Dashboard() {
               }
             />
           </div>
-          <CustomMetricsCard metrics={data.customMetrics ?? []} />
+          {data.customMetrics && data.customMetrics.length > 0 && (
+            <div className="flex flex-col gap-3 sm:gap-4 lg:gap-5 w-full lg:w-72 shrink-0">
+              <div className="flex items-center gap-1.5 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider pt-1 border-t border-border">
+                <Sparkles className="w-3 h-3 text-primary-ink" />
+                Métricas Personalizadas
+              </div>
+              {data.customMetrics.map((m) => (
+                <MetricCard
+                  key={m.id}
+                  title={m.name}
+                  value={formatCustomMetricValue(m.value, m.format)}
+                  icon={getCustomMetricIcon(m.icon)}
+                  variant="accent"
+                  tooltip="Métrica que você criou para o seu negócio, configurável em Personalizar."
+                />
+              ))}
+            </div>
+          )}
         </AnimatedSection>
       )}
 
@@ -535,8 +622,9 @@ export default function Dashboard() {
           title={isFinance ? "Fechamentos por dia" : "Entrada de Oportunidades"}
           unitNoun={isFinance ? "fechamentos" : "oportunidades"}
           tooltip={isFinance
-            ? "Volume diário de negócios fechados (ganho + perdido) pela data de fechamento. A linha mostra a tendência."
+            ? "Volume diário de negócios fechados (ganho + perdido) pela data de fechamento. Verde = ganho, vermelho = perdido."
             : "Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período."}
+          splitWonLost={isFinance}
         />
       </AnimatedSection>
 

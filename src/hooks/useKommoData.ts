@@ -52,7 +52,7 @@ export interface FollowUp {
 export interface PipelineStage { id: string; name: string; }
 export interface Pipeline { id: string; name: string; stages?: PipelineStage[]; }
 export interface User { id: string; name: string; }
-export interface DailyLead { date: string; count: number; dayName: string; }
+export interface DailyLead { date: string; count: number; won: number; lost: number; dayName: string; }
 export interface LossReason { reason: string; count: number; }
 export interface CustomFieldDistribution {
   key: string;
@@ -79,9 +79,11 @@ export interface CoolingLeads {
   alert: number;    // 10–13 dias parado
   critical: number; // 14+ dias parado
   total: number;
+  revenue?: { warning: number; alert: number; critical: number; total: number };
   thresholds: { warning: number; alert: number; critical: number };
   leads?: { warning: CoolingLead[]; alert: CoolingLead[]; critical: CoolingLead[] };
 }
+export interface CustomFilterDef { id: string; label: string; }
 export interface UnansweredConversation { name: string; seller: string | null; waitingDays: number; }
 export interface ResponseTime {
   averageMinutes: number;
@@ -126,6 +128,10 @@ export interface DashboardData {
   wonMonetary?: number;
   lostMonetary?: number;
   negotiatingMonetary?: number;
+  openPipelineRevenue?: number;
+  openPipelineCount?: number;
+  customFilterDefs?: CustomFilterDef[];
+  customFilterValues?: Record<string, string[]>;
   cachedAt?: string;
   responseTime?: ResponseTime | null;
   customMetrics?: CustomMetricResult[];
@@ -140,6 +146,8 @@ export interface DashboardFilters {
   utmMediums: string[];
   utmCampaigns: string[];
   origins: string[];
+  /** Valores selecionados por filtro personalizado, chaveado pelo id do filtro (Configurações → Filtros). */
+  customFilters?: Record<string, string[]>;
   workspaceId: string | null;
   additionalStartDate?: Date | null;
   additionalEndDate?: Date | null;
@@ -178,6 +186,10 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       [...filters.utmMediums].sort().join(","),
       [...filters.utmCampaigns].sort().join(","),
       [...filters.origins].sort().join(","),
+      JSON.stringify(
+        Object.entries(filters.customFilters ?? {}).sort(([a], [b]) => a.localeCompare(b))
+          .map(([id, values]) => [id, [...values].sort()]),
+      ),
       filters.additionalStartDate?.getTime() ?? null,
       filters.additionalEndDate?.getTime() ?? null,
       filters.dateBasis ?? "criacao",
@@ -192,6 +204,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.utmMediums,
       filters.utmCampaigns,
       filters.origins,
+      filters.customFilters,
       filters.additionalStartDate,
       filters.additionalEndDate,
       filters.dateBasis,
@@ -212,6 +225,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
           utmMedium: filters.utmMediums,
           utmCampaign: filters.utmCampaigns,
           origin: filters.origins,
+          customFilters: filters.customFilters ?? {},
           additionalStartDate: filters.additionalStartDate ? filters.additionalStartDate.toISOString() : null,
           additionalEndDate: filters.additionalEndDate ? filters.additionalEndDate.toISOString() : null,
           dateBasis: filters.dateBasis ?? "criacao",

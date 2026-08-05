@@ -19,7 +19,7 @@ export function FunnelCycles({
   cycleToLostSample,
 }: FunnelCyclesProps) {
   return (
-    <div className="bg-card border border-border rounded-2xl p-5 shadow-sm">
+    <div className="h-full bg-card border border-border rounded-2xl p-5 shadow-sm">
       <div className="space-y-4">
         <div>
           <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">

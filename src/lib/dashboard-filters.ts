@@ -11,6 +11,8 @@ export interface ActiveFilterFlags {
   utmCampaigns: string[];
   origins: string[];
   hasAdditionalRange: boolean;
+  /** Valores selecionados por filtro personalizado, chaveado pelo id do filtro. */
+  customFilters?: Record<string, string[]>;
 }
 
 export function countActiveFilters(f: ActiveFilterFlags): number {
@@ -22,5 +24,6 @@ export function countActiveFilters(f: ActiveFilterFlags): number {
     f.utmCampaigns.length > 0,
     f.origins.length > 0,
     f.hasAdditionalRange,
+    ...Object.values(f.customFilters ?? {}).map((v) => v.length > 0),
   ].filter(Boolean).length;
 }

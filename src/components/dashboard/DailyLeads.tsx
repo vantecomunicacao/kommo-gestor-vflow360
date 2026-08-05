@@ -9,6 +9,8 @@ interface DailyLeadsProps {
   /** Substantivo do que está sendo contado por dia (ex.: "oportunidades", "fechamentos"). */
   unitNoun?: string;
   tooltip?: string;
+  /** Financeiro: separa a barra em ganho (verde) + perdido (vermelho) empilhados, em vez de uma cor só. */
+  splitWonLost?: boolean;
 }
 
 export function DailyLeads({
@@ -16,6 +18,7 @@ export function DailyLeads({
   title = "Entrada de Oportunidades",
   unitNoun = "oportunidades",
   tooltip = "Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período.",
+  splitWonLost = false,
 }: DailyLeadsProps) {
   const data = dailyLeads || [];
   const periodLabel =
@@ -73,17 +76,28 @@ export function DailyLeads({
               <YAxis axisLine={false} tickLine={false} tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} allowDecimals={false} />
               <Tooltip<number, string>
                 contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "16px", boxShadow: "0 8px 24px rgba(0,0,0,0.08)" }}
-                formatter={(v, n) => [`${v} ${unitNoun}`, n === "count" ? "Total" : "Tendência"]}
+                formatter={(v, n) => {
+                  if (n === "won") return [`${v} ganho${v === 1 ? "" : "s"}`, "Ganho"];
+                  if (n === "lost") return [`${v} perdido${v === 1 ? "" : "s"}`, "Perdido"];
+                  return [`${v} ${unitNoun}`, n === "count" ? "Total" : "Tendência"];
+                }}
                 labelFormatter={(label, payload) => {
                   const p = payload?.[0]?.payload as { date?: string } | undefined;
                   return p?.date ? formatDate(p.date) : label;
                 }}
               />
-              <Bar dataKey="count" radius={[8, 8, 0, 0]}>
-                {data.map((entry, i) => (
-                  <Cell key={i} fill={entry.count === maxCount ? "hsl(var(--funnel-3))" : "hsl(var(--primary))"} opacity={0.9} />
-                ))}
-              </Bar>
+              {splitWonLost ? (
+                <>
+                  <Bar dataKey="won" stackId="closures" fill="hsl(var(--success))" radius={[0, 0, 0, 0]} opacity={0.9} />
+                  <Bar dataKey="lost" stackId="closures" fill="hsl(var(--destructive))" radius={[8, 8, 0, 0]} opacity={0.9} />
+                </>
+              ) : (
+                <Bar dataKey="count" radius={[8, 8, 0, 0]}>
+                  {data.map((entry, i) => (
+                    <Cell key={i} fill={entry.count === maxCount ? "hsl(var(--funnel-3))" : "hsl(var(--primary))"} opacity={0.9} />
+                  ))}
+                </Bar>
+              )}
               <Line type="monotone" dataKey="count" stroke="hsl(var(--funnel-3))" strokeWidth={2.5} dot={{ fill: "hsl(var(--funnel-3))", r: 4, strokeWidth: 2, stroke: "hsl(var(--card))" }} activeDot={{ r: 6 }} name="trend" />
             </ComposedChart>
           </ResponsiveContainer>
@@ -100,13 +114,13 @@ export function DailyLeads({
             <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">Total no período</p>
             <p className="text-2xl font-extrabold text-foreground mt-1">{totalWeek}</p>
             <p className="text-xs text-muted-foreground">
-              {data.length === 1 ? "opp no dia" : `opps em ${data.length} dia${data.length === 1 ? "" : "s"}`}
+              {data.length === 1 ? `${unitNoun} no dia` : `${unitNoun} em ${data.length} dia${data.length === 1 ? "" : "s"}`}
             </p>
           </div>
           <div className="p-4 bg-secondary/50 rounded-2xl">
             <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">Média diária</p>
             <p className="text-xl font-extrabold text-foreground mt-1">{avgPerDay.toFixed(1)}</p>
-            <p className="text-xs text-muted-foreground">opps por dia</p>
+            <p className="text-xs text-muted-foreground">{unitNoun} por dia</p>
           </div>
           <div className="p-4 bg-accent/10 border border-accent/20 rounded-2xl">
             <div className="flex items-center gap-2 mb-1">
@@ -114,7 +128,14 @@ export function DailyLeads({
               <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">Melhor dia</p>
             </div>
             <p className="text-lg font-extrabold text-foreground">{maxDay.dayName} — {formatDate(maxDay.date)}</p>
-            <p className="text-xs text-primary-ink font-bold">{maxDay.count} opps</p>
+            <p className="text-xs text-primary-ink font-bold">{maxDay.count} {unitNoun}</p>
+            {splitWonLost && (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                <span className="text-success font-semibold">{maxDay.won} ganho{maxDay.won === 1 ? "" : "s"}</span>
+                {" · "}
+                <span className="text-destructive font-semibold">{maxDay.lost} perdido{maxDay.lost === 1 ? "" : "s"}</span>
+              </p>
+            )}
           </div>
           <div className="p-4 bg-secondary/50 rounded-2xl">
             <div className="flex items-center gap-2 mb-1">
@@ -122,14 +143,22 @@ export function DailyLeads({
               <p className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">Hoje</p>
             </div>
             <div className="flex items-center gap-2">
-              <p className="text-lg font-extrabold text-foreground">{today.count} opps</p>
+              <p className="text-lg font-extrabold text-foreground">{today.count} {unitNoun}</p>
               {yesterday && todayVsYesterday !== 0 && (
                 <span className={`text-xs font-bold ${todayVsYesterday > 0 ? "text-success" : "text-destructive"}`}>
                   {todayVsYesterday > 0 ? "+" : ""}{todayVsYesterday.toFixed(0)}%
                 </span>
               )}
             </div>
-            {yesterday && <p className="text-xs text-muted-foreground">vs ontem: {yesterday.count} opps</p>}
+            {splitWonLost ? (
+              <p className="text-xs text-muted-foreground">
+                <span className="text-success font-semibold">{today.won} ganho{today.won === 1 ? "" : "s"}</span>
+                {" · "}
+                <span className="text-destructive font-semibold">{today.lost} perdido{today.lost === 1 ? "" : "s"}</span>
+              </p>
+            ) : (
+              yesterday && <p className="text-xs text-muted-foreground">vs ontem: {yesterday.count} {unitNoun}</p>
+            )}
           </div>
         </div>
       </div>

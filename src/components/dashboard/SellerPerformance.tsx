@@ -12,20 +12,6 @@ interface SellerPerformanceProps {
   onClearSellers?: () => void;
 }
 
-function formatResponseTime(minutes: number | null | undefined): string {
-  if (minutes == null || !isFinite(minutes) || minutes <= 0) return "—";
-  if (minutes < 1) return "<1 min";
-  if (minutes < 60) return `${Math.round(minutes)} min`;
-  const hours = minutes / 60;
-  if (hours < 24) {
-    const h = Math.floor(hours);
-    const m = Math.round((hours - h) * 60);
-    return m > 0 ? `${h}h ${m}m` : `${h}h`;
-  }
-  const days = hours / 24;
-  return `${days.toFixed(1)} dias`;
-}
-
 export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerToggle, onClearSellers }: SellerPerformanceProps) {
   const [query, setQuery] = useState("");
   const sortedSellers = useMemo(
@@ -70,8 +56,8 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
           Performance por Vendedor
           <SectionTooltip text={
             interactive
-              ? "Comparativo entre vendedores: oportunidades atribuídas por etapa, taxa de conversão e tempo médio de resposta individual. Clique em uma linha para filtrar o dashboard inteiro por esse vendedor."
-              : "Comparativo entre vendedores: oportunidades atribuídas por etapa, taxa de conversão e tempo médio de resposta individual."
+              ? "Comparativo entre vendedores: total de leads e oportunidades atribuídas por etapa, e taxa de conversão. Clique em uma linha para filtrar o dashboard inteiro por esse vendedor."
+              : "Comparativo entre vendedores: total de leads e oportunidades atribuídas por etapa, e taxa de conversão."
           } />
         </h2>
         <div className="flex items-center gap-3 ml-auto">
@@ -105,19 +91,19 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
             <tr>
               <th>#</th>
               <th>Vendedor</th>
+              <th className="text-center">Total de Leads</th>
               <th className="text-center">Contato Inicial</th>
               <th className="text-center">Proposta Enviada</th>
               <th className="text-center">Fechamento</th>
               <th className="text-center">Venda Ganha</th>
               <th className="text-center">Taxa Conversão</th>
-              <th className="text-center">Tempo Médio Resposta</th>
             </tr>
           </thead>
           <tbody>
             {visibleSellers.map((s) => {
               const realIndex = sortedSellers.indexOf(s);
               const rate = s.contatoInicial > 0 ? ((s.vendaGanha / s.contatoInicial) * 100).toFixed(1) : "0.0";
-              const respLabel = formatResponseTime(s.avgResponseMinutes);
+              const totalLeads = s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha;
               const isSelected = !!s.id && selectedSellerIds.includes(s.id);
               const canClick = interactive && !!s.id;
               return (
@@ -145,6 +131,9 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
                   </td>
                   <td className="font-semibold">{s.name}</td>
                   <td className="text-center">
+                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-secondary text-foreground rounded-lg font-bold text-sm">{totalLeads}</span>
+                  </td>
+                  <td className="text-center">
                     <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-1/10 text-funnel-1-ink rounded-lg font-bold text-sm">{s.contatoInicial}</span>
                   </td>
                   <td className="text-center">
@@ -157,12 +146,6 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
                     <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-4/10 text-funnel-4-ink rounded-lg font-bold text-sm">{s.vendaGanha}</span>
                   </td>
                   <td className="text-center"><span className="font-bold text-primary-ink">{rate}%</span></td>
-                  <td className="text-center">
-                    <span className="font-semibold text-foreground tabular-nums">{respLabel}</span>
-                    {s.responseCount ? (
-                      <span className="block text-[10px] text-muted-foreground">{s.responseCount} resposta{s.responseCount === 1 ? "" : "s"}</span>
-                    ) : null}
-                  </td>
                 </tr>
               );
             })}

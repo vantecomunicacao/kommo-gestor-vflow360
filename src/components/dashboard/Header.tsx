@@ -9,7 +9,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/co
 import { format, subDays, startOfDay, endOfDay, startOfMonth, endOfMonth, subMonths, startOfYear } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { DateRange } from "react-day-picker";
-import { Pipeline, User } from "@/hooks/useKommoData";
+import { Pipeline, User, CustomFilterDef } from "@/hooks/useKommoData";
 import { cn } from "@/lib/utils";
 import { MultiFilterSelect } from "@/components/filters/MultiFilterSelect";
 import { countActiveFilters } from "@/lib/dashboard-filters";
@@ -30,12 +30,17 @@ interface HeaderProps {
   selectedUtmMediums?: string[];
   selectedUtmCampaigns?: string[];
   selectedOrigins?: string[];
+  /** Filtros personalizados definidos em Configurações → Filtros. */
+  customFilterDefs?: CustomFilterDef[];
+  customFilterValues?: Record<string, string[]>;
+  selectedCustomFilters?: Record<string, string[]>;
   onPipelineIdsChange: (ids: string[]) => void;
   onStageIdsChange?: (ids: string[]) => void;
   onSellerIdsChange?: (ids: string[]) => void;
   onUtmMediumsChange?: (v: string[]) => void;
   onUtmCampaignsChange?: (v: string[]) => void;
   onOriginsChange?: (v: string[]) => void;
+  onCustomFilterChange?: (filterId: string, values: string[]) => void;
   cachedAt?: string | null;
   additionalDateRange?: DateRange | undefined;
   onAdditionalDateRangeChange?: (r: DateRange | undefined) => void;
@@ -202,8 +207,9 @@ export function Header({
   selectedPipelineIds, selectedStageIds = [], selectedSellerIds = [],
   utmMediumValues = [], utmCampaignValues = [], originValues = [],
   selectedUtmMediums = [], selectedUtmCampaigns = [], selectedOrigins = [],
+  customFilterDefs = [], customFilterValues = {}, selectedCustomFilters = {},
   onPipelineIdsChange, onStageIdsChange, onSellerIdsChange,
-  onUtmMediumsChange, onUtmCampaignsChange, onOriginsChange,
+  onUtmMediumsChange, onUtmCampaignsChange, onOriginsChange, onCustomFilterChange,
   cachedAt,
   additionalDateRange, onAdditionalDateRangeChange, additionalDateLabel,
 }: HeaderProps) {
@@ -217,6 +223,7 @@ export function Header({
     utmCampaigns: selectedUtmCampaigns,
     origins: selectedOrigins,
     hasAdditionalRange,
+    customFilters: selectedCustomFilters,
   });
   const showAdditional = !!additionalDateLabel && !!onAdditionalDateRangeChange;
   // Etapa só faz sentido com EXATAMENTE 1 funil selecionado: os ids de etapa se
@@ -234,6 +241,7 @@ export function Header({
     onUtmMediumsChange?.([]);
     onUtmCampaignsChange?.([]);
     onOriginsChange?.([]);
+    for (const def of customFilterDefs) onCustomFilterChange?.(def.id, []);
     onAdditionalDateRangeChange?.(undefined);
   };
 
@@ -329,6 +337,23 @@ export function Header({
           />
         </Field>
       )}
+
+      {onCustomFilterChange && customFilterDefs.map((def) => {
+        const options = customFilterValues[def.id] || [];
+        if (options.length === 0) return null;
+        return (
+          <Field key={def.id} label={def.label}>
+            <MultiFilterSelect
+              values={selectedCustomFilters[def.id] || []}
+              onChange={(v) => onCustomFilterChange(def.id, v)}
+              placeholder={def.label}
+              pluralLabel={def.label.toLowerCase()}
+              icon={Filter}
+              options={options.map((v) => ({ id: v, name: v }))}
+            />
+          </Field>
+        );
+      })}
 
       {showAdditional && (
         <>
