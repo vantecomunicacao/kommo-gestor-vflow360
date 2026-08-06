@@ -19,6 +19,23 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// Formato das linhas lidas de kommo.leads/lead_stage_events, só os campos usados aqui.
+interface LeadRow {
+  kommo_id: string;
+  status: string;
+  status_id: string | null;
+  price: number | null;
+  responsible_user_id: string | null;
+  kommo_created_at: string | null;
+  closed_at: string | null;
+  pipeline_id: string | null;
+}
+interface StageEventRow {
+  lead_id: string | null;
+  pipeline_id: string | null;
+  after_status_id: string | null;
+}
+
 // Ano-mês (YYYY-MM) em horário de Brasília.
 const BRT_MONTH_FMT = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit",
@@ -51,7 +68,7 @@ serve(async (req) => {
     // ===== Settings: mapeamento das 4 fases + fases-alvo das taxas =====
     const { data: settingsRow } = await db.from("dashboard_settings")
       .select("funnel_stage_mapping, funnel_stage_labels, report_rate_stages").eq("workspace_id", workspaceId).maybeSingle();
-    const settings = (settingsRow || {}) as any;
+    const settings = (settingsRow || {}) as Record<string, unknown>;
     // report_rate_stages agora guarda CHAVES DE FASE (bucket), não ids de etapa do Kommo.
     const reportRateBuckets: string[] = Array.isArray(settings?.report_rate_stages) ? settings.report_rate_stages.map(String) : [];
 
@@ -70,8 +87,8 @@ serve(async (req) => {
     const statusBucket = buildBucketResolver(parsedMapping);
     // Ganho = status de sistema do Kommo (o 142) OU etapa mapeada como venda_ganha
     // NAQUELE funil.
-    const isWon = (l: any) => l.status === "won" || statusBucket(l.pipeline_id, l.status_id) === "venda_ganha";
-    const isLost = (l: any) => l.status === "lost";
+    const isWon = (l: LeadRow) => l.status === "won" || statusBucket(l.pipeline_id, l.status_id) === "venda_ganha";
+    const isLost = (l: LeadRow) => l.status === "lost";
 
     // Alvos = fases escolhidas (subconjunto das 4), com ordem e rótulo (custom ou padrão).
     const targets = reportRateBuckets
@@ -82,7 +99,7 @@ serve(async (req) => {
     const leadsRows = await fetchAllRows((from, to) => db.from("leads")
       .select("kommo_id,status,status_id,price,responsible_user_id,kommo_created_at,closed_at,pipeline_id")
       .eq("workspace_id", workspaceId).eq("is_deleted", false).order("kommo_id").range(from, to));
-    const leads = leadsRows as any[];
+    const leads = leadsRows as LeadRow[];
 
     // ===== Taxas de fase ("chegou até a fase X") — cohort por data de criação =====
     // As 4 fases são a linguagem comum entre TODOS os funis, então isto funciona
@@ -92,14 +109,14 @@ serve(async (req) => {
     if (targets.length) {
       const evRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
         .select("lead_id,pipeline_id,after_status_id").eq("workspace_id", workspaceId).order("id").range(from, to));
-      for (const e of (evRows || []) as any[]) {
+      for (const e of (evRows || []) as StageEventRow[]) {
         const b = statusBucket(e.pipeline_id, e.after_status_id);
         if (b == null || !e.lead_id) continue;
         const k = String(e.lead_id);
         maxBucketByLead.set(k, Math.max(maxBucketByLead.get(k) ?? -1, BUCKET_ORDER[b]));
       }
     }
-    const reachedTargetIds = (l: any): string[] => {
+    const reachedTargetIds = (l: LeadRow): string[] => {
       if (!targets.length) return [];
       if (isWon(l)) return targets.map((t) => t.id);
       const curB = statusBucket(l.pipeline_id, l.status_id);
@@ -124,7 +141,7 @@ serve(async (req) => {
     // ===== Agregação: funil × eixo × mês, com sub-bloco por vendedor =====
     type Acc = { leads: number; won: number; wonRevenue: number; lost: number; lostRevenue: number; reached: Record<string, number> };
     const empty = (): Acc => ({ leads: 0, won: 0, wonRevenue: 0, lost: 0, lostRevenue: 0, reached: {} });
-    const bump = (a: Acc, l: any, axis: "criacao" | "fechamento") => {
+    const bump = (a: Acc, l: LeadRow, axis: "criacao" | "fechamento") => {
       a.leads++;
       const price = Number(l.price) || 0;
       if (isWon(l)) { a.won++; a.wonRevenue += price; }
@@ -138,7 +155,7 @@ serve(async (req) => {
     const sellersByCell = new Map<string, Set<string>>(); // cell -> vendedores presentes
     const pipelinesSeen = new Set<string>();
 
-    const record = (axis: "criacao" | "fechamento", month: string, l: any) => {
+    const record = (axis: "criacao" | "fechamento", month: string, l: LeadRow) => {
       if (!inRange.has(month)) return;
       const pid = l.pipeline_id ? String(l.pipeline_id) : "unknown";
       const sid = l.responsible_user_id ? String(l.responsible_user_id) : "__none__";
@@ -173,7 +190,7 @@ serve(async (req) => {
 
     // ===== Monta as linhas de upsert (uma por funil + '__all__') =====
     const frozenAt = new Date().toISOString();
-    const rows: any[] = [];
+    const rows: Record<string, unknown>[] = [];
     for (const p of ["__all__", ...pipelinesSeen]) {
       for (const axis of ["criacao", "fechamento"] as const) {
         for (const key of monthKeys) {
@@ -201,7 +218,7 @@ serve(async (req) => {
       quality.checks.push({ name, ok, ...(detail ? { detail } : {}) });
       if (!ok) quality.ok = false;
     };
-    const num = (m: any, k: string) => Number(m?.[k]) || 0;
+    const num = (m: unknown, k: string) => Number((m as Record<string, unknown> | undefined)?.[k]) || 0;
     // 1) won + lost nunca podem exceder o total de leads da célula.
     let overflow = 0;
     for (const r of rows) if (num(r.metrics, "won") + num(r.metrics, "lost") > num(r.metrics, "leads")) overflow++;

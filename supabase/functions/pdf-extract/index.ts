@@ -10,6 +10,13 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+interface OpenAIResponseContentItem {
+  text?: string;
+}
+interface OpenAIResponseOutputItem {
+  content?: OpenAIResponseContentItem[];
+}
+
 // Limits
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 const MAX_PAGES = 50;
@@ -142,9 +149,9 @@ async function ocrWithOpenAI(
     if (typeof data.output_text === "string") {
       fullContent = data.output_text;
     } else if (Array.isArray(data.output)) {
-      fullContent = data.output
-        .flatMap((item: any) => (Array.isArray(item.content) ? item.content : []))
-        .map((c: any) => c?.text ?? "")
+      fullContent = (data.output as OpenAIResponseOutputItem[])
+        .flatMap((item) => (Array.isArray(item.content) ? item.content : []))
+        .map((c) => c?.text ?? "")
         .join("");
     }
     fullContent = fullContent.trim();
@@ -230,7 +237,7 @@ serve(async (req) => {
     }
 
     // Resolve AI provider for this user
-    let aiEndpoint = "https://api.openai.com/v1/chat/completions";
+    const aiEndpoint = "https://api.openai.com/v1/chat/completions";
     let aiKey = "";
     let aiModel = "gpt-4o-mini";
 

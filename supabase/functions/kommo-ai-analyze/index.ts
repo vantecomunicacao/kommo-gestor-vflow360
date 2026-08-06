@@ -18,7 +18,44 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
+
+interface OpenAIUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+}
+
+// Formato da resposta da edge kommo-dashboard, só os campos lidos aqui.
+interface DashboardResponse {
+  error?: string;
+  totalLeads?: number;
+  lostLeads?: number;
+  funnelStages?: Array<{ id: string | number; name: string; count: number }>;
+  conversionRates?: Record<string, unknown>;
+  totalMonetary?: number;
+  wonMonetary?: number;
+  lostMonetary?: number;
+  negotiatingMonetary?: number;
+  cycleToWonDays?: number | null;
+  cycleToLostDays?: number | null;
+  lossReasons?: unknown[];
+  sellers?: Array<{
+    name: string;
+    contatoInicial?: number;
+    propostaEnviada?: number;
+    fechamento?: number;
+    vendaGanha?: number;
+    wonRevenue?: number;
+  }>;
+  followUp?: {
+    tarefasAtrasadas?: number;
+    tarefasHoje?: number;
+    leadsSemProximaAcao?: number;
+    porVendedor?: unknown[];
+  } | null;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -62,7 +99,7 @@ interface ProviderCfg { apiKey: string; model: string }
 // ai_provider_config pelo cliente travado no schema kommo → lemos pelo mesmo
 // caminho. Fallback no schema public (leitura permitida) cobre instalações antigas.
 async function resolveProvider(
-  dbKommo: any, dbPublic: any, ownerId: string, callerId: string | null,
+  dbKommo: SupabaseClient, dbPublic: SupabaseClient, ownerId: string, callerId: string | null,
 ): Promise<ProviderCfg> {
   const ids = [ownerId, callerId].filter((v): v is string => !!v);
   for (const client of [dbKommo, dbPublic]) {
@@ -81,7 +118,7 @@ async function resolveProvider(
 }
 
 // Chama a OpenAI (chat completions). Devolve { content, usage }.
-async function callOpenAI(cfg: ProviderCfg, body: Record<string, unknown>): Promise<{ content: string; usage: any }> {
+async function callOpenAI(cfg: ProviderCfg, body: Record<string, unknown>): Promise<{ content: string; usage: OpenAIUsage }> {
   const res = await fetch(OPENAI_ENDPOINT, {
     method: "POST",
     headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
@@ -103,24 +140,24 @@ async function callOpenAI(cfg: ProviderCfg, body: Record<string, unknown>): Prom
 async function fetchDashboard(
   supabaseUrl: string, anonKey: string, authHeader: string,
   body: Record<string, unknown>,
-): Promise<any> {
+): Promise<DashboardResponse> {
   const res = await fetch(`${supabaseUrl}/functions/v1/kommo-dashboard`, {
     method: "POST",
     headers: { Authorization: authHeader, apikey: anonKey, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => ({})) as DashboardResponse;
   if (!res.ok || data?.error) throw new Error(`Falha ao buscar métricas do dashboard: ${data?.error || res.status}`);
   return data;
 }
 
 // Extrai um resumo COMPACTO da resposta do kommo-dashboard (economia de tokens +
 // rastreabilidade). Só os campos que sustentam uma análise comercial.
-function summarizeMetrics(d: any) {
+function summarizeMetrics(d: DashboardResponse) {
   return {
     totalLeads: d?.totalLeads ?? 0,
     lostLeads: d?.lostLeads ?? 0,
-    funnelStages: (d?.funnelStages || []).map((s: any) => ({ id: s.id, name: s.name, count: s.count })),
+    funnelStages: (d?.funnelStages || []).map((s) => ({ id: s.id, name: s.name, count: s.count })),
     conversionRates: d?.conversionRates ?? {},
     monetary: {
       total: d?.totalMonetary ?? 0, won: d?.wonMonetary ?? 0,
@@ -129,7 +166,7 @@ function summarizeMetrics(d: any) {
     cycleToWonDays: d?.cycleToWonDays ?? null,
     cycleToLostDays: d?.cycleToLostDays ?? null,
     lossReasons: (d?.lossReasons || []).slice(0, 10),
-    sellers: (d?.sellers || []).slice(0, 15).map((s: any) => ({
+    sellers: (d?.sellers || []).slice(0, 15).map((s) => ({
       name: s.name, contatoInicial: s.contatoInicial, propostaEnviada: s.propostaEnviada,
       fechamento: s.fechamento, vendaGanha: s.vendaGanha, wonRevenue: s.wonRevenue,
     })),
@@ -155,9 +192,9 @@ serve(async (req) => {
     const dbKommo = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
     const dbPublic = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    const payload = await req.json().catch(() => ({} as any));
+    const payload = await req.json().catch(() => ({})) as Record<string, unknown>;
     const VALID_MODES = ["analyze", "followup", "delete", "pin"];
-    const mode = VALID_MODES.includes(payload.mode) ? payload.mode as string : "parse";
+    const mode = VALID_MODES.includes(payload.mode as string) ? payload.mode as string : "parse";
     const workspaceId = payload.workspace_id as string;
     const prompt = (payload.prompt as string | undefined)?.trim();
     if (!workspaceId) throw new Error("workspace_id é obrigatório");
@@ -238,18 +275,19 @@ ${pipelineList}`;
         temperature: 0,
       });
 
-      let interp: any = {};
+      let interp: Record<string, unknown> = {};
       try { interp = JSON.parse(content); } catch { interp = {}; }
 
       // Guardrails determinísticos pós-IA: garante formato/consistência mesmo se a IA falhar.
       const today = todayBRT();
-      const safeDate = (v: any, fb: string) => (typeof v === "string" && ISO_DATE.test(v) ? v : fb);
+      const safeDate = (v: unknown, fb: string | null): string | null =>
+        (typeof v === "string" && ISO_DATE.test(v) ? v : fb);
       interp.startDate = safeDate(interp.startDate, today);
       interp.endDate = safeDate(interp.endDate, today);
       interp.dateBasis = interp.dateBasis === "fechamento" ? "fechamento" : "criacao";
       interp.compare = !!interp.compare;
-      interp.compareStart = interp.compare ? safeDate(interp.compareStart, null as any) : null;
-      interp.compareEnd = interp.compare ? safeDate(interp.compareEnd, null as any) : null;
+      interp.compareStart = interp.compare ? safeDate(interp.compareStart, null) : null;
+      interp.compareEnd = interp.compare ? safeDate(interp.compareEnd, null) : null;
       if (interp.pipelineId && !pipelines.some((p) => p.kommo_id === String(interp.pipelineId))) {
         interp.pipelineId = null; interp.pipelineName = null;
       }
@@ -314,7 +352,7 @@ ${JSON.stringify(row.metrics ?? {}).slice(0, 14000)}`;
     }
 
     // ===================== MODO ANALYZE =====================
-    const params = (payload.params || {}) as any;
+    const params = (payload.params || {}) as Record<string, unknown>;
     const startDate = params.startDate as string;
     const endDate = params.endDate as string;
     if (!ISO_DATE.test(startDate || "") || !ISO_DATE.test(endDate || "")) {
@@ -322,7 +360,9 @@ ${JSON.stringify(row.metrics ?? {}).slice(0, 14000)}`;
     }
     const dateBasis = params.dateBasis === "fechamento" ? "fechamento" : "criacao";
     const pipelineId = (params.pipelineId as string | null) || null;
-    const compare = !!params.compare && ISO_DATE.test(params.compareStart || "") && ISO_DATE.test(params.compareEnd || "");
+    const compareStartParam = (params.compareStart as string | undefined) || "";
+    const compareEndParam = (params.compareEnd as string | undefined) || "";
+    const compare = !!params.compare && ISO_DATE.test(compareStartParam) && ISO_DATE.test(compareEndParam);
     const authHeader = req.headers.get("Authorization") || "";
 
     const pipelineName = pipelineId
@@ -338,7 +378,7 @@ ${JSON.stringify(row.metrics ?? {}).slice(0, 14000)}`;
       }),
       compare
         ? fetchDashboard(SUPABASE_URL, ANON_KEY, authHeader, {
-            workspace_id: workspaceId, startDate: dayStartISO(params.compareStart), endDate: dayEndISO(params.compareEnd), dateBasis, pipelineId,
+            workspace_id: workspaceId, startDate: dayStartISO(compareStartParam), endDate: dayEndISO(compareEndParam), dateBasis, pipelineId,
           })
         : Promise.resolve(null),
     ]);
@@ -369,16 +409,16 @@ Na dúvida entre os dois, prefira a resposta DIRETA. Atenda ao PEDIDO LITERAL ab
 PEDIDO LITERAL DO GESTOR: "${prompt}"`;
 
     const periodLabel = compare
-      ? `Período principal: ${startDate} a ${endDate}. Comparação: ${params.compareStart} a ${params.compareEnd}. Eixo: ${dateBasis}.`
+      ? `Período principal: ${startDate} a ${endDate}. Comparação: ${compareStartParam} a ${compareEndParam}. Eixo: ${dateBasis}.`
       : `Período: ${startDate} a ${endDate}. Eixo: ${dateBasis}.`;
 
     const userContent = `PERGUNTA DO GESTOR: "${prompt}"\n\n${periodLabel}\n\nDADOS (JSON):\n${JSON.stringify({ principal: mainMetrics, comparacao: compareMetrics }).slice(0, 14000)}`;
     const chatMessages = [{ role: "system", content: sys }, { role: "user", content: userContent }];
-    const savedParams = { pipelineId, pipelineName, startDate, endDate, dateBasis, compare, compareStart: compare ? params.compareStart : null, compareEnd: compare ? params.compareEnd : null, foco: params.foco ?? null, intent: params.intent === "pergunta" ? "pergunta" : "analise" };
+    const savedParams = { pipelineId, pipelineName, startDate, endDate, dateBasis, compare, compareStart: compare ? compareStartParam : null, compareEnd: compare ? compareEndParam : null, foco: (params.foco as string | undefined) ?? null, intent: params.intent === "pergunta" ? "pergunta" : "analise" };
     const fullMetrics = { principal: mainMetrics, comparacao: compareMetrics };
 
     // Grava a análise concluída no histórico e devolve id/created_at.
-    const persist = async (result: string, usage: any) => {
+    const persist = async (result: string, usage: OpenAIUsage) => {
       const costUsd = estimateCostUsd(cfg.model, Number(usage?.prompt_tokens || 0), Number(usage?.completion_tokens || 0));
       const { data: inserted, error: insErr } = await dbKommo.from("dashboard_analyses").insert({
         workspace_id: workspaceId, user_id: auth.userId, prompt, params: savedParams, result,
@@ -404,7 +444,7 @@ PEDIDO LITERAL DO GESTOR: "${prompt}"`;
             if (!res.ok || !res.body) { send({ type: "error", error: `Falha na IA [${res.status}]` }); controller.close(); return; }
             const reader = res.body.getReader();
             const decoder = new TextDecoder();
-            let buf = "", full = "", usageObj: any = {};
+            let buf = "", full = "", usageObj: OpenAIUsage = {};
             while (true) {
               const { done, value } = await reader.read();
               if (done) break;

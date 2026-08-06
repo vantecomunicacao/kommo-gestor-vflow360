@@ -9,11 +9,101 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+
 import {
   KommoCreds, normalizeSubdomain, kommoFetchAll,
   unixToIso, leadStatusKind, extractContactPhoneEmail,
 } from "../_shared/kommo-client.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
+
+// Formatos da API do Kommo (api/v4), derivados do uso real abaixo — não é o
+// schema completo da API, só os campos que este sync lê.
+interface KommoPipelineStatus {
+  id: string | number;
+  name: string;
+  sort?: number;
+  type?: string;
+  color?: string;
+}
+interface KommoPipeline {
+  id: string | number;
+  name?: string;
+  sort?: number | null;
+  is_main?: boolean;
+  is_archive?: boolean;
+  _embedded?: { statuses?: KommoPipelineStatus[] };
+}
+interface KommoUser {
+  id: string | number;
+  name?: string;
+  email?: string;
+  is_active?: boolean;
+  rights?: { is_admin?: boolean };
+}
+interface KommoLossReason {
+  id: string | number;
+  name?: string;
+  sort?: number | null;
+}
+interface KommoCustomField {
+  id: string | number;
+  name?: string;
+  code?: string | null;
+  type?: string | null;
+  enums?: unknown;
+  is_predefined?: boolean;
+  sort?: number | null;
+}
+interface KommoContact {
+  id: string | number;
+  name?: string | null;
+  responsible_user_id?: string | number | null;
+  custom_fields_values?: unknown[] | null;
+  created_at?: number | null;
+  updated_at?: number | null;
+}
+interface KommoLead {
+  id: string | number;
+  name?: string | null;
+  pipeline_id?: string | number | null;
+  status_id?: string | number | null;
+  price?: number | null;
+  responsible_user_id?: string | number | null;
+  loss_reason_id?: string | number | null;
+  custom_fields_values?: unknown;
+  is_deleted?: boolean;
+  created_at?: number | null;
+  updated_at?: number | null;
+  closed_at?: number | null;
+  closest_task_at?: number | null;
+  _embedded?: { contacts?: Array<{ id: string | number }> };
+}
+interface KommoDeletionEvent {
+  id: string | number;
+  entity_id?: string | number | null;
+  created_at?: number | null;
+  created_by?: string | number | null;
+}
+interface KommoStageChangeEvent {
+  id: string | number;
+  entity_id?: string | number | null;
+  created_at?: number | null;
+  value_after?: Array<{ lead_status?: { id?: string | number; pipeline_id?: string | number } }>;
+  value_before?: Array<{ lead_status?: { id?: string | number; pipeline_id?: string | number } }>;
+}
+interface KommoTask {
+  id: string | number;
+  entity_type?: string;
+  entity_id?: string | number | null;
+  responsible_user_id?: string | number | null;
+  complete_till?: number | null;
+  is_completed?: boolean;
+  task_type_id?: string | number | null;
+  text?: string | null;
+  created_at?: number | null;
+  updated_at?: number | null;
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -67,13 +157,13 @@ serve(async (req) => {
       const evts = await kommoFetchAll(
         creds, `/events?limit=100&filter[type]=lead_deleted&filter[entity]=lead`, "events", { maxPages: 30 },
       );
-      const out = evts
-        .map((e: any) => ({
+      const out = (evts as KommoDeletionEvent[])
+        .map((e) => ({
           lead_id: e.entity_id != null ? String(e.entity_id) : null,
           deleted_at: unixToIso(e.created_at),
           by_user_id: e.created_by != null ? String(e.created_by) : null,
         }))
-        .filter((r: any) => r.lead_id && (!wantIds || wantIds.has(r.lead_id)));
+        .filter((r) => r.lead_id && (!wantIds || wantIds.has(r.lead_id)));
       return new Response(JSON.stringify({ success: true, probe: "deletions", count: out.length, events: out }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
@@ -121,6 +211,7 @@ serve(async (req) => {
     );
 
     const counts: Record<string, number> = {};
+    let leadsDeletedIdsSample: string[] = [];
     let stageEventsError: string | null = null;
     let tasksError: string | null = null;
     const warnings: string[] = [];
@@ -128,7 +219,7 @@ serve(async (req) => {
     // === 1. Pipelines (+ statuses embutidos) ===
     const pipelines = await kommoFetchAll(creds, "/leads/pipelines", "pipelines", { maxPages: 5 });
     if (pipelines.length) {
-      const rows = pipelines.map((p: any) => ({
+      const rows = (pipelines as KommoPipeline[]).map((p) => ({
         workspace_id: workspaceId,
         kommo_id: String(p.id),
         name: p.name || "Sem nome",
@@ -136,7 +227,7 @@ serve(async (req) => {
         is_main: !!p.is_main,
         is_archive: !!p.is_archive,
         is_deleted: false, // veio no snapshot → vivo (ressuscita funil antes marcado)
-        statuses: (p?._embedded?.statuses ?? []).map((s: any) => ({
+        statuses: (p?._embedded?.statuses ?? []).map((s) => ({
           id: String(s.id), name: s.name, sort: s.sort, type: s.type, color: s.color,
         })),
       }));
@@ -161,7 +252,7 @@ serve(async (req) => {
     // === 2. Users ===
     const users = await kommoFetchAll(creds, "/users", "users", { maxPages: 10 });
     if (users.length) {
-      const rows = users.map((u: any) => ({
+      const rows = (users as KommoUser[]).map((u) => ({
         workspace_id: workspaceId,
         kommo_id: String(u.id),
         name: u.name || u.email || "Sem nome",
@@ -177,7 +268,7 @@ serve(async (req) => {
     // === 3. Loss reasons ===
     const lossReasons = await kommoFetchAll(creds, "/leads/loss_reasons", "loss_reasons", { maxPages: 10 });
     if (lossReasons.length) {
-      const rows = lossReasons.map((l: any) => ({
+      const rows = (lossReasons as KommoLossReason[]).map((l) => ({
         workspace_id: workspaceId,
         kommo_id: String(l.id),
         name: l.name || "Sem motivo",
@@ -192,8 +283,8 @@ serve(async (req) => {
     const cfLeads = await kommoFetchAll(creds, "/leads/custom_fields", "custom_fields", { maxPages: 10 });
     const cfContacts = await kommoFetchAll(creds, "/contacts/custom_fields", "custom_fields", { maxPages: 10 });
     const cfRows = [
-      ...cfLeads.map((f: any) => mapCustomField(workspaceId!, "leads", f)),
-      ...cfContacts.map((f: any) => mapCustomField(workspaceId!, "contacts", f)),
+      ...(cfLeads as KommoCustomField[]).map((f) => mapCustomField(workspaceId!, "leads", f)),
+      ...(cfContacts as KommoCustomField[]).map((f) => mapCustomField(workspaceId!, "contacts", f)),
     ];
     if (cfRows.length) {
       const { error } = await db.from("custom_fields").upsert(cfRows, { onConflict: "workspace_id,entity_type,kommo_id" });
@@ -210,7 +301,7 @@ serve(async (req) => {
     // que já está gravado no upsert anterior.
     const contactById = new Map<string, { name: string | null; phone: string | null; email: string | null }>();
     if (contacts.length) {
-      const rows = contacts.map((c: any) => {
+      const rows = (contacts as KommoContact[]).map((c) => {
         const { phone, email } = extractContactPhoneEmail(c.custom_fields_values);
         contactById.set(String(c.id), { name: c.name ?? null, phone, email });
         return {
@@ -236,28 +327,28 @@ serve(async (req) => {
 
     // === 6. Leads (entidade central do dashboard) ===
     const LEADS_MAX_PAGES = 60, LEADS_PAGE = 250;
-    const leads = await kommoFetchAll(creds, `/leads?limit=${LEADS_PAGE}&with=contacts${leadsSince}`, "leads", { maxPages: LEADS_MAX_PAGES });
+    const leads = await kommoFetchAll(creds, `/leads?limit=${LEADS_PAGE}&with=contacts${leadsSince}`, "leads", { maxPages: LEADS_MAX_PAGES }) as KommoLead[];
     if (leads.length) {
       // Num sync incremental, `contactById` só tem os contatos alterados neste
       // tick — busca no banco os IDs que faltam pra não gravar contact_name/
       // phone/email como null e apagar o que já estava denormalizado em leads.
       const missingContactIds = Array.from(new Set(
         leads
-          .map((l: any) => l?._embedded?.contacts?.[0]?.id)
-          .filter((id: unknown) => id != null)
-          .map((id: unknown) => String(id))
-          .filter((id: string) => !contactById.has(id)),
+          .map((l) => l?._embedded?.contacts?.[0]?.id)
+          .filter((id): id is string | number => id != null)
+          .map((id) => String(id))
+          .filter((id) => !contactById.has(id)),
       ));
       if (missingContactIds.length) {
         const { data: existingContacts } = await db.from("contacts")
           .select("kommo_id,name,phone,email")
           .eq("workspace_id", workspaceId)
           .in("kommo_id", missingContactIds);
-        for (const c of (existingContacts || []) as any[]) {
+        for (const c of (existingContacts ?? []) as Array<{ kommo_id: string; name: string | null; phone: string | null; email: string | null }>) {
           contactById.set(String(c.kommo_id), { name: c.name ?? null, phone: c.phone ?? null, email: c.email ?? null });
         }
       }
-      const rows = leads.map((l: any) => {
+      const rows = leads.map((l) => {
         const mainContactId = l?._embedded?.contacts?.[0]?.id ?? null;
         const contact = mainContactId != null ? contactById.get(String(mainContactId)) : undefined;
         return {
@@ -303,12 +394,12 @@ serve(async (req) => {
       );
     }
     if (leadsSince === "" && !hitPageCap) {
-      const seen = new Set(leads.map((l: any) => String(l.id)));
+      const seen = new Set(leads.map((l) => String(l.id)));
       const { data: localLeads } = await db.from("leads")
         .select("kommo_id").eq("workspace_id", workspaceId).neq("is_deleted", true);
-      const missing = (localLeads ?? [])
-        .map((r: any) => r.kommo_id as string)
-        .filter((id: string) => !seen.has(id));
+      const missing = ((localLeads ?? []) as Array<{ kommo_id: string }>)
+        .map((r) => r.kommo_id)
+        .filter((id) => !seen.has(id));
       if (!dryRun) {
         for (let i = 0; i < missing.length; i += 200) {
           const chunk = missing.slice(i, i + 200);
@@ -320,7 +411,7 @@ serve(async (req) => {
       counts.leads_deleted_reconciled = missing.length;
       counts.leads_deleted_dry_run = dryRun ? 1 : 0;
       // amostra p/ inspeção no dry-run (limita p/ não estourar a resposta)
-      (counts as any).leads_deleted_ids = missing.slice(0, 100);
+      leadsDeletedIdsSample = missing.slice(0, 100);
     } else if (leadsSince === "" && hitPageCap) {
       counts.leads_deleted_reconciled = -1; // sinaliza: pulado por teto de páginas
     }
@@ -331,9 +422,9 @@ serve(async (req) => {
     try {
       const stageEvents = await kommoFetchAll(
         creds, `/events?limit=100&filter[type]=lead_status_changed&filter[entity]=lead${eventsSince}`, "events", { maxPages: 15 },
-      );
+      ) as KommoStageChangeEvent[];
       if (stageEvents.length) {
-        const evRows = stageEvents.map((e: any) => {
+        const evRows = stageEvents.map((e) => {
           const after = e?.value_after?.[0]?.lead_status ?? {};
           const before = e?.value_before?.[0]?.lead_status ?? {};
           return {
@@ -346,7 +437,7 @@ serve(async (req) => {
             after_status_id: after.id != null ? String(after.id) : null,
             changed_at: unixToIso(e.created_at),
           };
-        }).filter((r: any) => r.event_id && r.lead_id && r.changed_at);
+        }).filter((r) => r.event_id && r.lead_id && r.changed_at);
         if (evRows.length) await upsertChunked(db, "lead_stage_events", evRows, "workspace_id,event_id");
         counts.stage_events = evRows.length;
       } else {
@@ -358,10 +449,10 @@ serve(async (req) => {
 
     // === 8. Tarefas (follow-up: atrasadas + leads sem próxima ação) ===
     try {
-      const tasks = await kommoFetchAll(creds, `/tasks?limit=250${tasksSince}`, "tasks", { maxPages: 20 });
+      const tasks = await kommoFetchAll(creds, `/tasks?limit=250${tasksSince}`, "tasks", { maxPages: 20 }) as KommoTask[];
       const taskRows = tasks
-        .filter((t: any) => t.entity_type === "leads")
-        .map((t: any) => ({
+        .filter((t) => t.entity_type === "leads")
+        .map((t) => ({
           workspace_id: workspaceId,
           kommo_id: String(t.id),
           lead_id: t.entity_id != null ? String(t.entity_id) : null,
@@ -373,7 +464,7 @@ serve(async (req) => {
           kommo_created_at: unixToIso(t.created_at),
           kommo_updated_at: unixToIso(t.updated_at),
         }))
-        .filter((r: any) => r.kommo_id);
+        .filter((r) => r.kommo_id);
       if (taskRows.length) await upsertChunked(db, "tasks", taskRows, "workspace_id,kommo_id");
       counts.tasks = taskRows.length;
     } catch (tErr) {
@@ -418,7 +509,11 @@ serve(async (req) => {
     await db.from("sync_watermarks").upsert(wmUpdate, { onConflict: "workspace_id" });
 
     return new Response(
-      JSON.stringify({ success: true, workspace_id: workspaceId, counts, warnings, stage_events_error: stageEventsError, tasks_error: tasksError, duration_ms: Date.now() - startTs }),
+      JSON.stringify({
+        success: true, workspace_id: workspaceId, counts, warnings,
+        leads_deleted_ids: leadsDeletedIdsSample,
+        stage_events_error: stageEventsError, tasks_error: tasksError, duration_ms: Date.now() - startTs,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
@@ -480,7 +575,7 @@ function serializeErr(e: unknown): string {
   return String(e);
 }
 
-function mapCustomField(workspaceId: string, entity: "leads" | "contacts", f: any) {
+function mapCustomField(workspaceId: string, entity: "leads" | "contacts", f: KommoCustomField) {
   return {
     workspace_id: workspaceId,
     kommo_id: String(f.id),
@@ -495,7 +590,13 @@ function mapCustomField(workspaceId: string, entity: "leads" | "contacts", f: an
 }
 
 /** Upsert em lotes (evita payloads gigantes). */
-async function upsertChunked(db: any, table: string, rows: any[], onConflict: string, size = 500) {
+async function upsertChunked(
+  db: SupabaseClient,
+  table: string,
+  rows: Record<string, unknown>[],
+  onConflict: string,
+  size = 500,
+) {
   for (let i = 0; i < rows.length; i += size) {
     const chunk = rows.slice(i, i + size);
     const { error } = await db.from(table).upsert(chunk, { onConflict });

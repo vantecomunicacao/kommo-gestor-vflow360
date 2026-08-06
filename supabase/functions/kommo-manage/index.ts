@@ -7,6 +7,35 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { KommoCreds, normalizeSubdomain, kommoFetch, kommoFetchAll } from "../_shared/kommo-client.ts";
 
+interface KommoAccount {
+  id?: string | number;
+  name?: string;
+  currency?: string;
+}
+
+interface KommoCustomFieldEnum {
+  value?: string;
+}
+
+interface KommoCustomFieldRaw {
+  id: string | number;
+  name?: string;
+  code?: string;
+  type?: string;
+  enums?: Array<string | KommoCustomFieldEnum>;
+}
+
+interface KommoPipelineStatusRaw {
+  id: string | number;
+  name: string;
+}
+
+interface KommoPipelineRaw {
+  id: string | number;
+  name?: string;
+  _embedded?: { statuses?: KommoPipelineStatusRaw[] };
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -44,7 +73,7 @@ serve(async (req) => {
     const userId = claims?.claims?.sub as string | undefined;
     if (!userId) throw new Error("Unauthorized");
 
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     const action = (body.action as string) || "status";
     let workspaceId = body.workspace_id as string | null;
 
@@ -85,7 +114,7 @@ serve(async (req) => {
 
       // 1) valida credenciais no Kommo
       const creds: KommoCreds = { subdomain, token: kommoToken };
-      let account: any;
+      let account: KommoAccount | undefined;
       try {
         account = await kommoFetch(creds, "/account");
       } catch (e) {
@@ -179,12 +208,12 @@ serve(async (req) => {
         kommoFetchAll(creds, "/leads/custom_fields", "custom_fields", { maxPages: 10 }),
         kommoFetchAll(creds, "/contacts/custom_fields", "custom_fields", { maxPages: 10 }),
       ]);
-      const mapField = (f: any, entity: "lead" | "contact") => {
+      const mapField = (f: KommoCustomFieldRaw, entity: "lead" | "contact") => {
         const enums = Array.isArray(f?.enums) ? f.enums : [];
         const options = enums
-          .map((e: any) => (typeof e === "string" ? e : e?.value))
-          .filter((v: any) => typeof v === "string" && v.length > 0)
-          .map((value: string) => ({ value, instruction: "" }));
+          .map((e) => (typeof e === "string" ? e : e?.value))
+          .filter((v): v is string => typeof v === "string" && v.length > 0)
+          .map((value) => ({ value, instruction: "" }));
         return {
           id: `${entity}_${f.id}`,
           name: f.name || f.code || String(f.id),
@@ -197,8 +226,8 @@ serve(async (req) => {
         };
       };
       const customFields = [
-        ...cfLeads.map((f: any) => mapField(f, "lead")),
-        ...cfContacts.map((f: any) => mapField(f, "contact")),
+        ...(cfLeads as KommoCustomFieldRaw[]).map((f) => mapField(f, "lead")),
+        ...(cfContacts as KommoCustomFieldRaw[]).map((f) => mapField(f, "contact")),
       ];
       return new Response(JSON.stringify({ success: true, data: { customFields } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -210,11 +239,11 @@ serve(async (req) => {
       if (!workspaceId) throw new Error("workspace_id is required");
       await requireMember(workspaceId);
       const creds = await loadCreds(workspaceId);
-      const pipelines = await kommoFetchAll(creds, "/leads/pipelines", "pipelines", { maxPages: 10 });
-      const normalized = pipelines.map((p: any) => ({
+      const pipelines = await kommoFetchAll(creds, "/leads/pipelines", "pipelines", { maxPages: 10 }) as KommoPipelineRaw[];
+      const normalized = pipelines.map((p) => ({
         id: String(p.id),
         name: p.name,
-        stages: (p?._embedded?.statuses ?? []).map((s: any) => ({ id: String(s.id), name: s.name })),
+        stages: (p?._embedded?.statuses ?? []).map((s) => ({ id: String(s.id), name: s.name })),
       }));
       return new Response(JSON.stringify({ success: true, data: { pipelines: normalized } }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
