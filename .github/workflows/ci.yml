@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  frontend:
+    name: Frontend (typecheck, test, lint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Lint (Kommo-scoped only — GHL/legacy paths excluded, see eslint.config.js)
+        # Não-bloqueante até a Fase 2 do plano de remediação zerar os ~197
+        # erros restantes (majoritariamente @typescript-eslint/no-explicit-any
+        # em kommo-sync/kommo-report-snapshot/kommo-manage/pdf-extract).
+        # Critério de corte: remover `continue-on-error` quando `npm run lint`
+        # sair limpo localmente.
+        continue-on-error: true
+        run: npm run lint
+
+  edge-functions:
+    name: Edge functions (Deno)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          # Best-effort pin a recent stable Deno 2.x. Não há como confirmar a
+          # versão exata do Supabase Edge Runtime a partir daqui — se o
+          # comportamento divergir do hospedado, ajustar este pin.
+          deno-version: "2.1.x"
+      - name: Type-check Kommo-owned functions (GHL/legacy excluídos pela Regra #1)
+        run: |
+          set -e
+          for dir in supabase/functions/*/; do
+            name=$(basename "$dir")
+            case "$name" in
+              _shared|admin-bootstrap|admin-users|ai-analyze-v2|ai-assistant|ai-insights-generate|ghl-*)
+                continue ;;
+            esac
+            echo "deno check $dir index.ts"
+            deno check "$dir/index.ts"
+          done
+      - name: Auth guardrail (verify_jwt=false ⇒ alguma autorização explícita)
+        # Não-bloqueante por enquanto: achado real pendente em pdf-extract
+        # (verify_jwt=false sem nenhuma checagem) — decisão de correção fica
+        # pra fora desta configuração de CI. Remover `continue-on-error`
+        # quando resolvido.
+        continue-on-error: true
+        run: node scripts/check-auth-guardrail.mjs
+
+  # E2E (Playwright) fica FORA da CI de propósito: precisa de credenciais
+  # reais do Kommo/Supabase que não devem virar secret de CI neste momento.
+  # Rodar manualmente (`npm run test:e2e`) antes de releases maiores.
