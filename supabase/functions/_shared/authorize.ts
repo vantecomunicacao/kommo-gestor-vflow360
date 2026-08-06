@@ -78,3 +78,60 @@ export async function authorizeWorkspace(opts: AuthorizeOpts): Promise<AuthResul
 
   return { userId, via: "user" };
 }
+
+export interface CallerIdentity {
+  userId: string | undefined;
+  userEmail: string | undefined;
+}
+
+/**
+ * Resolve quem está chamando (sub/email do JWT), SEM checar workspace.
+ * getClaims primeiro (rápido), com fallback pra getUser (cobre formatos de
+ * JWT que getClaims não decodifica). Uso: fluxos sem workspace ainda pra
+ * checar membership (bootstrap de admin, criação de workspace nova) — quando
+ * já existe um workspaceId, prefira `authorizeWorkspace` (cobre também o
+ * caminho interno via `x-internal-secret`, que esta função não cobre).
+ */
+export async function resolveCallerIdentity(
+  req: Request,
+  supabaseUrl: string,
+  anonKey: string,
+): Promise<CallerIdentity> {
+  const authHeader = req.headers.get("Authorization") || "";
+  const token = authHeader.replace("Bearer ", "");
+  if (!token) return { userId: undefined, userEmail: undefined };
+
+  const userClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  let userId: string | undefined;
+  let userEmail: string | undefined;
+  try {
+    const { data: claims } = await userClient.auth.getClaims(token);
+    const c = (claims as { claims?: Record<string, unknown> } | null)?.claims
+      ?? (claims as Record<string, unknown> | null);
+    userId = c?.sub as string | undefined;
+    userEmail = c?.email as string | undefined;
+  } catch {
+    // fallback abaixo
+  }
+  if (!userId) {
+    const { data: u } = await userClient.auth.getUser(token);
+    userId = u?.user?.id;
+    userEmail = u?.user?.email ?? userEmail;
+  }
+  return { userId, userEmail };
+}
+
+/** Lança `Error("Forbidden: not a member of this workspace")` se `userId` não for membro. */
+export async function requireWorkspaceMember(
+  db: SupabaseClient,
+  userId: string,
+  workspaceId: string,
+): Promise<void> {
+  const { data: isMember } = await db.rpc("is_workspace_member", {
+    _user_id: userId,
+    _workspace_id: workspaceId,
+  });
+  if (!isMember) throw new Error("Forbidden: not a member of this workspace");
+}

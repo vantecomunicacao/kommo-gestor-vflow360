@@ -53,6 +53,21 @@ menores (frontend hooks/páginas/componentes ui). Nenhum desses toca API
 externa diretamente (menor risco de bug silencioso), mas o gate de lint da CI
 (Fase 1) continua não-bloqueante até isso ser zerado.
 
+**Fase 3 do plano de remediação (2026-08-06):** mapeamento de auth confirmou dois
+modelos reais (não duplicação por preguiça): `kommo-sync`/`kommo-dashboard`/
+`kommo-report-snapshot`/`kommo-ai-analyze` usam `authorizeWorkspace` (cobre o
+caminho interno via `x-internal-secret`, usado pelos crons); `kommo-manage`,
+`cooling-leads` e `kommo-actions` nunca precisaram desse caminho — migradas pros
+novos helpers `resolveCallerIdentity`/`requireWorkspaceMember` (`_shared/authorize.ts`),
+equivalentes ao que já faziam à mão. `kommo-admin-bootstrap`/`kommo-admin-users`
+são operações GLOBAIS (não de workspace) — não fazem sentido em `authorizeWorkspace`;
+usam só `resolveCallerIdentity`. CORS extraído pra `_shared/cors.ts` (duas variantes
+reais, `corsHeadersBase`/`corsHeadersExtended` — `kommo-sync` ficou de fora por ter
+uma terceira variante própria, único consumidor). `wipeWorkspaceData` documentado
+como já seguro pra retry (delete idempotente + account_id só atualiza depois que
+termina), sem precisar de transação. Guardrail de auth (Fase 1) atualizado pra
+reconhecer os novos helpers como sinal válido.
+
 **Achado 2026-08-05 — `pdf-extract` sem autorização:** essa edge function tem
 `verify_jwt = false` e nenhuma checagem de auth (nem a real, nem um comentário
 "Public endpoint" como o `log-event` tem). Endpoint aberto que processa PDF e

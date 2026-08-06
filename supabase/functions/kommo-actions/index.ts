@@ -8,12 +8,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { KommoCreds, kommoFetch } from "../_shared/kommo-client.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { resolveCallerIdentity, requireWorkspaceMember } from "../_shared/authorize.ts";
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 const DEFAULT_TAG = "esfriando";
 const DEFAULT_TASK_TYPE_ID = 1; // "Contato" (tipo padrão do Kommo)
@@ -37,34 +33,18 @@ serve(async (req) => {
   const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Missing authorization");
-    const token = authHeader.replace("Bearer ", "");
-
     // Auth: exige usuário válido no JWT + membership no workspace.
-    // getClaims em try/catch (não derruba com 500 nas API keys novas), mas o
-    // usuário é OBRIGATÓRIO — sem usuário, 401; sem membership, 403.
-    let userId: string | null = null;
-    try {
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-      const { data: claims } = await userClient.auth.getClaims(token);
-      userId = claims?.claims?.sub ?? null;
-    } catch { userId = null; }
+    const { userId } = await resolveCallerIdentity(req, SUPABASE_URL, ANON_KEY);
     if (!userId) throw new Error("Unauthorized");
 
-    const body = await req.json().catch(() => ({} as any));
+    const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     const workspaceId = body.workspace_id as string;
     const leadKommoId = String(body.lead_kommo_id ?? "");
     const kind = (body.kind as string) || "task";
     if (!workspaceId) throw new Error("workspace_id is required");
     if (!leadKommoId) throw new Error("lead_kommo_id is required");
 
-    const { data: isMember } = await db.rpc("is_workspace_member", {
-      _user_id: userId, _workspace_id: workspaceId,
-    });
-    if (!isMember) throw new Error("Forbidden: not a member of this workspace");
+    await requireWorkspaceMember(db, userId, workspaceId);
 
     // Idempotência: se o vflow já criou esta ação neste lead, não repete no Kommo.
     const { data: prior } = await db.from("lead_actions")

@@ -26,7 +26,7 @@ const ghlAndLegacy = new Set([
   "ghl-enrich-attachments", "ghl-manage", "ghl-messages-sync", "ghl-sync",
 ]);
 
-const authSignal = /authorizeWorkspace|is_workspace_member|x-internal-secret|getClaims|getUser|Public endpoint/i;
+const authSignal = /authorizeWorkspace|resolveCallerIdentity|requireWorkspaceMember|is_workspace_member|x-internal-secret|getClaims|getUser|Public endpoint/i;
 
 const jwtDisabled = [...config.matchAll(/\[functions\.([\w-]+)\]\s*\n\s*verify_jwt\s*=\s*false/g)]
   .map((m) => m[1])

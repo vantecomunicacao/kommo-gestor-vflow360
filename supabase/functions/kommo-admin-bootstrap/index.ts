@@ -3,11 +3,8 @@
 // no schema `kommo`. Espelha admin-bootstrap, mas opera SOMENTE em kommo.* (não toca
 // no schema public/GHL). auth.users é compartilhado — aqui só lemos o caller.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { resolveCallerIdentity } from "../_shared/authorize.ts";
+import { corsHeadersBase as corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -16,22 +13,7 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUB
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const auth = req.headers.get("Authorization") || "";
-    const token = auth.replace("Bearer ", "");
-    if (!token) return json({ error: "Unauthorized" }, 401);
-
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: auth } } });
-    let userId: string | undefined;
-    let userEmail: string | undefined;
-    try {
-      const { data: claims } = await (userClient.auth as any).getClaims(token);
-      const c = claims?.claims ?? claims;
-      userId = c?.sub; userEmail = c?.email;
-    } catch (_) { /* fallback abaixo */ }
-    if (!userId) {
-      const { data: u } = await userClient.auth.getUser(token);
-      userId = u?.user?.id; userEmail = u?.user?.email ?? userEmail;
-    }
+    const { userId, userEmail } = await resolveCallerIdentity(req, SUPABASE_URL, ANON_KEY);
     if (!userId) return json({ error: "Unauthorized" }, 401);
 
     // Client no schema kommo: todo .from() resolve em kommo.*

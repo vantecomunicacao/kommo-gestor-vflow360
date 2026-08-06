@@ -16,12 +16,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { fetchAllRows } from "../_shared/paginate.ts";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { resolveCallerIdentity, requireWorkspaceMember } from "../_shared/authorize.ts";
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 const DAY = 86_400_000;
 const COOLING_THRESHOLDS = { warning: 7, alert: 10, critical: 14 };
@@ -37,32 +33,16 @@ serve(async (req) => {
     // Client com schema padrão `kommo`: todo .from() resolve em kommo.*
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Missing authorization");
-    const token = authHeader.replace("Bearer ", "");
-
-    const payload = await req.json().catch(() => ({} as any));
+    const payload = await req.json().catch(() => ({})) as Record<string, unknown>;
     const workspaceId = payload.workspace_id as string;
     if (!workspaceId) throw new Error("workspace_id is required");
     const filterPipelineIds: string[] = Array.isArray(payload.pipelineIds) ? payload.pipelineIds.filter(Boolean) : [];
     const filterSellerIds: string[] = Array.isArray(payload.sellerIds) ? payload.sellerIds.filter(Boolean) : [];
 
     // Auth: exige usuário válido no JWT + membership no workspace.
-    // getClaims em try/catch (não derruba com 500 nas API keys novas), mas o
-    // usuário é OBRIGATÓRIO — sem usuário, 401; sem membership, 403.
-    let userId: string | null = null;
-    try {
-      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-        global: { headers: { Authorization: `Bearer ${token}` } },
-      });
-      const { data: claims } = await userClient.auth.getClaims(token);
-      userId = claims?.claims?.sub ?? null;
-    } catch { userId = null; }
+    const { userId } = await resolveCallerIdentity(req, SUPABASE_URL, ANON_KEY);
     if (!userId) throw new Error("Unauthorized");
-    const { data: isMember } = await db.rpc("is_workspace_member", {
-      _user_id: userId, _workspace_id: workspaceId,
-    });
-    if (!isMember) throw new Error("Forbidden");
+    await requireWorkspaceMember(db, userId, workspaceId);
 
     // Stages "ganhas" para excluir do "aberto" (por nome + status_id 142 do Kommo).
     const [{ data: pipelinesRows }, { data: usersRows }] = await Promise.all([

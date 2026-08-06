@@ -6,11 +6,8 @@
 //   - update_password: muda a senha da conta única (efeito também no GHL) — usar com ciência.
 //   - list_users: escopado aos usuários com presença no kommo.*.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+import { resolveCallerIdentity } from "../_shared/authorize.ts";
+import { corsHeadersBase as corsHeaders } from "../_shared/cors.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -19,20 +16,7 @@ const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUB
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const authHeader = req.headers.get("Authorization") || "";
-    const token = authHeader.replace("Bearer ", "");
-    if (!token) return json({ error: "Unauthorized" }, 401);
-
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
-    let userId: string | undefined;
-    try {
-      const { data: claims } = await (userClient.auth as any).getClaims(token);
-      userId = claims?.sub || claims?.claims?.sub;
-    } catch (_) { /* fallback */ }
-    if (!userId) {
-      const { data: u } = await userClient.auth.getUser(token);
-      userId = u?.user?.id;
-    }
+    const { userId } = await resolveCallerIdentity(req, SUPABASE_URL, ANON_KEY);
     if (!userId) return json({ error: "Unauthorized" }, 401);
 
     // auth: client de service só para a Admin API (auth.users compartilhado).

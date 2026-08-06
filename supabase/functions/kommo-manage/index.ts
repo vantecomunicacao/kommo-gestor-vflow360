@@ -6,6 +6,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { KommoCreds, normalizeSubdomain, kommoFetch, kommoFetchAll } from "../_shared/kommo-client.ts";
+import { resolveCallerIdentity, requireWorkspaceMember } from "../_shared/authorize.ts";
+import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 interface KommoAccount {
   id?: string | number;
@@ -36,12 +38,6 @@ interface KommoPipelineRaw {
   _embedded?: { statuses?: KommoPipelineStatusRaw[] };
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
 function serializeErr(e: unknown): string {
   if (e instanceof Error) return e.message;
   if (e && typeof e === "object") {
@@ -61,29 +57,23 @@ serve(async (req) => {
   const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Missing authorization");
-    const token = authHeader.replace("Bearer ", "");
-
-    // Exige usuário autenticado (membro do workspace)
-    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    });
-    const { data: claims } = await userClient.auth.getClaims(token);
-    const userId = claims?.claims?.sub as string | undefined;
+    // Identidade do chamador — SEM checar workspace ainda, porque "connect" sem
+    // workspace_id cria um workspace novo (não há membership pra checar até existir).
+    const { userId } = await resolveCallerIdentity(req, SUPABASE_URL, ANON_KEY);
     if (!userId) throw new Error("Unauthorized");
 
     const body = await req.json().catch(() => ({})) as Record<string, unknown>;
     const action = (body.action as string) || "status";
     let workspaceId = body.workspace_id as string | null;
 
-    const requireMember = async (wsId: string) => {
-      const { data: ok } = await db.rpc("is_workspace_member", { _user_id: userId, _workspace_id: wsId });
-      if (!ok) throw new Error("Forbidden: not a member of this workspace");
-    };
+    const requireMember = (wsId: string) => requireWorkspaceMember(db, userId, wsId);
 
     // Apaga todo o dado de CRM sincronizado de um workspace (modelo "uma conta por vez").
     // Usado quando se conecta uma conta Kommo DIFERENTE da anterior, para não misturar dados.
+    // Seguro pra reexecutar: cada DELETE é idempotente (0 linhas se já limpo), e o
+    // account_id da integração só é atualizado DEPOIS que isto termina sem erro — se
+    // falhar no meio, o próximo "connect" com as mesmas credenciais detecta a troca de
+    // conta de novo e retoma a limpeza (sem duplicar trabalho nem perder o rastro).
     const wipeWorkspaceData = async (wsId: string) => {
       const tables = [
         "leads", "contacts", "pipelines", "users",
