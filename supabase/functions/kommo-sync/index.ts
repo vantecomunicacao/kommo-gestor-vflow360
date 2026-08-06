@@ -9,13 +9,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-
 import {
   KommoCreds, normalizeSubdomain, kommoFetchAll,
   unixToIso, leadStatusKind, extractContactPhoneEmail,
 } from "../_shared/kommo-client.ts";
-import { authorizeWorkspace } from "../_shared/authorize.ts";
+import { authorizeWorkspace, type KommoClient } from "../_shared/authorize.ts";
 
 // Formatos da API do Kommo (api/v4), derivados do uso real abaixo — não é o
 // schema completo da API, só os campos que este sync lê.
@@ -591,7 +589,7 @@ function mapCustomField(workspaceId: string, entity: "leads" | "contacts", f: Ko
 
 /** Upsert em lotes (evita payloads gigantes). */
 async function upsertChunked(
-  db: SupabaseClient,
+  db: KommoClient,
   table: string,
   rows: Record<string, unknown>[],
   onConflict: string,

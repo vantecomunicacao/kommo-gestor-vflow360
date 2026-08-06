@@ -125,6 +125,9 @@ serve(async (req) => {
           { onConflict: "workspace_id,user_id" },
         );
       }
+      // ws.id vem de um client sem tipos gerados (any) — narrowing explícito em vez
+      // de assumir que a criação do workspace sempre devolve um id válido.
+      if (!workspaceId) throw new Error("Falha ao resolver workspace_id");
 
       // 3) upsert da integração (sem token em claro)
       const newAccountId = String(account?.id ?? "");

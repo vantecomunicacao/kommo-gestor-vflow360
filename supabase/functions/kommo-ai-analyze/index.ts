@@ -19,7 +19,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authorizeWorkspace } from "../_shared/authorize.ts";
+import { authorizeWorkspace, type KommoClient } from "../_shared/authorize.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 interface OpenAIUsage {
@@ -94,7 +94,7 @@ interface ProviderCfg { apiKey: string; model: string }
 // ai_provider_config pelo cliente travado no schema kommo → lemos pelo mesmo
 // caminho. Fallback no schema public (leitura permitida) cobre instalações antigas.
 async function resolveProvider(
-  dbKommo: SupabaseClient, dbPublic: SupabaseClient, ownerId: string, callerId: string | null,
+  dbKommo: KommoClient, dbPublic: SupabaseClient, ownerId: string, callerId: string | null,
 ): Promise<ProviderCfg> {
   const ids = [ownerId, callerId].filter((v): v is string => !!v);
   for (const client of [dbKommo, dbPublic]) {

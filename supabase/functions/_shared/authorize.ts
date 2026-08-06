@@ -12,6 +12,17 @@
 
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+/**
+ * Client Supabase apontando pro schema `kommo` (via `createClient(url, key,
+ * { db: { schema: "kommo" } })`). O supabase-js infere esse schema no tipo de
+ * retorno do `createClient` — um `SupabaseClient` genérico (schema `public`)
+ * NÃO é o mesmo tipo e não é aceito onde isto é esperado.
+ */
+// Database/Schema genéricos: não há tipos gerados do banco neste projeto, então
+// `any` aqui é o mesmo "sem tipo de linha" que createClient() já usa sem generics.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type KommoClient = SupabaseClient<any, "public", "kommo", any, any>;
+
 export interface AuthResult {
   /** sub do usuário quando autenticado por JWT; null em chamada interna. */
   userId: string | null;
@@ -20,7 +31,7 @@ export interface AuthResult {
 }
 
 /** Comparação de segredos em tempo (aprox.) constante — evita timing oracle simples. */
-function safeEqual(a: string, b: string): boolean {
+export function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
@@ -30,7 +41,7 @@ function safeEqual(a: string, b: string): boolean {
 export interface AuthorizeOpts {
   req: Request;
   /** Client com service_role (schema kommo) para checar membership via RPC. */
-  db: SupabaseClient;
+  db: KommoClient;
   supabaseUrl: string;
   anonKey: string;
   workspaceId: string;
@@ -125,7 +136,7 @@ export async function resolveCallerIdentity(
 
 /** Lança `Error("Forbidden: not a member of this workspace")` se `userId` não for membro. */
 export async function requireWorkspaceMember(
-  db: SupabaseClient,
+  db: KommoClient,
   userId: string,
   workspaceId: string,
 ): Promise<void> {
