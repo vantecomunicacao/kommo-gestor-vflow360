@@ -25,6 +25,41 @@ manualmente o restante dos workspaces pro projeto novo. Só desligar
 (`cron.unschedule`) ou remover algo do lado Kommo desse projeto antigo com
 autorização explícita — mesmo sendo "nosso", é código morto pendente, não órfão.
 
+**Achado 2026-08-05 — o projeto novo NÃO é 100% "zero GHL" como a tabela acima
+descreve:** o schema `public` desse projeto (`fjncmmqvmocwykpshgsh`) tem 27
+tabelas de um sistema "GHL v2" (`ghl_contacts`, `ghl_conversations`,
+`suggestions`, `integrations`, `workspaces` etc.) e **6 crons ativos**
+(`ghl-v2-sync-tick`, `ghl-v2-analyze-tick`, `ghl-v2-auto-execute-tick`,
+`cleanup-system-logs-daily`, `purge-trashed-workspaces`, `ai-insights-tick`)
+que leem esses dados e disparam chamadas (a cada 2-10min) pra edge functions
+de produção no projeto **antigo** (`ghl-manage`, `ai-analyze-v2`,
+`ai-insights-generate`, `ghl-conversations-sync`). Não é código morto — está
+rodando de verdade. O usuário acredita que é de um "sistema antigo" e pode ser
+apagado, mas a tentativa de pausar os crons (`cron.unschedule`) foi bloqueada
+pelo classificador de permissão do Claude Code e **ficou pendente** — nada foi
+alterado. Antes de mexer: confirmar que nada depende disso, e tratar como
+ação irreversível (perda de dado) separada de só pausar (reversível).
+
+**Fase 2 do plano de remediação (2026-08-05) — parcial:** `npm run lint` caiu de
+339 → 152 problemas (136 erros). Corrigidos: `tailwind.config.ts`, `pdf-extract`,
+e as 4 edge functions de maior risco (tocam API externa/dinheiro) —
+`kommo-sync` (25→0), `kommo-ai-analyze` (15→0), `kommo-manage` (9→0),
+`kommo-report-snapshot` (10→0). **Pendente:** ~136 erros ainda em
+`kommo-dashboard/index.ts` (27), `cooling-leads/index.ts` (26),
+`settings/DashboardSettings.tsx` (26), `Integrations.tsx` (8),
+`_shared/dashboard-metrics.ts` (7), `settings/AiSettings.tsx` (7),
+`kommo-actions/index.ts` (5), `_shared/kommo-client.ts` (5) + ~20 arquivos
+menores (frontend hooks/páginas/componentes ui). Nenhum desses toca API
+externa diretamente (menor risco de bug silencioso), mas o gate de lint da CI
+(Fase 1) continua não-bloqueante até isso ser zerado.
+
+**Achado 2026-08-05 — `pdf-extract` sem autorização:** essa edge function tem
+`verify_jwt = false` e nenhuma checagem de auth (nem a real, nem um comentário
+"Public endpoint" como o `log-event` tem). Endpoint aberto que processa PDF e
+chama uma API de IA externa (custo por request). Guardrail de CI
+(`scripts/check-auth-guardrail.mjs`) já detecta isso, mas está não-bloqueante
+até alguém decidir se é bug (precisa de auth) ou intencional (documentar).
+
 **`supabase db push` está QUEBRADO no projeto novo** (confirmado 2026-08-05): a
 tabela de histórico de migrations do projeto novo não bate com o que já existe
 no banco (herança da replicação em bloco de 2026-08-02), então `db push` tenta
@@ -134,9 +169,28 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.lead_actions` | Ações do vflow por lead (tarefa/tag criadas) — anti-duplicidade dos leads esfriando |
 | `kommo.dashboard_analyses` | Histórico das análises de IA sob demanda do Dashboard (prompt + params + resultado + custo) |
 | `kommo.ai_provider_config` | Chave OpenAI/modelo por usuário (tela Configurações › IA) — antes gravava no public/GHL e falhava |
+| `kommo.tasks` | Tarefas do CRM Kommo (prazo, responsável, concluída) — base de "tarefas atrasadas" por vendedor. Criada em `20260626130000_kommo_tasks.sql`, que também adiciona `kommo.leads.closest_task_at` |
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
+- `20260805130000_kommo_cron_url_drift_fix.sql` — recria as 3 funções de cron
+  (`trigger_sync_all`, `trigger_sync_all_full`, `trigger_report_snapshot_all`)
+  só pra recapturar a URL/anon key do projeto novo (`fjncmmqvmocwykpshgsh`).
+  As funções em produção já tinham sido corrigidas manualmente depois da
+  separação de infra de 2026-08-02, mas as migrations anteriores
+  (`20260709130000`, `20260721120000`) no repo ainda apontavam pro projeto
+  antigo — divergência achada na auditoria de 2026-08-05. Sem mudança de
+  comportamento, só sincroniza repo com o que já roda.
+- `20260803150000_kommo_custom_metrics.sql` — adiciona coluna
+  `kommo.dashboard_settings.custom_metrics jsonb` (até 3 métricas personalizadas
+  por workspace, cada uma comparando contagens de leads por etapa/par
+  pipeline+status; ex. "Taxa de No Show"). Aditiva; sem mudança de RLS.
+- `20260717130000_kommo_sync_tick_every_12h.sql` — reagenda o cron
+  `kommo-sync-tick` de 15min pra 12h (reduz carga na API do Kommo; o full-scan
+  diário já cobre o resto). Não altera função nem tabela.
+- `20260709130000_kommo_report_snapshot_cron.sql` — cria o cron
+  `kommo-report-snapshot-daily` (03:10 UTC) que recomputa os últimos 12 meses +
+  o mês corrente via `kommo-report-snapshot`. Não cria tabela.
 - `20260805120000_kommo_custom_filters.sql` — adiciona coluna
   `kommo.dashboard_settings.custom_filters jsonb` (até 4 filtros extras por workspace,
   `{id, label, fieldId}`, editados na tela Configurações → aba "Filtros"). Cada filtro
@@ -170,6 +224,11 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-08-05 (`20260805130000_kommo_cron_url_drift_fix.sql`): sem mudança
+  estrutural — corrige divergência repo-vs-banco nas 3 funções de cron (ver
+  entrada na seção de migrations acima). Achada durante a auditoria/plano de
+  remediação técnica de 2026-08-05. _(APLICADA em prod 2026-08-05 via
+  `supabase db query --linked`.)_
 - 2026-08-05 (`20260805120000_kommo_custom_filters.sql`): adiciona coluna
   `kommo.dashboard_settings.custom_filters jsonb` — até 4 filtros personalizados por
   workspace (`{id, label, fieldId}`), configurados em Configurações → aba "Filtros"
@@ -189,6 +248,13 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   pro projeto novo. Ver seção "Infraestrutura Supabase" no topo deste arquivo.
   _(dados/usuários pré-migração ainda pendentes de portar manualmente do
   projeto antigo — cada workspace precisa reconectar a integração Kommo.)_
+- 2026-08-03 (`20260803150000_kommo_custom_metrics.sql`): adiciona coluna
+  `kommo.dashboard_settings.custom_metrics jsonb` — até 3 métricas
+  personalizadas por workspace comparando contagens de leads por etapa
+  (par pipeline+status), configuradas em Configurações (mesmo padrão depois
+  reaproveitado por `custom_filters`). Achada faltando no changelog durante a
+  auditoria de 2026-08-05, apesar de já aplicada em prod. Aditiva; sem mudança
+  de RLS.
 - 2026-08-03 (`20260803120000_kommo_sync_status_warning.sql`): adiciona coluna
   `kommo.sync_status.last_sync_warning text` — sync pode terminar `success` com
   ressalva registrada (ex.: teto de páginas de `contacts`/`leads` atingido,
@@ -256,6 +322,10 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   estrutural de tabela. _(APLICADA em prod 2026-07-21: Vault secret criado, env
   `INTERNAL_FUNCTION_SECRET` gravado, migration rodada via `supabase db query --linked`,
   3 edges redeployadas e smoke-testadas — sem segredo = Forbidden, com segredo = OK.)_
+- 2026-07-17 (`20260717130000_kommo_sync_tick_every_12h.sql`): sem mudança
+  estrutural — reagenda o cron `kommo-sync-tick` de 15min pra 12h (menos carga
+  na API do Kommo; full-scan diário cobre o resto). Achada faltando no
+  changelog durante a auditoria de 2026-08-05.
 - 2026-07-17 (`20260717120000_kommo_report_snapshots_rls_fix.sql`): fix de consistência
   de RLS em `kommo.report_snapshots` — adiciona a policy `"svc all"` (FOR ALL TO
   service_role) que faltava e revoga o excesso `insert/update/delete` de `authenticated`
@@ -275,6 +345,10 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   lead × kind, `unique`). Escrita pela edge function `kommo-actions` (idempotência +
   anti-duplicidade dos leads esfriando); leitura por membros via RLS. _(aplicada em prod
   via SQL direto.)_
+- 2026-07-09 (`20260709130000_kommo_report_snapshot_cron.sql`): sem mudança
+  estrutural — cria o cron `kommo-report-snapshot-daily` (03:10 UTC) que chama
+  `kommo-report-snapshot` pra cada integração conectada. Achada faltando no
+  changelog durante a auditoria de 2026-08-05.
 - 2026-07-09 (`20260709120000_kommo_report_snapshots.sql`): **nova tabela**
   `kommo.report_snapshots` — fotos mensais congeladas (workspace × funil × mês × eixo,
   `metrics` jsonb) para a tela de Relatórios (comparação mês a mês). Escrita pela edge
@@ -289,6 +363,12 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   `kommo.dashboard_settings.funnel_stage_labels jsonb` — rótulos customizados das 4
   fases do funil (Configurações → "Nomes das etapas do funil"). _(ainda não
   aplicada em prod — em validação local)._
+- 2026-06-26 (`20260626130000_kommo_tasks.sql`): **nova tabela** `kommo.tasks` —
+  tarefas do CRM Kommo (prazo, responsável, concluída), base de "tarefas
+  atrasadas" por vendedor; também adiciona `kommo.leads.closest_task_at`.
+  Achada faltando no inventário durante a auditoria/plano de remediação técnica
+  de 2026-08-05, apesar de já estar aplicada em prod (confirmado por leitura
+  direta do banco). Aditiva; sem mudança de RLS.
 - 2026-06-26 (`20260626120000_kommo_lead_stage_events.sql`): **nova tabela**
   `kommo.lead_stage_events` — histórico de mudança de etapa (Kommo /events) para
   calcular "Tempo por etapa" e velocidade do funil. _(ainda não deployada/aplicada
