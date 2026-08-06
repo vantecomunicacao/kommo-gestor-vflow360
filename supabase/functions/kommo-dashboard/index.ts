@@ -13,6 +13,10 @@ import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
 import { KommoDashboardPayloadSchema, CustomMetricsListSchema, CustomFiltersListSchema } from "../_shared/schemas.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import {
+  type Bucket, type KommoStatus,
+  inferFunnelMapping, extractCf, extractCfDate, extractCfValues,
+} from "./pure.ts";
 
 const DAY_MS = 86_400_000;
 
@@ -23,65 +27,7 @@ const BRT_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
 function brtDate(d: Date): string {
   return BRT_DATE_FMT.format(d);
 }
-type Bucket = "contato_inicial" | "proposta_enviada" | "fechamento" | "venda_ganha";
 const VALID_BUCKETS: Bucket[] = ["contato_inicial", "proposta_enviada", "fechamento", "venda_ganha"];
-
-interface KommoStatus { id: string; name: string; sort?: number; type?: number; }
-
-function inferFunnelMapping(stages: KommoStatus[]): Record<Bucket, string[]> {
-  const out: Record<Bucket, string[]> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
-  for (const s of stages) {
-    const id = String(s.id);
-    if (id === "142") { out.venda_ganha.push(id); continue; }
-    if (id === "143") continue; // perdido nunca entra no funil
-    const n = (s.name || "").toLowerCase();
-    if (/(ganho|ganha|won|venda)/.test(n)) out.venda_ganha.push(id);
-    else if (/(fechamento|closing|negocia|proposta enviada)/.test(n)) out.fechamento.push(id);
-    else if (/(proposta|proposal|enviar|oferta|reuni)/.test(n)) out.proposta_enviada.push(id);
-    else out.contato_inicial.push(id);
-  }
-  if (!out.venda_ganha.includes("142")) out.venda_ganha.push("142");
-  return out;
-}
-
-/** Extrai valor de um custom field de lead (array custom_fields_values) por code/id. */
-function extractCf(cfv: any, codeOrId: string | null): string | null {
-  if (!codeOrId || !Array.isArray(cfv)) return null;
-  for (const f of cfv) {
-    if (String(f?.field_code ?? "") === codeOrId || String(f?.field_id ?? "") === codeOrId) {
-      const vals = (f?.values ?? []).map((v: any) => v?.value).filter((v: any) => v != null && String(v).trim() !== "");
-      return vals.length ? vals.join(", ") : null;
-    }
-  }
-  return null;
-}
-
-/** Valor de um custom field do tipo DATA como Date (Kommo grava unix em segundos). */
-function extractCfDate(cfv: any, codeOrId: string | null): Date | null {
-  const vals = extractCfValues(cfv, codeOrId);
-  if (!vals.length) return null;
-  const n = Number(vals[0]);
-  if (!Number.isFinite(n)) {
-    const d = new Date(vals[0]);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  // unix em segundos (Kommo) → ms
-  return new Date(n * 1000);
-}
-
-/** Como extractCf, mas devolve cada valor individualmente (p/ multiselect e distribuição). */
-function extractCfValues(cfv: any, codeOrId: string | null): string[] {
-  if (!codeOrId || !Array.isArray(cfv)) return [];
-  for (const f of cfv) {
-    if (String(f?.field_code ?? "") === codeOrId || String(f?.field_id ?? "") === codeOrId) {
-      return (f?.values ?? [])
-        .map((v: any) => v?.value)
-        .filter((v: any) => v != null && String(v).trim() !== "")
-        .map((v: any) => String(v));
-    }
-  }
-  return [];
-}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });

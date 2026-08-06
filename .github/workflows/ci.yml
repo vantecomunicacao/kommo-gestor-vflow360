@@ -59,6 +59,14 @@ jobs:
         # quando resolvido.
         continue-on-error: true
         run: node scripts/check-auth-guardrail.mjs
+      - name: Unit tests (Deno)
+        # Runner separado do vitest (que só enxerga src/). Lista de paths
+        # explícita — atualizar conforme novos *.test.ts forem adicionados
+        # em supabase/functions/**.
+        run: |
+          deno test --allow-env \
+            supabase/functions/_shared/ \
+            supabase/functions/kommo-dashboard/
 
   # E2E (Playwright) fica FORA da CI de propósito: precisa de credenciais
   # reais do Kommo/Supabase que não devem virar secret de CI neste momento.

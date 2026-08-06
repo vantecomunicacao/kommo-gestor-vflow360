@@ -68,6 +68,35 @@ como já seguro pra retry (delete idempotente + account_id só atualiza depois q
 termina), sem precisar de transação. Guardrail de auth (Fase 1) atualizado pra
 reconhecer os novos helpers como sinal válido.
 
+**Fase 4 do plano de remediação (2026-08-06) — parcial:** `npx deno` (via
+`npx -y deno ...`) ficou disponível nesta sessão, então `deno check`/`deno test`
+passaram a rodar de verdade (antes eram só revisão manual). Isso achou e corrigiu
+bugs reais de tipo em 7 arquivos (ver commit `381eba9`) — sinal de que vale
+rodar `deno check` manualmente depois de qualquer mudança em `supabase/functions/`
+até o CI (Fase 1) rodar sozinho. CI ganhou o step `deno test`
+(`.github/workflows/ci.yml`). Testes novos: `_shared/authorize.test.ts` (caminho
+interno inteiro + `requireWorkspaceMember`, com `db` mockado — o caminho JWT real
+fica fora, exigiria rede ou refactor pra injeção) e
+`kommo-dashboard/pure.test.ts`. As 4 funções puras que já eram standalone
+(`inferFunnelMapping`, `extractCf`, `extractCfDate`, `extractCfValues`) foram
+extraídas pra `kommo-dashboard/pure.ts` — **não** dava pra testar direto de
+`index.ts` porque o `serve(...)` roda no nível do módulo (importar o arquivo pra
+pegar as funções dispararia o handler HTTP inteiro). O teste já achou um
+comportamento real do código (não é bug, é o comportamento atual): uma etapa
+chamada "Proposta enviada" cai no bucket `fechamento`, não `proposta_enviada`,
+porque o regex de fechamento inclui essa frase literal.
+
+**Pendente da Fase 4:** o resto do `kommo-dashboard/index.ts` (~600 linhas) tem
+várias funções computacionalmente puras mas escritas como closures dentro do
+`serve()` (`computeTimePerStage`, `buildDist`, `cycleDays`, `countCurrentlyIn`,
+etc.), capturando várias variáveis do escopo externo — extrair essas exige
+threading explícito de parâmetros (risco real de erro de transcrição) e, por
+isso, um golden test ANTES de extrair (conforme o plano original). Ainda não
+decidido: snapshot de uma chamada HTTP real (precisa de workspace estável +
+segredo interno) vs. fixtures sintéticas (sem dependência de dado ao vivo, mas
+não pega discrepância contra edge cases reais de produção) — decisão em aberto
+com o usuário.
+
 **Achado 2026-08-05 — `pdf-extract` sem autorização:** essa edge function tem
 `verify_jwt = false` e nenhuma checagem de auth (nem a real, nem um comentário
 "Public endpoint" como o `log-event` tem). Endpoint aberto que processa PDF e
