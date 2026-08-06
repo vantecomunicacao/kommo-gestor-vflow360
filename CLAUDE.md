@@ -86,16 +86,21 @@ comportamento real do código (não é bug, é o comportamento atual): uma etapa
 chamada "Proposta enviada" cai no bucket `fechamento`, não `proposta_enviada`,
 porque o regex de fechamento inclui essa frase literal.
 
-**Pendente da Fase 4:** o resto do `kommo-dashboard/index.ts` (~600 linhas) tem
-várias funções computacionalmente puras mas escritas como closures dentro do
-`serve()` (`computeTimePerStage`, `buildDist`, `cycleDays`, `countCurrentlyIn`,
-etc.), capturando várias variáveis do escopo externo — extrair essas exige
-threading explícito de parâmetros (risco real de erro de transcrição) e, por
-isso, um golden test ANTES de extrair (conforme o plano original). Ainda não
-decidido: snapshot de uma chamada HTTP real (precisa de workspace estável +
-segredo interno) vs. fixtures sintéticas (sem dependência de dado ao vivo, mas
-não pega discrepância contra edge cases reais de produção) — decisão em aberto
-com o usuário.
+**Fase 4 concluída (2026-08-06):** decisão tomada — fixtures sintéticas (não
+snapshot de chamada real). As 7 closures restantes do `serve()`
+(`safeRate`, `isWonLead`, `stageBucket`, `buildDist`, `cycleDays`,
+`computeTimePerStage`, `countCurrentlyIn`, `countPassedThrough`) foram
+extraídas pra `kommo-dashboard/pure.ts` com parâmetros explícitos
+(`leads`, `eventsByLead`, `bucketOf` em vez de capturados do escopo). Em
+`index.ts`, `isWonLead`/`stageBucket` viraram wrappers locais finos que fecham
+sobre `bucketOf` (evita reescrever os ~9 pontos de chamada espalhados pelo
+arquivo). 30 testes no total em `pure.test.ts`, todos rodados de verdade e
+passando de primeira — inclusive os cálculos mais delicados
+(`computeTimePerStage`, `cycleDays`) com valores calculados à mão. Zero mudança
+de comportamento (`deno check` limpo em todas as 10 edge functions Kommo,
+`npm run lint/typecheck/test` verdes). Efeito colateral bom: tipar
+`DashboardLead`/`StageEvent` em vez de `any` durante a extração já reduziu o
+lint de `kommo-dashboard/index.ts` de 27 pra 16 erros.
 
 **Achado 2026-08-05 — `pdf-extract` sem autorização:** essa edge function tem
 `verify_jwt = false` e nenhuma checagem de auth (nem a real, nem um comentário

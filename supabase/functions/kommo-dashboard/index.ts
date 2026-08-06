@@ -16,9 +16,13 @@ import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 import {
   type Bucket, type KommoStatus,
   inferFunnelMapping, extractCf, extractCfDate, extractCfValues,
+  safeRate, buildDist, cycleDays,
+  stageBucket as stageBucketPure,
+  isWonLead as isWonLeadPure,
+  computeTimePerStage as computeTimePerStagePure,
+  countCurrentlyIn as countCurrentlyInPure,
+  countPassedThrough as countPassedThroughPure,
 } from "./pure.ts";
-
-const DAY_MS = 86_400_000;
 
 // Data-calendário (YYYY-MM-DD) em horário de Brasília. en-CA formata como YYYY-MM-DD.
 const BRT_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
@@ -144,7 +148,10 @@ serve(async (req) => {
     // OU etapa mapeada como "Venda Ganha" NAQUELE funil. Antes havia um
     // `add("142")` global aqui, que fazia o 142 de qualquer funil contar como
     // venda — inclusive onde ele é outra coisa ("Cirurgia Realizada").
-    const isWonLead = (l: any) => l.status === "won" || bucketOf(l.pipeline_id, l.status_id) === "venda_ganha";
+    // (isWonLead/stageBucket: lógica em pure.ts, fechada aqui sobre `bucketOf`.)
+    const isWonLead = (l: any) => isWonLeadPure(l, bucketOf);
+    const stageBucket = (pipelineId: string | null, statusId: string | null): Bucket | null =>
+      stageBucketPure(pipelineId, statusId, bucketOf);
 
     // ===== Query leads (paginada — PostgREST corta em 1000 por resposta) =====
     const leadsRows = await fetchAllRows((from, to) => {
@@ -216,11 +223,6 @@ serve(async (req) => {
       });
     }
 
-    const safeRate = (a: number, b: number) => (b > 0 ? (a / b) * 100 : 0);
-    // A fase depende do PAR funil+etapa: `142`/`143` repetem em todos os funis.
-    const stageBucket = (pipelineId: string | null, statusId: string | null): Bucket | null =>
-      bucketOf(pipelineId, statusId) as Bucket | null;
-
     // ===== Tempo por etapa (a partir do histórico de eventos) =====
     // Para cada lead, reconstrói os trechos (status, entrada, saída) usando created_at
     // + eventos de mudança de etapa, e tira a média de dias por balde do funil.
@@ -235,38 +237,7 @@ serve(async (req) => {
       arr.push({ before: e.before_status_id ?? null, after: e.after_status_id ?? null, t });
       eventsByLead.set(String(e.lead_id), arr);
     }
-    const computeTimePerStage = () => {
-      const acc: Record<Exclude<Bucket, "venda_ganha">, { sum: number; n: number }> = {
-        contato_inicial: { sum: 0, n: 0 }, proposta_enviada: { sum: 0, n: 0 }, fechamento: { sum: 0, n: 0 },
-      };
-      const now = Date.now();
-      for (const l of leads) {
-        const evs = (eventsByLead.get(String(l.kommo_id)) || []).slice().sort((a, b) => a.t - b.t);
-        const created = l.kommo_created_at ? new Date(l.kommo_created_at as string).getTime() : null;
-        const segs: Array<[string | null, number, number]> = [];
-        if (evs.length === 0) {
-          if (created != null) segs.push([l.status_id, created, now]);
-        } else {
-          if (created != null && evs[0].before) segs.push([evs[0].before, created, evs[0].t]);
-          for (let i = 0; i < evs.length; i++) {
-            segs.push([evs[i].after, evs[i].t, i + 1 < evs.length ? evs[i + 1].t : now]);
-          }
-        }
-        for (const [status, enter, exit] of segs) {
-          if (!status || exit < enter || status === "143") continue;
-          const b = stageBucket(l.pipeline_id, status);
-          if (b && b !== "venda_ganha") { acc[b].sum += (exit - enter); acc[b].n++; }
-        }
-      }
-      // O componente do front formata em HORAS (depois converte para "Xd Yh").
-      const toHours = (o: { sum: number; n: number }) => (o.n ? Math.round(o.sum / o.n / 3_600_000) : 0);
-      return {
-        contatoInicial: toHours(acc.contato_inicial),
-        propostaEnviada: toHours(acc.proposta_enviada),
-        fechamento: toHours(acc.fechamento),
-      };
-    };
-    const averageTimePerStage = computeTimePerStage();
+    const averageTimePerStage = computeTimePerStagePure(leads, eventsByLead, bucketOf);
 
     // ===== Velocidade do funil (movimentação no período selecionado) =====
     const sortByStatus = new Map<string, number>();
@@ -402,12 +373,6 @@ serve(async (req) => {
     const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha > 0);
 
     // ===== Origem / UTM =====
-    const buildDist = (getter: (l: any) => string | null, subset: any[]) => {
-      const m = new Map<string, number>(); let filled = 0;
-      for (const l of subset) { const v = getter(l); if (v) { filled++; m.set(v, (m.get(v) || 0) + 1); } }
-      const distribution = Array.from(m.entries()).map(([name, count]) => ({ name, count, percentage: safeRate(count, filled) })).sort((a, b) => b.count - a.count);
-      return { distribution, fillRate: safeRate(filled, subset.length || 0) };
-    };
     const origem = buildDist(getOrigin, leads);
     const wonOrigem = buildDist(getOrigin, wonOpps);
     // Listas de opções dos dropdowns (Tipo de origem/Campanha/Origem): calculadas sobre
@@ -500,15 +465,6 @@ serve(async (req) => {
     }
 
     // ===== Ciclos (criação → fechamento) =====
-    const cycleDays = (subset: any[]) => {
-      let total = 0, n = 0;
-      for (const l of subset) {
-        if (!l.kommo_created_at || !l.closed_at) continue;
-        const ms = new Date(l.closed_at).getTime() - new Date(l.kommo_created_at).getTime();
-        if (ms < 0) continue; total += ms; n++;
-      }
-      return n === 0 ? { days: 0, sampleSize: 0 } : { days: Math.round((total / n / DAY_MS) * 10) / 10, sampleSize: n };
-    };
     const cycleToWon = cycleDays(wonOpps);
     const cycleToLost = cycleDays(lostOpps);
 
@@ -567,36 +523,10 @@ serve(async (req) => {
     // são descartadas em vez de derrubar a request inteira.
     const customMetricsParsed = CustomMetricsListSchema.safeParse(settings?.custom_metrics ?? []);
     const customMetricsConfig = customMetricsParsed.success ? customMetricsParsed.data : [];
-    // "Está em": lead cujo status atual é uma das etapas configuradas.
-    const countCurrentlyIn = (refs: { pipelineId: string; statusId: string }[]) => {
-      const keys = new Set(refs.map((r) => `${r.pipelineId}:${r.statusId}`));
-      let n = 0;
-      for (const l of leads) {
-        if (l.pipeline_id && l.status_id && keys.has(`${l.pipeline_id}:${l.status_id}`)) n++;
-      }
-      return n;
-    };
-    // "Passou por": lead que está atualmente na etapa OU tem, no histórico real
-    // (lead_stage_events, já carregado acima), um evento de entrada nela. Igual ao
-    // resto do arquivo, resolve a etapa pelo pipeline ATUAL do lead (não por
-    // pipeline gravado no evento) — evita colisão de status_id repetido entre funis.
-    const countPassedThrough = (refs: { pipelineId: string; statusId: string }[]) => {
-      if (refs.length === 0) return 0;
-      let n = 0;
-      for (const l of leads) {
-        if (!l.pipeline_id) continue;
-        const targetStatusIds = new Set(refs.filter((r) => r.pipelineId === l.pipeline_id).map((r) => r.statusId));
-        if (targetStatusIds.size === 0) continue;
-        if (l.status_id && targetStatusIds.has(l.status_id)) { n++; continue; }
-        const evs = eventsByLead.get(String(l.kommo_id)) || [];
-        if (evs.some((e) => e.after && targetStatusIds.has(e.after))) n++;
-      }
-      return n;
-    };
     const customMetrics = customMetricsConfig.map((m) => {
-      const passed = countPassedThrough(m.numerator);
+      const passed = countPassedThroughPure(leads, eventsByLead, m.numerator);
       if (m.format === "number") return { id: m.id, name: m.name, format: m.format, icon: m.icon, value: passed };
-      const base = countCurrentlyIn(m.denominator);
+      const base = countCurrentlyInPure(leads, m.denominator);
       return { id: m.id, name: m.name, format: m.format, icon: m.icon, value: base > 0 ? (passed / base) * 100 : null };
     });
 

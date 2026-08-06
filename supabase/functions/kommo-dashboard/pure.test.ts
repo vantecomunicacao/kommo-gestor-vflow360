@@ -1,5 +1,10 @@
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { extractCf, extractCfDate, extractCfValues, inferFunnelMapping, type KommoStatus } from "./pure.ts";
+import {
+  extractCf, extractCfDate, extractCfValues, inferFunnelMapping, type KommoStatus,
+  safeRate, isWonLead, stageBucket, buildDist, cycleDays, computeTimePerStage,
+  countCurrentlyIn, countPassedThrough,
+  type Bucket, type BucketResolver, type DashboardLead, type StageEvent,
+} from "./pure.ts";
 
 Deno.test("inferFunnelMapping - status 142 sempre vai pra venda_ganha, mesmo sem nome batendo", () => {
   const stages: KommoStatus[] = [{ id: "142", name: "Qualquer nome" }];
@@ -95,4 +100,118 @@ Deno.test("extractCfDate - valor não numérico tenta parsear como data", () => 
 
 Deno.test("extractCfDate - sem valores devolve null", () => {
   assertEquals(extractCfDate(cfv, "NAO_EXISTE"), null);
+});
+
+// ============================================================================
+// Golden tests (fixtures sintéticas) das funções extraídas das closures do
+// serve() — segunda leva da Fase 4. Funil fictício "P1": status_id "10"
+// contato_inicial, "20" proposta_enviada, "30" fechamento, "142" venda_ganha
+// (won de sistema do Kommo), "143" perdido (nunca entra em bucket).
+// ============================================================================
+
+const testBucketOf: BucketResolver = (_pipelineId, statusId) => {
+  const map: Record<string, Bucket> = { "10": "contato_inicial", "20": "proposta_enviada", "30": "fechamento", "142": "venda_ganha" };
+  return statusId ? (map[statusId] ?? null) : null;
+};
+
+function lead(overrides: Partial<DashboardLead> & { kommo_id: string }): DashboardLead {
+  return { pipeline_id: "P1", status_id: "10", status: "open", ...overrides };
+}
+
+Deno.test("safeRate - divisão normal", () => {
+  assertEquals(safeRate(5, 10), 50);
+});
+
+Deno.test("safeRate - denominador zero devolve 0 (não Infinity/NaN)", () => {
+  assertEquals(safeRate(5, 0), 0);
+});
+
+Deno.test("isWonLead - true quando status literal é 'won', mesmo sem bucket mapeado", () => {
+  assertEquals(isWonLead(lead({ kommo_id: "1", status: "won", status_id: "999" }), testBucketOf), true);
+});
+
+Deno.test("isWonLead - true quando o bucket da etapa atual é venda_ganha", () => {
+  assertEquals(isWonLead(lead({ kommo_id: "1", status: "open", status_id: "142" }), testBucketOf), true);
+});
+
+Deno.test("isWonLead - false em etapa comum", () => {
+  assertEquals(isWonLead(lead({ kommo_id: "1", status: "open", status_id: "10" }), testBucketOf), false);
+});
+
+Deno.test("stageBucket - resolve etapa comum", () => {
+  assertEquals(stageBucket("P1", "20", testBucketOf), "proposta_enviada");
+});
+
+Deno.test("stageBucket - status perdido (143) nunca cai em bucket", () => {
+  assertEquals(stageBucket("P1", "143", testBucketOf), null);
+});
+
+Deno.test("buildDist - distribui, ordena por contagem e calcula fillRate", () => {
+  const subset = [lead({ kommo_id: "1" }), lead({ kommo_id: "2" }), lead({ kommo_id: "3" }), lead({ kommo_id: "4" })];
+  const values = ["a", "a", "b", "b"];
+  let i = 0;
+  const result = buildDist(() => values[i++], subset);
+  assertEquals(result.fillRate, 100);
+  assertEquals(result.distribution, [
+    { name: "a", count: 2, percentage: 50 },
+    { name: "b", count: 2, percentage: 50 },
+  ]);
+});
+
+Deno.test("buildDist - valores nulos não contam pro fillRate", () => {
+  const subset = [lead({ kommo_id: "1" }), lead({ kommo_id: "2" })];
+  const result = buildDist(() => null, subset);
+  assertEquals(result.fillRate, 0);
+  assertEquals(result.distribution, []);
+});
+
+Deno.test("cycleDays - média em dias, ignora leads sem closed_at", () => {
+  const subset: DashboardLead[] = [
+    lead({ kommo_id: "1", kommo_created_at: "2025-01-01T00:00:00Z", closed_at: "2025-01-06T00:00:00Z" }), // 5 dias
+    lead({ kommo_id: "2", kommo_created_at: "2025-01-01T00:00:00Z", closed_at: "2025-01-11T00:00:00Z" }), // 10 dias
+    lead({ kommo_id: "3", kommo_created_at: "2025-01-01T00:00:00Z" }), // sem closed_at — ignorado
+  ];
+  const result = cycleDays(subset);
+  assertEquals(result, { days: 7.5, sampleSize: 2 });
+});
+
+Deno.test("cycleDays - subset vazio devolve zeros", () => {
+  assertEquals(cycleDays([]), { days: 0, sampleSize: 0 });
+});
+
+Deno.test("computeTimePerStage - soma o tempo dos trechos FECHADOS (o trecho aberto no bucket venda_ganha nunca é contado)", () => {
+  const created = new Date("2025-01-01T00:00:00Z").getTime();
+  const t1 = created + 10 * 3_600_000; // 10h em "contato_inicial"
+  const t2 = t1 + 5 * 3_600_000; // 5h em "proposta_enviada", depois vira venda_ganha (aberto, excluído)
+  const leads: DashboardLead[] = [
+    lead({ kommo_id: "1", kommo_created_at: "2025-01-01T00:00:00Z" }),
+    // sem eventos, etapa não mapeada (bucket null) — excluído independente de `now`.
+    lead({ kommo_id: "2", status_id: "999", kommo_created_at: "2025-01-01T00:00:00Z" }),
+  ];
+  const eventsByLead = new Map<string, StageEvent[]>([
+    ["1", [{ before: "10", after: "20", t: t1 }, { before: "20", after: "142", t: t2 }]],
+  ]);
+  const result = computeTimePerStage(leads, eventsByLead, testBucketOf);
+  assertEquals(result, { contatoInicial: 10, propostaEnviada: 5, fechamento: 0 });
+});
+
+Deno.test("countCurrentlyIn - conta só quem está ATUALMENTE no par funil+etapa", () => {
+  const leads: DashboardLead[] = [
+    lead({ kommo_id: "1", pipeline_id: "P1", status_id: "20" }),
+    lead({ kommo_id: "2", pipeline_id: "P1", status_id: "30" }),
+  ];
+  assertEquals(countCurrentlyIn(leads, [{ pipelineId: "P1", statusId: "20" }]), 1);
+});
+
+Deno.test("countPassedThrough - conta quem está atualmente na etapa OU passou por ela no histórico", () => {
+  const leads: DashboardLead[] = [lead({ kommo_id: "1", pipeline_id: "P1", status_id: "30" })];
+  const eventsByLead = new Map<string, StageEvent[]>([
+    ["1", [{ before: "10", after: "20", t: 100 }]],
+  ]);
+  assertEquals(countPassedThrough(leads, eventsByLead, [{ pipelineId: "P1", statusId: "20" }]), 1);
+  assertEquals(countPassedThrough(leads, eventsByLead, [{ pipelineId: "P1", statusId: "999" }]), 0);
+});
+
+Deno.test("countPassedThrough - refs vazio devolve 0 sem iterar", () => {
+  assertEquals(countPassedThrough([lead({ kommo_id: "1" })], new Map(), []), 0);
 });

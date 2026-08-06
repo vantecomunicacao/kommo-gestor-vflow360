@@ -67,3 +67,160 @@ export function extractCfValues(cfv: any, codeOrId: string | null): string[] {
   }
   return [];
 }
+
+// ============================================================================
+// Segunda leva de extração (Fase 4): funções que eram closures dentro do
+// serve() em index.ts, capturando `leads`/`eventsByLead`/`bucketOf` do escopo
+// externo. Aqui os mesmos dados viram parâmetros explícitos — mesma lógica,
+// sem mudança de comportamento. Testadas com fixtures sintéticas em
+// pure.test.ts (não dá pra rodar contra dado real sem mockar todo o client
+// Supabase, fora do escopo desta leva — ver CLAUDE.md).
+// ============================================================================
+
+export const DAY_MS = 86_400_000;
+
+/** Formato das linhas de kommo.leads usadas pelos cálculos abaixo. */
+export interface DashboardLead {
+  kommo_id: string | number;
+  name?: string | null;
+  pipeline_id: string | null;
+  status_id: string | null;
+  status: string;
+  price?: number | null;
+  responsible_user_id?: string | null;
+  loss_reason_id?: string | null;
+  custom_fields?: unknown;
+  kommo_created_at?: string | null;
+  kommo_updated_at?: string | null;
+  closed_at?: string | null;
+  closest_task_at?: string | null;
+  contact_name?: string | null;
+}
+
+/** Evento de mudança de etapa, já normalizado (ver eventsByLead em index.ts). */
+export interface StageEvent {
+  before: string | null;
+  after: string | null;
+  t: number;
+}
+
+/** Mesma assinatura de `buildBucketResolver` (_shared/kommo-funnel.ts). */
+export type BucketResolver = (
+  pipelineId: string | null | undefined,
+  statusId: string | null | undefined,
+) => Bucket | null;
+
+export function safeRate(a: number, b: number): number {
+  return b > 0 ? (a / b) * 100 : 0;
+}
+
+/** A fase depende do PAR funil+etapa: `142`/`143` repetem em todos os funis. */
+export function stageBucket(pipelineId: string | null, statusId: string | null, bucketOf: BucketResolver): Bucket | null {
+  return bucketOf(pipelineId, statusId) as Bucket | null;
+}
+
+/**
+ * Ganho = status de sistema do Kommo (`won`, status_id 142) OU etapa mapeada
+ * como "Venda Ganha" NAQUELE funil (não um `add("142")` global — 142 é outra
+ * coisa em alguns funis, ex. "Cirurgia Realizada").
+ */
+export function isWonLead(l: DashboardLead, bucketOf: BucketResolver): boolean {
+  return l.status === "won" || bucketOf(l.pipeline_id, l.status_id) === "venda_ganha";
+}
+
+export interface Distribution {
+  distribution: Array<{ name: string; count: number; percentage: number }>;
+  fillRate: number;
+}
+
+export function buildDist(getter: (l: DashboardLead) => string | null, subset: DashboardLead[]): Distribution {
+  const m = new Map<string, number>(); let filled = 0;
+  for (const l of subset) { const v = getter(l); if (v) { filled++; m.set(v, (m.get(v) || 0) + 1); } }
+  const distribution = Array.from(m.entries()).map(([name, count]) => ({ name, count, percentage: safeRate(count, filled) })).sort((a, b) => b.count - a.count);
+  return { distribution, fillRate: safeRate(filled, subset.length || 0) };
+}
+
+export function cycleDays(subset: DashboardLead[]): { days: number; sampleSize: number } {
+  let total = 0, n = 0;
+  for (const l of subset) {
+    if (!l.kommo_created_at || !l.closed_at) continue;
+    const ms = new Date(l.closed_at).getTime() - new Date(l.kommo_created_at).getTime();
+    if (ms < 0) continue; total += ms; n++;
+  }
+  return n === 0 ? { days: 0, sampleSize: 0 } : { days: Math.round((total / n / DAY_MS) * 10) / 10, sampleSize: n };
+}
+
+/**
+ * Tempo médio (em horas) por fase do funil, a partir do histórico de eventos.
+ * Reconstrói os trechos (status, entrada, saída) de cada lead usando
+ * created_at + eventos de mudança de etapa.
+ */
+export function computeTimePerStage(
+  leads: DashboardLead[],
+  eventsByLead: Map<string, StageEvent[]>,
+  bucketOf: BucketResolver,
+): { contatoInicial: number; propostaEnviada: number; fechamento: number } {
+  const acc: Record<Exclude<Bucket, "venda_ganha">, { sum: number; n: number }> = {
+    contato_inicial: { sum: 0, n: 0 }, proposta_enviada: { sum: 0, n: 0 }, fechamento: { sum: 0, n: 0 },
+  };
+  const now = Date.now();
+  for (const l of leads) {
+    const evs = (eventsByLead.get(String(l.kommo_id)) || []).slice().sort((a, b) => a.t - b.t);
+    const created = l.kommo_created_at ? new Date(l.kommo_created_at).getTime() : null;
+    const segs: Array<[string | null, number, number]> = [];
+    if (evs.length === 0) {
+      if (created != null) segs.push([l.status_id, created, now]);
+    } else {
+      if (created != null && evs[0].before) segs.push([evs[0].before, created, evs[0].t]);
+      for (let i = 0; i < evs.length; i++) {
+        segs.push([evs[i].after, evs[i].t, i + 1 < evs.length ? evs[i + 1].t : now]);
+      }
+    }
+    for (const [status, enter, exit] of segs) {
+      if (!status || exit < enter || status === "143") continue;
+      const b = stageBucket(l.pipeline_id, status, bucketOf);
+      if (b && b !== "venda_ganha") { acc[b].sum += (exit - enter); acc[b].n++; }
+    }
+  }
+  // O componente do front formata em HORAS (depois converte para "Xd Yh").
+  const toHours = (o: { sum: number; n: number }) => (o.n ? Math.round(o.sum / o.n / 3_600_000) : 0);
+  return {
+    contatoInicial: toHours(acc.contato_inicial),
+    propostaEnviada: toHours(acc.proposta_enviada),
+    fechamento: toHours(acc.fechamento),
+  };
+}
+
+/** "Está em": lead cujo status ATUAL é uma das etapas configuradas (par funil+etapa). */
+export function countCurrentlyIn(leads: DashboardLead[], refs: { pipelineId: string; statusId: string }[]): number {
+  const keys = new Set(refs.map((r) => `${r.pipelineId}:${r.statusId}`));
+  let n = 0;
+  for (const l of leads) {
+    if (l.pipeline_id && l.status_id && keys.has(`${l.pipeline_id}:${l.status_id}`)) n++;
+  }
+  return n;
+}
+
+/**
+ * "Passou por": lead que está atualmente na etapa OU tem, no histórico real
+ * (eventsByLead), um evento de entrada nela. Resolve a etapa pelo pipeline
+ * ATUAL do lead (não pelo pipeline gravado no evento) — evita colisão de
+ * status_id repetido entre funis.
+ */
+export function countPassedThrough(
+  leads: DashboardLead[],
+  eventsByLead: Map<string, StageEvent[]>,
+  refs: { pipelineId: string; statusId: string }[],
+): number {
+  if (refs.length === 0) return 0;
+  let n = 0;
+  for (const l of leads) {
+    if (!l.pipeline_id) continue;
+    const targetStatusIds = new Set(refs.filter((r) => r.pipelineId === l.pipeline_id).map((r) => r.statusId));
+    if (targetStatusIds.size === 0) continue;
+    if (l.status_id && targetStatusIds.has(l.status_id)) { n++; continue; }
+    const evs = eventsByLead.get(String(l.kommo_id)) || [];
+    if (evs.some((e) => e.after && targetStatusIds.has(e.after))) n++;
+  }
+  return n;
+}
