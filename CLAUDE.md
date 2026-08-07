@@ -226,6 +226,15 @@ Kommo, porque ele é compartilhado com produção viva do GHL.
 > excluída, renomeada (ou houver mudança estrutural relevante), **atualize esta
 > lista na MESMA alteração**, anotando a data e a migration responsável. Esta
 > lista é a fonte de verdade — não deixe ela divergir do banco.
+>
+> **Verificação mecânica (Fase 0, 2026-08-06):** `node scripts/check-schema-drift.mjs`
+> compara essa lista (espelhada em `scripts/kommo-schema-manifest.json`, junto com
+> funções/RPCs e os 3 crons do Kommo) contra o banco real, via `supabase db query
+> --linked`. Roda só localmente (precisa das credenciais do projeto, mesmo motivo
+> do E2E ficar fora da CI — ver `.github/workflows/ci.yml`). Rodar antes de
+> releases maiores ou sempre que desconfiar que o CLAUDE.md ficou pra trás — foi
+> assim que o drift de URL dos crons (2026-08-05) e as 3 tabelas faltando no
+> inventário foram achados manualmente, antes de existir esse script.
 
 Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
