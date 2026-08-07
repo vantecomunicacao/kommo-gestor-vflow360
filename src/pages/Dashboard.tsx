@@ -349,13 +349,17 @@ export default function Dashboard() {
   const coolingLeadsTotal = coolingData?.total ?? 0;
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      {/* Barra de carregamento indeterminada: feedback ao trocar filtros/datas */}
+    <>
+      {/* Barra de carregamento indeterminada: feedback ao trocar filtros/datas.
+          Fica fora do container `space-y-5` de propósito — sendo `fixed`, não ocupa
+          espaço no fluxo, mas o Tailwind aplica `margin-top` a qualquer irmão seguinte
+          via `> * + *`, então dentro do space-y ela empurrava o Header ao aparecer/sumir. */}
       {isFetching && (
         <div className="fixed top-0 left-0 right-0 z-50 h-1 overflow-hidden bg-primary/15" role="status" aria-label="Carregando dados">
           <div className="h-full w-1/3 bg-primary animate-dashboard-loading rounded-full" />
         </div>
       )}
+      <div className="space-y-5 sm:space-y-6">
       <Header
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
@@ -634,6 +638,7 @@ export default function Dashboard() {
         </AnimatedSection>
       )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
