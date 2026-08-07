@@ -9,7 +9,7 @@ import { AxisTabs } from "@/components/AxisTabs";
 import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
 import { DateBasis } from "@/lib/report-axis";
-import { type SavedFilters, filtersStorageKey, parseCsvParam, parseCustomFiltersParam } from "@/lib/dashboard-filters-storage";
+import { type SavedFilters, filtersStorageKey, parseCsvParam, parseCustomFiltersParam, parseLocalDateParam } from "@/lib/dashboard-filters-storage";
 import { useDashboardFilterPersistence } from "@/hooks/useDashboardFilterPersistence";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
@@ -97,7 +97,7 @@ export default function Dashboard() {
       if (hasUrlFilters) {
         setDateRange(
           urlFrom
-            ? { from: new Date(urlFrom), to: urlTo ? new Date(urlTo) : undefined }
+            ? { from: parseLocalDateParam(urlFrom), to: urlTo ? parseLocalDateParam(urlTo) : undefined }
             : { from: subDays(new Date(), 7), to: subDays(new Date(), 1) }
         );
         setSelectedPipelineIds(urlPipelines);

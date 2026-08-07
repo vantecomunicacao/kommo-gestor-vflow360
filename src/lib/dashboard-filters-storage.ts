@@ -43,3 +43,13 @@ export const parseCustomFiltersParam = (v: string | null): Record<string, string
     return out;
   } catch { return {}; }
 };
+
+// Achado 2026-08-06 (não é extração — fix real): "yyyy-MM-dd" sem componente de
+// hora é interpretado pelo JS como MEIA-NOITE UTC. Num fuso atrás de UTC (Brasil,
+// UTC-3), isso volta pro dia anterior em horário local — e como o efeito de
+// persistência reescreve o param a cada mudança de estado via
+// `format(date, "yyyy-MM-dd")` (horário LOCAL), o filtro "from"/"to" perdia um
+// dia a cada reload da página (efeito cumulativo: 2 reloads = 2 dias a menos).
+// Achado escrevendo um teste E2E real (tests-real/dashboard-filters-real.spec.ts)
+// depois da Fase 5 — bug pré-existente, não introduzido pelo refactor.
+export const parseLocalDateParam = (v: string): Date => new Date(`${v}T00:00:00`);
