@@ -35,7 +35,7 @@ const AccountSettings = () => {
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
-        const n = (data as any)?.full_name || "";
+        const n = data?.full_name || "";
         setFullName(n);
         setInitialName(n);
       });
@@ -54,8 +54,8 @@ const AccountSettings = () => {
       if (error) throw error;
       setInitialName(fullName.trim());
       toast.success("Perfil atualizado!");
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao salvar o perfil");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao salvar o perfil");
     } finally {
       setSavingProfile(false);
     }
@@ -75,8 +75,8 @@ const AccountSettings = () => {
         "Enviamos um link de confirmação para o novo e-mail. A troca só vale após confirmar.",
       );
       setNewEmail("");
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao solicitar troca de e-mail");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao solicitar troca de e-mail");
     } finally {
       setSavingEmail(false);
     }
@@ -110,8 +110,8 @@ const AccountSettings = () => {
       setCurrentPw("");
       setNewPw("");
       setConfirmPw("");
-    } catch (e: any) {
-      toast.error(e.message || "Erro ao alterar a senha");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Erro ao alterar a senha");
     } finally {
       setSavingPw(false);
     }

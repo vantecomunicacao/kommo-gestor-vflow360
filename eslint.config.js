@@ -52,4 +52,13 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  {
+    // shadcn/ui gerados (padrão: exportam variants/hooks junto do componente) e
+    // Provider+useX no mesmo arquivo (idioma padrão de Context do React) — o aviso
+    // de fast-refresh é inerente a esses dois padrões, não dívida técnica real.
+    files: ["src/components/ui/**/*.{ts,tsx}", "src/contexts/**/*.{ts,tsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 );

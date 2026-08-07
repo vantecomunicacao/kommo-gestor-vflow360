@@ -85,45 +85,46 @@ export default function DashboardSettings() {
     try {
       const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }] = await Promise.all([
         // Só funis vivos: arquivado/apagado no Kommo não deve aparecer p/ configurar.
-        supabase.from("pipelines" as any).select("*")
+        supabase.from("pipelines").select("*")
           .eq("workspace_id", activeWorkspace.id).eq("is_archive", false).eq("is_deleted", false),
-        supabase.from("custom_fields" as any).select("id,kommo_id,name,code,field_type,entity_type").eq("workspace_id", activeWorkspace.id),
-        supabase.from("dashboard_settings" as any).select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
-        supabase.from("sync_status" as any).select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),
+        supabase.from("custom_fields").select("id,kommo_id,name,code,field_type,entity_type").eq("workspace_id", activeWorkspace.id),
+        supabase.from("dashboard_settings").select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
+        supabase.from("sync_status").select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),
       ]);
-      setSyncStatus(status as any);
+      setSyncStatus(status);
       // Kommo: etapas vivem em `statuses` (jsonb) dentro de cada pipeline.
-      const ps = (pipes || []).map((p: any) => ({
+      const ps = (pipes || []).map((p) => ({
         id: p.id, kommo_id: p.kommo_id, name: p.name,
-        stages: (Array.isArray(p.statuses) ? p.statuses : []).map((s: any) => ({ id: String(s.id), name: s.name })),
+        stages: (Array.isArray(p.statuses) ? p.statuses : []).map((s) =>
+          ({ id: String((s as { id: string | number }).id), name: (s as { name: string }).name })),
       }));
       setPipelines(ps);
-      setCustomFields((fields || []) as any);
-      const settings = settingsRow as any;
+      setCustomFields(fields || []);
+      const settings = settingsRow;
       if (settings) {
         setDefaultPipelines(settings.default_pipeline_ids || []);
-        setStageMapping((settings.funnel_stage_mapping as any) || {});
-        setUtmSourceField((settings as any).utm_source_field_id || "");
-        setUtmMediumField((settings as any).utm_medium_field_id || "");
-        setUtmCampaignField((settings as any).utm_campaign_field_id || "");
-        setUtmContentField((settings as any).utm_content_field_id || "");
-        setUtmTermField((settings as any).utm_term_field_id || "");
+        setStageMapping((settings.funnel_stage_mapping as Record<string, string>) || {});
+        setUtmSourceField(settings.utm_source_field_id || "");
+        setUtmMediumField(settings.utm_medium_field_id || "");
+        setUtmCampaignField(settings.utm_campaign_field_id || "");
+        setUtmContentField(settings.utm_content_field_id || "");
+        setUtmTermField(settings.utm_term_field_id || "");
         setAdditionalDateField(settings.additional_date_field || "");
         setOriginFieldName(settings.origin_field_name || "");
         setVisibleFields(settings.visible_custom_fields || []);
         setChartFields(settings.chart_custom_fields || []);
-        setBusinessStart((settings as any).business_hours_start || "09:00");
-        setBusinessEnd((settings as any).business_hours_end || "18:00");
+        setBusinessStart(settings.business_hours_start || "09:00");
+        setBusinessEnd(settings.business_hours_end || "18:00");
         setWonStageKeys(settings.won_stage_keys || ["venda_ganha"]);
-        setStageLabels((settings.funnel_stage_labels as any) || {});
+        setStageLabels((settings.funnel_stage_labels as Record<string, string>) || {});
         // report_rate_stages guarda CHAVES DE FASE; descarta valores legados (ids de etapa).
-        setReportRateStages(((settings as any).report_rate_stages || []).filter((x: string) =>
+        setReportRateStages((settings.report_rate_stages || []).filter((x: string) =>
           FUNNEL_BUCKETS.some((b) => b.key === x)));
-        setReportGoals(((settings as any).report_goals as any) || {});
+        setReportGoals((settings.report_goals as Record<string, number>) || {});
         // Descarta entradas malformadas em vez de quebrar a tela (ex.: editado direto no banco).
-        const parsedMetrics = customMetricsListSchema.safeParse((settings as any).custom_metrics ?? []);
+        const parsedMetrics = customMetricsListSchema.safeParse(settings.custom_metrics ?? []);
         setCustomMetrics(parsedMetrics.success ? parsedMetrics.data : []);
-        const parsedFilters = customFiltersListSchema.safeParse((settings as any).custom_filters ?? []);
+        const parsedFilters = customFiltersListSchema.safeParse(settings.custom_filters ?? []);
         setCustomFilters(parsedFilters.success ? parsedFilters.data : []);
       }
     } catch (e) {
@@ -174,8 +175,8 @@ export default function DashboardSettings() {
         custom_filters: customFilters,
       };
       const { error } = await supabase
-        .from("dashboard_settings" as any)
-        .upsert(payload as any, { onConflict: "workspace_id" });
+        .from("dashboard_settings")
+        .upsert(payload, { onConflict: "workspace_id" });
       if (error) throw error;
       baselineRef.current = editable; // novo baseline = estado salvo
       setDirty(false);
@@ -210,11 +211,11 @@ export default function DashboardSettings() {
 
     setSyncing(true);
     try {
-      const { data, error } = await supabase.functions.invoke("kommo-sync", {
+      const { data, error } = await supabase.functions.invoke<{ error?: string }>("kommo-sync", {
         body: { workspace_id: activeWorkspace.id },
       });
       if (error) throw error;
-      const errMsg = (data as any)?.error;
+      const errMsg = data?.error;
       if (errMsg) {
         toast.warning("Sincronização", { description: errMsg });
       } else {

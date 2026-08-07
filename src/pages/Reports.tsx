@@ -187,7 +187,7 @@ export default function Reports() {
     enabled: !!wsId,
     queryFn: async () => {
       const { data } = await supabase.from("dashboard_settings").select("report_goals").eq("workspace_id", wsId!).maybeSingle();
-      const raw = (data as any)?.report_goals;
+      const raw = data?.report_goals;
       return (raw && typeof raw === "object" ? raw : {}) as Record<string, number>;
     },
   });
@@ -203,7 +203,7 @@ export default function Reports() {
         else next[k] = n;
       }
       const { error } = await supabase.from("dashboard_settings")
-        .upsert({ workspace_id: wsId, report_goals: next } as any, { onConflict: "workspace_id" });
+        .upsert({ workspace_id: wsId, report_goals: next }, { onConflict: "workspace_id" });
       if (error) throw error;
       toast.success("Metas salvas");
       setGoalDraft({});

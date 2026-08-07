@@ -111,7 +111,7 @@ export default function Dashboard() {
         .eq("workspace_id", activeWorkspace.id)
         .maybeSingle();
       if (cancelled) return;
-      setStageLabels(((settings as any)?.funnel_stage_labels as Record<string, string>) || {});
+      setStageLabels((settings?.funnel_stage_labels as Record<string, string>) || {});
 
       // Deep link: se a URL já tem algum filtro, ela vence — inclusive sobre o funil
       // padrão do workspace, porque um link compartilhado é uma intenção explícita de

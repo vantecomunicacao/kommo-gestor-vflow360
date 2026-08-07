@@ -7,9 +7,45 @@ import { supabase } from "@/integrations/supabase/client";
 import { FieldOption, KommoCustomField, KommoPipelineStage, KommoSync } from "@/components/integrations/types";
 import { AI_COPILOT } from "@/lib/features";
 
+/** Config de um campo/etapa já salva no mapeamento (kommo-manage action "get_mappings"). */
+interface SavedFieldConfig {
+  id: string;
+  description?: string;
+  options?: Array<string | { value: string; instruction?: string }>;
+}
+interface SavedStageConfig {
+  id: string;
+  description?: string;
+}
+/** Campo/pipeline crus, como devolvidos pela API do Kommo via kommo-manage. */
+interface RawCustomField {
+  id: string;
+  name: string;
+  fieldKey: string;
+  dataType?: string;
+  options?: FieldOption[];
+}
+interface RawPipeline {
+  id: string;
+  name: string;
+  stages?: Array<{ id: string; name: string }>;
+}
+interface KommoManageResponse {
+  success: boolean;
+  error?: string;
+  data?: {
+    selectedFields?: SavedFieldConfig[];
+    selectedStages?: SavedStageConfig[];
+    aiPrompt?: string;
+    customFields?: RawCustomField[];
+    pipelines?: RawPipeline[];
+    [key: string]: unknown;
+  };
+}
+
 /** Chama kommo-manage e devolve o JSON cru (envelope no nível de cima). */
-async function callKommo(body: Record<string, unknown>): Promise<any> {
-  const { data, error } = await supabase.functions.invoke<any>("kommo-manage", { body });
+async function callKommo(body: Record<string, unknown>): Promise<KommoManageResponse> {
+  const { data, error } = await supabase.functions.invoke<KommoManageResponse>("kommo-manage", { body });
   if (error) throw new Error(error.message || "Falha ao chamar kommo-manage");
   if (!data) throw new Error("kommo-manage não retornou resposta");
   if (!data.success) throw new Error(data.error || "Erro desconhecido");
@@ -54,8 +90,8 @@ const Integrations = () => {
     setFields([]);
     setStages([]);
 
-    let savedFields: any[] = [];
-    let savedStages: any[] = [];
+    let savedFields: SavedFieldConfig[] = [];
+    let savedStages: SavedStageConfig[] = [];
     let savedPrompt = "";
     try {
       const mappings = await callKommoWs("get_mappings");
@@ -69,12 +105,12 @@ const Integrations = () => {
 
     try {
       const res = await callKommoWs("custom_fields");
-      const customFields: KommoCustomField[] = (res?.data?.customFields || []).map((f: any) => {
-        const saved = savedFields.find((sf: any) => sf.id === f.id);
+      const customFields: KommoCustomField[] = (res?.data?.customFields || []).map((f) => {
+        const saved = savedFields.find((sf) => sf.id === f.id);
         let mergedOptions: FieldOption[] | undefined = f.options;
         if (f.options && saved?.options) {
           mergedOptions = f.options.map((opt: FieldOption) => {
-            const savedOpt = saved.options?.find((so: any) => (typeof so === "string" ? so : so.value) === opt.value);
+            const savedOpt = saved.options?.find((so) => (typeof so === "string" ? so : so.value) === opt.value);
             return savedOpt && typeof savedOpt === "object"
               ? { ...opt, instruction: savedOpt.instruction || "" }
               : opt;
@@ -103,7 +139,7 @@ const Integrations = () => {
       const flat: KommoPipelineStage[] = [];
       for (const pipeline of res?.data?.pipelines || []) {
         for (const stage of pipeline.stages || []) {
-          const saved = savedStages.find((ss: any) => ss.id === stage.id);
+          const saved = savedStages.find((ss) => ss.id === stage.id);
           flat.push({
             id: stage.id,
             name: stage.name,

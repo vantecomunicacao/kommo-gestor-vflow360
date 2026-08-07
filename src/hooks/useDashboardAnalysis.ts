@@ -177,6 +177,11 @@ export interface StreamCallbacks {
   onDelta: (text: string) => void;
   onDone: (d: { id: string | null; created_at: string | null }) => void;
 }
+type StreamEvent =
+  | { type: "meta"; prompt: string; params: Record<string, unknown>; metrics: AnalysisMetrics }
+  | { type: "delta"; text: string }
+  | { type: "done"; id: string | null; created_at: string | null }
+  | { type: "error"; error?: string };
 export async function streamAnalyze(
   workspaceId: string, prompt: string, params: AnalysisParams, cb: StreamCallbacks,
 ): Promise<void> {
@@ -203,8 +208,8 @@ export async function streamAnalyze(
     for (const line of parts) {
       const t = line.trim();
       if (!t) continue;
-      let ev: any;
-      try { ev = JSON.parse(t); } catch { continue; }
+      let ev: StreamEvent;
+      try { ev = JSON.parse(t) as StreamEvent; } catch { continue; }
       if (ev.type === "meta") cb.onMeta(ev);
       else if (ev.type === "delta") cb.onDelta(ev.text as string);
       else if (ev.type === "done") cb.onDone(ev);
@@ -218,7 +223,7 @@ export function useAnalysisHistory(workspaceId: string | null | undefined) {
   return useQuery<AnalysisRecord[], Error>({
     queryKey: ["dashboard-analyses", workspaceId],
     queryFn: async () => {
-      const { data, error } = await (supabase.from("dashboard_analyses" as any) as any)
+      const { data, error } = await supabase.from("dashboard_analyses")
         .select("id, prompt, params, result, metrics, messages, pinned, model, cost_usd, created_at")
         .eq("workspace_id", workspaceId as string)
         .order("pinned", { ascending: false })

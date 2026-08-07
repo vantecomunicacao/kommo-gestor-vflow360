@@ -91,10 +91,23 @@ function confirmSummary(p: AnalysisParams, pipelineName: string): string {
   return `Vou analisar ${pipelineName} de ${per}${cmp}, ${eixo}.`;
 }
 
+/** Formato solto do `params` salvo em `kommo.dashboard_analyses` (jsonb, sem schema fixo). */
+interface SavedAnalysisParams {
+  pipelineId?: string | null;
+  pipelineName?: string;
+  startDate?: string;
+  endDate?: string;
+  dateBasis?: string;
+  compare?: boolean;
+  compareStart?: string | null;
+  compareEnd?: string | null;
+  foco?: string;
+}
+
 // Reconstrói AnalysisParams a partir do params salvo (para o Regenerar).
 function paramsFromSaved(pr: Record<string, unknown> | null): AnalysisParams | null {
   if (!pr) return null;
-  const s = pr as any;
+  const s = pr as SavedAnalysisParams;
   if (!s.startDate || !s.endDate) return null;
   return {
     pipelineId: s.pipelineId ?? null,
@@ -131,7 +144,7 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
     const q = historySearch.trim().toLowerCase();
     if (!q) return history;
     return history.filter((h) => {
-      const pm = (h.params || {}) as any;
+      const pm = (h.params || {}) as SavedAnalysisParams;
       return `${h.prompt} ${pm.pipelineName ?? ""} ${h.result ?? ""}`.toLowerCase().includes(q);
     });
   }, [history, historySearch]);
@@ -480,7 +493,7 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
               <p className="px-1 py-2 text-[11px] text-muted-foreground">Nenhuma análise encontrada.</p>
             )}
             {filteredHistory.map((h) => {
-              const p = (h.params || {}) as any;
+              const p = (h.params || {}) as SavedAnalysisParams;
               const isPinned = !!h.pinned;
               return (
                 <div key={h.id} className="group relative rounded-md border border-border bg-card transition-colors hover:bg-muted/40">

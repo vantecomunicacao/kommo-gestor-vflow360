@@ -26,14 +26,13 @@ const AiSettings = () => {
     if (!user) return;
     const fetchConfig = async () => {
       const { data } = await supabase
-        .from("ai_provider_config" as any)
+        .from("ai_provider_config")
         .select("*")
         .eq("user_id", user.id)
         .maybeSingle();
       if (data) {
-        const d = data as any;
-        setOpenaiApiKey(d.api_key || "");
-        setOpenaiModel(d.model || "gpt-4o");
+        setOpenaiApiKey(data.api_key || "");
+        setOpenaiModel(data.model || "gpt-4o");
       }
     };
     fetchConfig();
@@ -57,14 +56,14 @@ const AiSettings = () => {
       };
 
       const { data: existing } = await supabase
-        .from("ai_provider_config" as any)
+        .from("ai_provider_config")
         .select("id")
         .eq("user_id", user.id)
         .maybeSingle();
 
       const { error: writeError } = existing
-        ? await (supabase.from("ai_provider_config" as any) as any).update(payload).eq("user_id", user.id)
-        : await supabase.from("ai_provider_config" as any).insert(payload as any);
+        ? await supabase.from("ai_provider_config").update(payload).eq("user_id", user.id)
+        : await supabase.from("ai_provider_config").insert(payload);
       if (writeError) throw writeError;
 
       toast.success("Configuração de IA salva com sucesso!");

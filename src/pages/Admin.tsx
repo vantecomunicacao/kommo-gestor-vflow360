@@ -120,6 +120,9 @@ export default function Admin() {
 
   useEffect(() => {
     if (!roleLoading && isAdmin) refresh();
+    // `refresh` é recriada a cada render (não usa useCallback) — incluí-la aqui
+    // faria o efeito rodar em todo render, não só quando role/isAdmin mudam.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleLoading, isAdmin]);
 
   // Carrega os usuários do GHL do workspace quando criando um vendedor.
@@ -135,7 +138,6 @@ export default function Admin() {
       .catch(() => { if (active) setGhlUsers([]); })
       .finally(() => { if (active) setLoadingGhlUsers(false); });
     return () => { active = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isVendor, newWorkspace]);
 
   const promoteSelf = async () => {

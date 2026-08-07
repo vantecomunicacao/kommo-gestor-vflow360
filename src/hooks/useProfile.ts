@@ -19,12 +19,12 @@ export function useProfile() {
       .eq("user_id", user.id)
       .maybeSingle()
       .then(({ data }) => {
-        if (active) setFullName((data as any)?.full_name ?? null);
+        if (active) setFullName(data?.full_name ?? null);
       });
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [user]);
 
   const email = user?.email ?? null;
   const displayName = fullName || email || "Usuário";

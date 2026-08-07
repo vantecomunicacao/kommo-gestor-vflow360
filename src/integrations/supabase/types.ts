@@ -10,56 +10,39 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.15"
   }
   kommo: {
     Tables: {
-      report_snapshots: {
+      ai_provider_config: {
         Row: {
+          api_key: string | null
           created_at: string
-          date_basis: string
-          frozen_at: string
           id: string
-          is_partial: boolean
-          metrics: Json
-          month: string
-          pipeline_id: string
+          model: string | null
+          provider: string
           updated_at: string
-          workspace_id: string
+          user_id: string
         }
         Insert: {
+          api_key?: string | null
           created_at?: string
-          date_basis: string
-          frozen_at?: string
           id?: string
-          is_partial?: boolean
-          metrics?: Json
-          month: string
-          pipeline_id?: string
+          model?: string | null
+          provider?: string
           updated_at?: string
-          workspace_id: string
+          user_id: string
         }
         Update: {
+          api_key?: string | null
           created_at?: string
-          date_basis?: string
-          frozen_at?: string
           id?: string
-          is_partial?: boolean
-          metrics?: Json
-          month?: string
-          pipeline_id?: string
+          model?: string | null
+          provider?: string
           updated_at?: string
-          workspace_id?: string
+          user_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "report_snapshots_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       contacts: {
         Row: {
@@ -167,6 +150,59 @@ export type Database = {
           },
         ]
       }
+      dashboard_analyses: {
+        Row: {
+          cost_usd: number
+          created_at: string
+          id: string
+          messages: Json
+          metrics: Json
+          model: string | null
+          params: Json
+          pinned: boolean
+          prompt: string
+          result: string
+          user_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          messages?: Json
+          metrics?: Json
+          model?: string | null
+          params?: Json
+          pinned?: boolean
+          prompt: string
+          result?: string
+          user_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          cost_usd?: number
+          created_at?: string
+          id?: string
+          messages?: Json
+          metrics?: Json
+          model?: string | null
+          params?: Json
+          pinned?: boolean
+          prompt?: string
+          result?: string
+          user_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dashboard_analyses_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dashboard_settings: {
         Row: {
           additional_date_field: string | null
@@ -176,10 +212,14 @@ export type Database = {
           business_hours_start: string | null
           chart_custom_fields: string[]
           created_at: string
+          custom_filters: Json
+          custom_metrics: Json
           default_pipeline_ids: string[] | null
           funnel_stage_labels: Json
           funnel_stage_mapping: Json | null
           origin_field_name: string | null
+          report_goals: Json
+          report_rate_stages: string[] | null
           updated_at: string
           utm_campaign_field_id: string | null
           utm_content_field_id: string | null
@@ -198,10 +238,14 @@ export type Database = {
           business_hours_start?: string | null
           chart_custom_fields?: string[]
           created_at?: string
+          custom_filters?: Json
+          custom_metrics?: Json
           default_pipeline_ids?: string[] | null
           funnel_stage_labels?: Json
           funnel_stage_mapping?: Json | null
           origin_field_name?: string | null
+          report_goals?: Json
+          report_rate_stages?: string[] | null
           updated_at?: string
           utm_campaign_field_id?: string | null
           utm_content_field_id?: string | null
@@ -220,10 +264,14 @@ export type Database = {
           business_hours_start?: string | null
           chart_custom_fields?: string[]
           created_at?: string
+          custom_filters?: Json
+          custom_metrics?: Json
           default_pipeline_ids?: string[] | null
           funnel_stage_labels?: Json
           funnel_stage_mapping?: Json | null
           origin_field_name?: string | null
+          report_goals?: Json
+          report_rate_stages?: string[] | null
           updated_at?: string
           utm_campaign_field_id?: string | null
           utm_content_field_id?: string | null
@@ -294,9 +342,89 @@ export type Database = {
           },
         ]
       }
+      lead_actions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          kind: string
+          lead_kommo_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind: string
+          lead_kommo_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          kind?: string
+          lead_kommo_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_actions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      lead_stage_events: {
+        Row: {
+          after_status_id: string | null
+          before_status_id: string | null
+          changed_at: string
+          created_at: string
+          event_id: string
+          id: string
+          lead_id: string
+          pipeline_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          after_status_id?: string | null
+          before_status_id?: string | null
+          changed_at: string
+          created_at?: string
+          event_id: string
+          id?: string
+          lead_id: string
+          pipeline_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          after_status_id?: string | null
+          before_status_id?: string | null
+          changed_at?: string
+          created_at?: string
+          event_id?: string
+          id?: string
+          lead_id?: string
+          pipeline_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_stage_events_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
           closed_at: string | null
+          closest_task_at: string | null
           contact_email: string | null
           contact_id: string | null
           contact_name: string | null
@@ -322,6 +450,7 @@ export type Database = {
         }
         Insert: {
           closed_at?: string | null
+          closest_task_at?: string | null
           contact_email?: string | null
           contact_id?: string | null
           contact_name?: string | null
@@ -347,6 +476,7 @@ export type Database = {
         }
         Update: {
           closed_at?: string | null
+          closest_task_at?: string | null
           contact_email?: string | null
           contact_id?: string | null
           contact_name?: string | null
@@ -495,6 +625,53 @@ export type Database = {
         }
         Relationships: []
       }
+      report_snapshots: {
+        Row: {
+          created_at: string
+          date_basis: string
+          frozen_at: string
+          id: string
+          is_partial: boolean
+          metrics: Json
+          month: string
+          pipeline_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          date_basis: string
+          frozen_at?: string
+          id?: string
+          is_partial?: boolean
+          metrics?: Json
+          month: string
+          pipeline_id?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          date_basis?: string
+          frozen_at?: string
+          id?: string
+          is_partial?: boolean
+          metrics?: Json
+          month?: string
+          pipeline_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_snapshots_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sync_status: {
         Row: {
           created_at: string
@@ -503,6 +680,7 @@ export type Database = {
           last_sync_duration_ms: number | null
           last_sync_error: string | null
           last_sync_status: string | null
+          last_sync_warning: string | null
           leads_count: number | null
           updated_at: string
           workspace_id: string
@@ -514,6 +692,7 @@ export type Database = {
           last_sync_duration_ms?: number | null
           last_sync_error?: string | null
           last_sync_status?: string | null
+          last_sync_warning?: string | null
           leads_count?: number | null
           updated_at?: string
           workspace_id: string
@@ -525,6 +704,7 @@ export type Database = {
           last_sync_duration_ms?: number | null
           last_sync_error?: string | null
           last_sync_status?: string | null
+          last_sync_warning?: string | null
           leads_count?: number | null
           updated_at?: string
           workspace_id?: string
@@ -541,32 +721,41 @@ export type Database = {
       }
       sync_watermarks: {
         Row: {
+          contacts_last_seen_at: string | null
           created_at: string
+          events_last_seen_at: string | null
           last_run_at: string | null
           last_run_count: number | null
           last_run_error: string | null
           last_run_status: string | null
           leads_last_seen_at: string | null
+          tasks_last_seen_at: string | null
           updated_at: string
           workspace_id: string
         }
         Insert: {
+          contacts_last_seen_at?: string | null
           created_at?: string
+          events_last_seen_at?: string | null
           last_run_at?: string | null
           last_run_count?: number | null
           last_run_error?: string | null
           last_run_status?: string | null
           leads_last_seen_at?: string | null
+          tasks_last_seen_at?: string | null
           updated_at?: string
           workspace_id: string
         }
         Update: {
+          contacts_last_seen_at?: string | null
           created_at?: string
+          events_last_seen_at?: string | null
           last_run_at?: string | null
           last_run_count?: number | null
           last_run_error?: string | null
           last_run_status?: string | null
           leads_last_seen_at?: string | null
+          tasks_last_seen_at?: string | null
           updated_at?: string
           workspace_id?: string
         }
@@ -575,6 +764,59 @@ export type Database = {
             foreignKeyName: "sync_watermarks_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          complete_till: string | null
+          created_at: string
+          id: string
+          is_completed: boolean
+          kommo_created_at: string | null
+          kommo_id: string
+          kommo_updated_at: string | null
+          lead_id: string | null
+          responsible_user_id: string | null
+          task_type_id: string | null
+          text: string | null
+          workspace_id: string
+        }
+        Insert: {
+          complete_till?: string | null
+          created_at?: string
+          id?: string
+          is_completed?: boolean
+          kommo_created_at?: string | null
+          kommo_id: string
+          kommo_updated_at?: string | null
+          lead_id?: string | null
+          responsible_user_id?: string | null
+          task_type_id?: string | null
+          text?: string | null
+          workspace_id: string
+        }
+        Update: {
+          complete_till?: string | null
+          created_at?: string
+          id?: string
+          is_completed?: boolean
+          kommo_created_at?: string | null
+          kommo_id?: string
+          kommo_updated_at?: string | null
+          lead_id?: string | null
+          responsible_user_id?: string | null
+          task_type_id?: string | null
+          text?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tasks_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
@@ -744,10 +986,7 @@ export type Database = {
         Args: { _workspace_id: string }
         Returns: boolean
       }
-      create_workspace: {
-        Args: { _name: string }
-        Returns: string
-      }
+      create_workspace: { Args: { _name: string }; Returns: string }
       get_integration_token: {
         Args: { p_integration_id: string }
         Returns: string
@@ -768,6 +1007,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      internal_function_secret: { Args: never; Returns: string }
       is_workspace_member: {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
@@ -790,6 +1030,9 @@ export type Database = {
         Args: { p_integration_id: string; p_token: string }
         Returns: string
       }
+      trigger_report_snapshot_all: { Args: never; Returns: undefined }
+      trigger_sync_all: { Args: never; Returns: undefined }
+      trigger_sync_all_full: { Args: never; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "user"

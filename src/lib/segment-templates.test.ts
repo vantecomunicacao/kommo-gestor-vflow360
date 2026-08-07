@@ -4,7 +4,7 @@ import {
   applyTemplateToSettings,
   type SegmentTemplate,
 } from "./segment-templates";
-import { FUNNEL_BUCKETS } from "./dashboard-funnel";
+import { FUNNEL_BUCKETS, type FunnelBucketKey } from "./dashboard-funnel";
 
 const clinicas = SEGMENT_TEMPLATES.find((t) => t.id === "clinicas")!;
 
@@ -18,7 +18,7 @@ describe("catálogo de templates", () => {
   it("só usa chaves de fase válidas em stageLabels e reportRateStages", () => {
     const valid = new Set(FUNNEL_BUCKETS.map((b) => b.key));
     for (const t of SEGMENT_TEMPLATES) {
-      for (const k of Object.keys(t.stageLabels)) expect(valid.has(k as any)).toBe(true);
+      for (const k of Object.keys(t.stageLabels)) expect(valid.has(k as FunnelBucketKey)).toBe(true);
       for (const k of t.reportRateStages) expect(valid.has(k)).toBe(true);
     }
   });

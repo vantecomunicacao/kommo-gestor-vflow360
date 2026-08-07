@@ -55,7 +55,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     await supabase.auth.signOut();
   };
 
-  // Stable user reference: only changes when user.id changes
+  // Stable user reference: only changes when user.id changes (evita recomputar em
+  // token refresh, que troca a referência de session.user sem trocar o usuário).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const user = useMemo(() => session?.user ?? null, [session?.user?.id]);
 
   const contextValue = useMemo(
