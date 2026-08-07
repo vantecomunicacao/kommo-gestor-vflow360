@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
 import { DateBasis } from "@/lib/report-axis";
 import { type SavedFilters, filtersStorageKey, parseCsvParam, parseCustomFiltersParam } from "@/lib/dashboard-filters-storage";
+import { useDashboardFilterPersistence } from "@/hooks/useDashboardFilterPersistence";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
@@ -174,43 +175,13 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspace?.id]);
 
-  // Persistir filtros no localStorage por workspace
-  useEffect(() => {
-    if (!hydrated || !activeWorkspace?.id) return;
-    const payload: SavedFilters = {
-      from: dateRange?.from ? dateRange.from.toISOString() : undefined,
-      to: dateRange?.to ? dateRange.to.toISOString() : undefined,
-      pipelineIds: selectedPipelineIds,
-      stageIds: selectedStageIds,
-      sellerIds: selectedSellerIds,
-      utmMediums: selectedUtmMediums,
-      utmCampaigns: selectedUtmCampaigns,
-      origins: selectedOrigins,
-      customFilters: selectedCustomFilters,
-      dateBasis,
-    };
-    try {
-      localStorage.setItem(filtersStorageKey(activeWorkspace.id), JSON.stringify(payload));
-    } catch {
-      // ignora quota cheia
-    }
-
-    // Mantém a URL como espelho do filtro atual (deep link) — replace pra não
-    // empilhar histórico de navegação a cada clique de filtro.
-    const nextParams = new URLSearchParams();
-    if (selectedPipelineIds.length) nextParams.set("pipelines", selectedPipelineIds.join(","));
-    if (selectedStageIds.length) nextParams.set("stages", selectedStageIds.join(","));
-    if (selectedSellerIds.length) nextParams.set("sellers", selectedSellerIds.join(","));
-    if (selectedUtmMediums.length) nextParams.set("utmMedium", selectedUtmMediums.join(","));
-    if (selectedUtmCampaigns.length) nextParams.set("utmCampaign", selectedUtmCampaigns.join(","));
-    if (selectedOrigins.length) nextParams.set("origin", selectedOrigins.join(","));
-    const nonEmptyCustomFilters = Object.fromEntries(Object.entries(selectedCustomFilters).filter(([, v]) => v.length));
-    if (Object.keys(nonEmptyCustomFilters).length) nextParams.set("cf", JSON.stringify(nonEmptyCustomFilters));
-    if (dateBasis === "fechamento") nextParams.set("axis", "fechamento");
-    if (dateRange?.from) nextParams.set("from", format(dateRange.from, "yyyy-MM-dd"));
-    if (dateRange?.to) nextParams.set("to", format(dateRange.to, "yyyy-MM-dd"));
-    setSearchParams(nextParams, { replace: true });
-  }, [hydrated, activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds, selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, selectedCustomFilters, dateBasis, setSearchParams]);
+  // Persistir filtros no localStorage por workspace (e espelhar na URL) — ver
+  // useDashboardFilterPersistence em hooks/useDashboardFilterPersistence.ts.
+  useDashboardFilterPersistence({
+    hydrated, workspaceId: activeWorkspace?.id, dateRange, selectedPipelineIds, selectedStageIds,
+    selectedSellerIds, selectedUtmMediums, selectedUtmCampaigns, selectedOrigins, selectedCustomFilters,
+    dateBasis, setSearchParams,
+  });
 
 
   const startDate = useMemo(() => startOfDay(dateRange?.from || subDays(new Date(), 7)), [dateRange?.from]);
