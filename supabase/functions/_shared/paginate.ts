@@ -16,8 +16,8 @@
 //     db.from("leads").select("...").eq("workspace_id", ws)
 //       .order("kommo_id").range(from, to));
 
-export async function fetchAllRows<T = any>(
-  makeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+export async function fetchAllRows<T>(
+  makeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: unknown }>,
   opts: { page?: number } = {},
 ): Promise<T[]> {
   const PAGE = opts.page ?? 1000;

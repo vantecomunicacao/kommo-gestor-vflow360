@@ -62,8 +62,10 @@ Deno.serve(async (req) => {
             last_sign_in_at: u?.last_sign_in_at ?? null,
             full_name: kProfiles?.find((x) => x.user_id === id)?.full_name || null,
             roles: (kRoles?.filter((r) => r.user_id === id).map((r) => r.role)) || [],
-            workspaces: (kMembers?.filter((m) => m.user_id === id) || []).map((m: any) => ({
-              workspace_id: m.workspace_id, role: m.role, name: m.workspaces?.name,
+            workspaces: (kMembers?.filter((m) => m.user_id === id) || []).map((m: {
+              workspace_id: string; role: string; workspaces?: Array<{ name: string }> | null;
+            }) => ({
+              workspace_id: m.workspace_id, role: m.role, name: m.workspaces?.[0]?.name,
             })),
             permissions: {
               view_suggestions: !!p?.view_suggestions,

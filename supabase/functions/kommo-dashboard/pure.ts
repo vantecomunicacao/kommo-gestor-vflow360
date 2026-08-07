@@ -29,12 +29,23 @@ export function inferFunnelMapping(stages: KommoStatus[]): Record<Bucket, string
   return out;
 }
 
+/** Item de `custom_fields` como gravado pelo kommo-sync (jsonb, sem schema fixo). */
+interface CustomFieldRow {
+  field_code?: string | number;
+  field_id?: string | number;
+  values?: Array<{ value?: unknown }>;
+}
+
+function asCustomFieldRows(cfv: unknown): CustomFieldRow[] {
+  return Array.isArray(cfv) ? (cfv as CustomFieldRow[]) : [];
+}
+
 /** Extrai valor de um custom field de lead (array custom_fields_values) por code/id. */
-export function extractCf(cfv: any, codeOrId: string | null): string | null {
-  if (!codeOrId || !Array.isArray(cfv)) return null;
-  for (const f of cfv) {
+export function extractCf(cfv: unknown, codeOrId: string | null): string | null {
+  if (!codeOrId) return null;
+  for (const f of asCustomFieldRows(cfv)) {
     if (String(f?.field_code ?? "") === codeOrId || String(f?.field_id ?? "") === codeOrId) {
-      const vals = (f?.values ?? []).map((v: any) => v?.value).filter((v: any) => v != null && String(v).trim() !== "");
+      const vals = (f?.values ?? []).map((v) => v?.value).filter((v) => v != null && String(v).trim() !== "");
       return vals.length ? vals.join(", ") : null;
     }
   }
@@ -42,7 +53,7 @@ export function extractCf(cfv: any, codeOrId: string | null): string | null {
 }
 
 /** Valor de um custom field do tipo DATA como Date (Kommo grava unix em segundos). */
-export function extractCfDate(cfv: any, codeOrId: string | null): Date | null {
+export function extractCfDate(cfv: unknown, codeOrId: string | null): Date | null {
   const vals = extractCfValues(cfv, codeOrId);
   if (!vals.length) return null;
   const n = Number(vals[0]);
@@ -55,14 +66,14 @@ export function extractCfDate(cfv: any, codeOrId: string | null): Date | null {
 }
 
 /** Como extractCf, mas devolve cada valor individualmente (p/ multiselect e distribuição). */
-export function extractCfValues(cfv: any, codeOrId: string | null): string[] {
-  if (!codeOrId || !Array.isArray(cfv)) return [];
-  for (const f of cfv) {
+export function extractCfValues(cfv: unknown, codeOrId: string | null): string[] {
+  if (!codeOrId) return [];
+  for (const f of asCustomFieldRows(cfv)) {
     if (String(f?.field_code ?? "") === codeOrId || String(f?.field_id ?? "") === codeOrId) {
       return (f?.values ?? [])
-        .map((v: any) => v?.value)
-        .filter((v: any) => v != null && String(v).trim() !== "")
-        .map((v: any) => String(v));
+        .map((v) => v?.value)
+        .filter((v) => v != null && String(v).trim() !== "")
+        .map((v) => String(v));
     }
   }
   return [];
@@ -124,7 +135,7 @@ export function stageBucket(pipelineId: string | null, statusId: string | null, 
  * como "Venda Ganha" NAQUELE funil (não um `add("142")` global — 142 é outra
  * coisa em alguns funis, ex. "Cirurgia Realizada").
  */
-export function isWonLead(l: DashboardLead, bucketOf: BucketResolver): boolean {
+export function isWonLead(l: Pick<DashboardLead, "status" | "pipeline_id" | "status_id">, bucketOf: BucketResolver): boolean {
   return l.status === "won" || bucketOf(l.pipeline_id, l.status_id) === "venda_ganha";
 }
 

@@ -109,6 +109,17 @@ chama uma API de IA externa (custo por request). Guardrail de CI
 (`scripts/check-auth-guardrail.mjs`) já detecta isso, mas está não-bloqueante
 até alguém decidir se é bug (precisa de auth) ou intencional (documentar).
 
+**Achado 2026-08-06 — `kommo.leads.source` nunca é lido pelo `kommo-dashboard`:**
+a tabela `kommo.leads` tem uma coluna `source text` ("origem derivada de UTM/origem
+do lead", populada pelo `kommo-sync`), mas o `SELECT` de `leadsRows` em
+`kommo-dashboard/index.ts` nunca a inclui na lista de colunas. O helper `getOrigin`
+tinha um fallback pra `l.source` que por isso sempre avaliava `undefined` — código
+morto desde sempre. Achado ao tipar `DashboardLead` de verdade (era mascarado por
+`any`) durante o fechamento da Fase 2. Comportamento preservado nesta leva (só
+removi o termo morto do fallback, sem incluir a coluna no SELECT) porque incluir
+a coluna mudaria números reais do gráfico de Origem — decisão de fazer isso ou
+não fica pendente, fora do escopo de uma leva de lint.
+
 **Achado 2026-08-06 — `pdf-extract` é código do lado GHL, órfão neste projeto:**
 o único chamador de `pdf-extract` no repo é `_shared/ghl-enrich.ts` (enriquecimento
 de anexos de conversas GHL — "Conversas 2.0"), usado pelas functions

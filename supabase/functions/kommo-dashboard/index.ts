@@ -14,7 +14,7 @@ import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel
 import { KommoDashboardPayloadSchema, CustomMetricsListSchema, CustomFiltersListSchema } from "../_shared/schemas.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 import {
-  type Bucket, type KommoStatus,
+  type Bucket, type KommoStatus, type DashboardLead,
   inferFunnelMapping, extractCf, extractCfDate, extractCfValues,
   safeRate, buildDist, cycleDays,
   stageBucket as stageBucketPure,
@@ -23,6 +23,63 @@ import {
   countCurrentlyIn as countCurrentlyInPure,
   countPassedThrough as countPassedThroughPure,
 } from "./pure.ts";
+
+interface DashboardSettingsRow {
+  additional_date_field?: string | null;
+  utm_medium_field_id?: string | null;
+  utm_campaign_field_id?: string | null;
+  utm_source_field_id?: string | null;
+  origin_field_name?: string | null;
+  custom_filters?: unknown;
+  default_pipeline_ids?: string[] | null;
+  funnel_stage_mapping?: unknown;
+  visible_custom_fields?: string[] | null;
+  chart_custom_fields?: string[] | null;
+  custom_metrics?: unknown;
+  business_hours_start?: string | null;
+  business_hours_end?: string | null;
+}
+interface StageEventRow {
+  lead_id: string | null;
+  pipeline_id: string | null;
+  before_status_id: string | null;
+  after_status_id: string | null;
+  changed_at: string | null;
+}
+interface TaskRow {
+  lead_id: string | null;
+  responsible_user_id: string | null;
+  complete_till: string | null;
+  is_completed: boolean;
+}
+interface OpenLeadRow {
+  pipeline_id: string | null;
+  status_id: string | null;
+  status: string;
+  price: number | null;
+  responsible_user_id: string | null;
+}
+interface SellerAgg {
+  id: string;
+  name: string;
+  contatoInicial: number;
+  propostaEnviada: number;
+  fechamento: number;
+  vendaGanha: number;
+  wonRevenue: number;
+  avgResponseMinutes: number | null;
+  responseCount: number;
+}
+
+function serializeErr(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (o.message) return [o.message, o.code].filter(Boolean).join(" | ");
+    try { return JSON.stringify(o); } catch { return String(e); }
+  }
+  return String(e);
+}
 
 // Data-calendário (YYYY-MM-DD) em horário de Brasília. en-CA formata como YYYY-MM-DD.
 const BRT_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
@@ -77,7 +134,7 @@ serve(async (req) => {
       db.from("custom_fields").select("kommo_id,name,code,entity_type,field_type,enums").eq("workspace_id", workspaceId),
     ]);
 
-    const allPipelines = (pipelinesRows || []) as Array<{ kommo_id: string; name: string; statuses: any; is_main: boolean; sort: number }>;
+    const allPipelines = (pipelinesRows || []) as Array<{ kommo_id: string; name: string; statuses: KommoStatus[] | null; is_main: boolean; sort: number }>;
     // Funil arquivado/apagado (fora de `allPipelines`, que já só traz vivos) não filtra
     // leads — evita que um pipelineId salvo em localStorage de antes da migration
     // is_deleted volte a vazar dado de um funil morto.
@@ -88,8 +145,8 @@ serve(async (req) => {
     // nomes (sellerNameMap) segue completo p/ resolver quem já teve venda mas foi desativado.
     const activeUsers = usersList.filter((u) => u.is_active !== false);
     const lossList = (lossRows || []) as Array<{ kommo_id: string; name: string }>;
-    const settings = (settingsRow || {}) as any;
-    const customFieldDefs = (cfRows || []) as Array<{ kommo_id: string; name: string; code: string | null; entity_type: string | null; field_type: string | null; enums: any }>;
+    const settings = (settingsRow || {}) as DashboardSettingsRow;
+    const customFieldDefs = (cfRows || []) as Array<{ kommo_id: string; name: string; code: string | null; entity_type: string | null; field_type: string | null; enums: unknown }>;
 
     // ===== Data adicional (filtro ADITIVO/união) =====
     // O conjunto final = leads criados no período principal UNIÃO leads cuja data
@@ -115,8 +172,12 @@ serve(async (req) => {
     const utmCampaignField = settings?.utm_campaign_field_id || "UTM_CAMPAIGN";
     const utmSourceField = settings?.utm_source_field_id || "UTM_SOURCE";
     const originFieldName = settings?.origin_field_name || null; // ex: code de "Origem do lead"
-    const getOrigin = (l: any): string | null =>
-      extractCf(l.custom_fields, originFieldName) || extractCf(l.custom_fields, utmSourceField) || l.source || null;
+    // NOTA: kommo.leads tem uma coluna `source` (origem derivada de UTM), mas o SELECT
+    // de `leadsRows` abaixo nunca a inclui — esse fallback era morto (l.source sempre
+    // undefined). Achado ao tipar DashboardLead de verdade; comportamento preservado
+    // (não incluído no SELECT), sinalizado no CLAUDE.md para decisão futura.
+    const getOrigin = (l: DashboardLead): string | null =>
+      extractCf(l.custom_fields, originFieldName) || extractCf(l.custom_fields, utmSourceField) || null;
 
     // ===== Filtros Personalizados (kommo.dashboard_settings.custom_filters) =====
     // Config validada na leitura: entradas malformadas são descartadas em vez de
@@ -149,12 +210,12 @@ serve(async (req) => {
     // `add("142")` global aqui, que fazia o 142 de qualquer funil contar como
     // venda — inclusive onde ele é outra coisa ("Cirurgia Realizada").
     // (isWonLead/stageBucket: lógica em pure.ts, fechada aqui sobre `bucketOf`.)
-    const isWonLead = (l: any) => isWonLeadPure(l, bucketOf);
+    const isWonLead = (l: Pick<DashboardLead, "status" | "pipeline_id" | "status_id">) => isWonLeadPure(l, bucketOf);
     const stageBucket = (pipelineId: string | null, statusId: string | null): Bucket | null =>
       stageBucketPure(pipelineId, statusId, bucketOf);
 
     // ===== Query leads (paginada — PostgREST corta em 1000 por resposta) =====
-    const leadsRows = await fetchAllRows((from, to) => {
+    const leadsRows = await fetchAllRows<DashboardLead>((from, to) => {
       let q = db.from("leads")
         .select("kommo_id,name,pipeline_id,status_id,status,price,responsible_user_id,loss_reason_id,custom_fields,kommo_created_at,kommo_updated_at,closed_at,closest_task_at,contact_name")
         .eq("workspace_id", workspaceId).eq("is_deleted", false);
@@ -176,7 +237,7 @@ serve(async (req) => {
       }
       return q.order("kommo_id").range(from, to);
     });
-    let leads = leadsRows as any[];
+    let leads = leadsRows;
     if (!filterPipelineIds.length && activePipelineIds.size > 0) {
       leads = leads.filter((l) => !l.pipeline_id || activePipelineIds.has(l.pipeline_id));
     }
@@ -200,7 +261,7 @@ serve(async (req) => {
       const addFrom = additionalStartDate ? new Date(additionalStartDate).getTime() : -Infinity;
       const addTo = additionalEndDate ? new Date(additionalEndDate).getTime() : Infinity;
       // Data adicional de cada lead conforme o modo configurado.
-      const additionalDateOf = (l: any): Date | null => {
+      const additionalDateOf = (l: DashboardLead): Date | null => {
         if (additionalDateFieldId === SENTINEL_WON) {
           const isWon = isWonLead(l);
           return isWon && l.closed_at ? new Date(l.closed_at as string) : null;
@@ -226,11 +287,11 @@ serve(async (req) => {
     // ===== Tempo por etapa (a partir do histórico de eventos) =====
     // Para cada lead, reconstrói os trechos (status, entrada, saída) usando created_at
     // + eventos de mudança de etapa, e tira a média de dias por balde do funil.
-    const stageEvRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
+    const stageEvRows = await fetchAllRows<StageEventRow>((from, to) => db.from("lead_stage_events")
       .select("lead_id,pipeline_id,before_status_id,after_status_id,changed_at")
       .eq("workspace_id", workspaceId).order("id").range(from, to));
     const eventsByLead = new Map<string, Array<{ before: string | null; after: string | null; t: number }>>();
-    for (const e of (stageEvRows || []) as any[]) {
+    for (const e of (stageEvRows || [])) {
       const t = e.changed_at ? new Date(e.changed_at).getTime() : NaN;
       if (!e.lead_id || isNaN(t)) continue;
       const arr = eventsByLead.get(String(e.lead_id)) || [];
@@ -253,7 +314,7 @@ serve(async (req) => {
     const movedLeads = new Set<string>();
     const advancedLeads = new Set<string>();
     let movimentacoes = 0, velGanhos = 0, velPerdidos = 0;
-    for (const e of (stageEvRows || []) as any[]) {
+    for (const e of (stageEvRows || [])) {
       const t = e.changed_at ? new Date(e.changed_at).getTime() : NaN;
       if (isNaN(t) || t < velFrom || t > velTo) continue;
       if (!pipeOk(e.pipeline_id ?? null)) continue;
@@ -280,7 +341,7 @@ serve(async (req) => {
     const openLeads = leads.filter((l) => l.status !== "lost" && !isWonLead(l));
     const leadsSemProximaAcao = openLeads.filter((l) => !l.closest_task_at).length;
 
-    const taskRows = await fetchAllRows((from, to) => db.from("tasks")
+    const taskRows = await fetchAllRows<TaskRow>((from, to) => db.from("tasks")
       .select("lead_id,responsible_user_id,complete_till,is_completed")
       .eq("workspace_id", workspaceId).eq("is_completed", false).order("id").range(from, to));
     const fuNow = Date.now();
@@ -288,7 +349,7 @@ serve(async (req) => {
     const sellerNameMap = new Map(usersList.map((u) => [u.kommo_id, u.name]));
     let tarefasAtrasadas = 0, tarefasHoje = 0;
     const overdueBySeller = new Map<string, number>();
-    for (const t of (taskRows || []) as any[]) {
+    for (const t of (taskRows || [])) {
       if (!t.lead_id || !leadIdSet.has(String(t.lead_id))) continue; // respeita filtros (leads no escopo)
       const due = t.complete_till ? new Date(t.complete_till).getTime() : null;
       if (due == null) continue;
@@ -296,7 +357,7 @@ serve(async (req) => {
         tarefasAtrasadas++;
         const nm = (t.responsible_user_id && sellerNameMap.get(String(t.responsible_user_id))) || "Sem responsável";
         overdueBySeller.set(nm, (overdueBySeller.get(nm) || 0) + 1);
-      } else if (brtDate(new Date(t.complete_till)) === fuToday) {
+      } else if (brtDate(new Date(due)) === fuToday) {
         tarefasHoje++;
       }
     }
@@ -351,7 +412,7 @@ serve(async (req) => {
     };
 
     // ===== Sellers =====
-    const sellersMap = new Map<string, any>();
+    const sellersMap = new Map<string, SellerAgg>();
     for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
     for (const l of leads) {
       const b = stageBucket(l.pipeline_id, l.status_id);
@@ -395,7 +456,7 @@ serve(async (req) => {
     const dayLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
     // Conta leads por data-calendário BRT
     // Eixo do gráfico segue o dateBasis: criação (Comercial) ou fechamento (Financeiro).
-    const dailyDateOf = (l: any): string | null =>
+    const dailyDateOf = (l: DashboardLead): string | null =>
       dateBasis === "fechamento" ? (l.closed_at || null) : (l.kommo_created_at || null);
     // `total` = todos os leads do dia (usado pelo Comercial). No Financeiro, `leads`
     // já só contém fechados (won/lost) então total === won+lost; no Comercial há
@@ -445,7 +506,7 @@ serve(async (req) => {
     // "Receita Ganha/Perdida" acima são cortes por período (data de criação ou fechamento);
     // isso aqui é "quanto está aberto agora", então busca de novo sem filtro de data, só
     // respeitando os mesmos filtros de funil/vendedor da tela.
-    const openLeadsRows = await fetchAllRows((from, to) => {
+    const openLeadsRows = await fetchAllRows<OpenLeadRow>((from, to) => {
       let q = db.from("leads")
         .select("pipeline_id,status_id,status,price,responsible_user_id")
         .eq("workspace_id", workspaceId).eq("is_deleted", false).neq("status", "lost");
@@ -457,7 +518,7 @@ serve(async (req) => {
     });
     let openPipelineRevenue = 0;
     let openPipelineCount = 0;
-    for (const l of (openLeadsRows || []) as any[]) {
+    for (const l of (openLeadsRows || [])) {
       if (isWonLead(l)) continue;
       if (!filterPipelineIds.length && activePipelineIds.size > 0 && l.pipeline_id && !activePipelineIds.has(l.pipeline_id)) continue;
       openPipelineRevenue += Number(l.price) || 0;
@@ -568,7 +629,7 @@ serve(async (req) => {
       console.error("kommo-dashboard payload inválido:", msg);
       return new Response(JSON.stringify({ error: msg }), { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
-    const msg = err instanceof Error ? err.message : (err && typeof err === "object" && (err as any).message ? `${(err as any).message} | ${(err as any).code ?? ""}` : String(err));
+    const msg = serializeErr(err);
     console.error("kommo-dashboard error:", msg);
     // Acesso negado → 403 (consistente com kommo-sync); demais falhas → 500.
     const status = msg === "Forbidden" || msg === "Missing authorization" ? 403 : 500;

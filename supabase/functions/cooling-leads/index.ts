@@ -23,6 +23,23 @@ const DAY = 86_400_000;
 const COOLING_THRESHOLDS = { warning: 7, alert: 10, critical: 14 };
 const isWonName = (n: string) => /(ganho|ganha|won|venda)/.test((n || "").toLowerCase());
 
+interface StageRow { id: string | number; name: string; }
+interface PipelineRow { kommo_id: string; name: string; statuses: StageRow[] | null; }
+interface UserRow { kommo_id: string; name: string; }
+interface ActionRow { lead_kommo_id: string; kind: string; }
+interface TaskRow { lead_id: string | null; }
+interface LeadRow {
+  kommo_id: string | number;
+  name: string | null;
+  status: string;
+  status_id: string | number | null;
+  responsible_user_id: string | number | null;
+  pipeline_id: string | number | null;
+  kommo_updated_at: string | null;
+  kommo_created_at: string | null;
+  price: number | null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -56,7 +73,7 @@ serve(async (req) => {
     // Nome da etapa por par "pipeline:status" — status_id se repete entre funis (ex.: 142/143
     // são os mesmos ids em todos os funis), então mapear só por status seria ambíguo.
     const stageNameByPipelineStatus = new Map<string, string>();
-    for (const p of (pipelinesRows || []) as any[]) {
+    for (const p of (pipelinesRows || []) as PipelineRow[]) {
       pipelineNameById.set(String(p.kommo_id), p.name);
       const stages = Array.isArray(p.statuses) ? p.statuses : [];
       for (const s of stages) {
@@ -66,7 +83,7 @@ serve(async (req) => {
     }
 
     const sellerNameById = new Map<string, string>();
-    for (const u of (usersRows || []) as any[]) sellerNameById.set(u.kommo_id, u.name);
+    for (const u of (usersRows || []) as UserRow[]) sellerNameById.set(u.kommo_id, u.name);
 
     // Anti-duplicidade: ações já registradas pelo vflow (kommo.lead_actions) e tarefas
     // abertas já sincronizadas (kommo.tasks). taskDone = criada por nós OU tarefa aberta;
@@ -79,17 +96,17 @@ serve(async (req) => {
     ]);
     const taskDoneSet = new Set<string>();
     const tagDoneSet = new Set<string>();
-    for (const a of (actionRows || []) as any[]) {
+    for (const a of (actionRows || []) as ActionRow[]) {
       if (a.kind === "task") taskDoneSet.add(String(a.lead_kommo_id));
       else if (a.kind === "tag") tagDoneSet.add(String(a.lead_kommo_id));
     }
-    for (const t of (openTaskRows || []) as any[]) {
+    for (const t of (openTaskRows || []) as TaskRow[]) {
       if (t.lead_id) taskDoneSet.add(String(t.lead_id));
     }
 
     // Leads abertos (sem filtro de data; aplica funil/vendedor opcionais). Exclui deletados.
     // Paginado — PostgREST corta a resposta em 1000 linhas.
-    const leadRows = await fetchAllRows((from, to) => {
+    const leadRows = await fetchAllRows<LeadRow>((from, to) => {
       let q = db
         .from("leads")
         .select("kommo_id,name,status,status_id,responsible_user_id,pipeline_id,kommo_updated_at,kommo_created_at,price")
@@ -103,7 +120,7 @@ serve(async (req) => {
     });
 
     const nowMs = Date.now();
-    const isOpen = (l: any) => {
+    const isOpen = (l: LeadRow) => {
       const st = (l.status || "").toLowerCase();
       if (st === "lost" || st === "won") return false;
       if (l.status_id && wonStageIds.has(String(l.status_id))) return false;
@@ -118,13 +135,13 @@ serve(async (req) => {
       leads: { warning: [] as CoolingLead[], alert: [] as CoolingLead[], critical: [] as CoolingLead[] },
       scope: "workspace" as const,
       // Opções pros filtros da tela (sempre a lista completa do workspace, não filtrada).
-      pipelines: (pipelinesRows || []).map((p: any) => ({ id: String(p.kommo_id), name: p.name })),
-      users: (usersRows || []).map((u: any) => ({ id: String(u.kommo_id), name: u.name })),
+      pipelines: ((pipelinesRows || []) as PipelineRow[]).map((p) => ({ id: String(p.kommo_id), name: p.name })),
+      users: ((usersRows || []) as UserRow[]).map((u) => ({ id: String(u.kommo_id), name: u.name })),
     };
 
     for (const l of (leadRows || [])) {
       if (!isOpen(l)) continue;
-      const baseStr = (l as any).kommo_updated_at || (l as any).kommo_created_at;
+      const baseStr = l.kommo_updated_at || l.kommo_created_at;
       if (!baseStr) continue;
       const baseMs = new Date(baseStr).getTime();
       if (isNaN(baseMs)) continue;
@@ -136,20 +153,20 @@ serve(async (req) => {
         : days >= COOLING_THRESHOLDS.alert ? "alert"
         : "warning";
       result[bucket]++;
-      const price = Number((l as any).price) || 0;
+      const price = Number(l.price) || 0;
       result.revenue[bucket] += price;
       result.revenue.total += price;
       result.leads[bucket].push({
-        name: (l as any).name || `Lead ${String((l as any).kommo_id).slice(0, 6)}`,
-        seller: (l as any).responsible_user_id ? (sellerNameById.get((l as any).responsible_user_id) || null) : null,
+        name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`,
+        seller: l.responsible_user_id ? (sellerNameById.get(String(l.responsible_user_id)) || null) : null,
         days: Math.floor(days),
-        kommo_id: String((l as any).kommo_id),
-        responsible_user_id: (l as any).responsible_user_id ? String((l as any).responsible_user_id) : null,
-        taskDone: taskDoneSet.has(String((l as any).kommo_id)),
-        tagDone: tagDoneSet.has(String((l as any).kommo_id)),
-        pipeline: (l as any).pipeline_id ? (pipelineNameById.get(String((l as any).pipeline_id)) || null) : null,
-        stage: (l as any).pipeline_id && (l as any).status_id
-          ? (stageNameByPipelineStatus.get(`${(l as any).pipeline_id}:${(l as any).status_id}`) || null)
+        kommo_id: String(l.kommo_id),
+        responsible_user_id: l.responsible_user_id ? String(l.responsible_user_id) : null,
+        taskDone: taskDoneSet.has(String(l.kommo_id)),
+        tagDone: tagDoneSet.has(String(l.kommo_id)),
+        pipeline: l.pipeline_id ? (pipelineNameById.get(String(l.pipeline_id)) || null) : null,
+        stage: l.pipeline_id && l.status_id
+          ? (stageNameByPipelineStatus.get(`${l.pipeline_id}:${l.status_id}`) || null)
           : null,
       });
     }

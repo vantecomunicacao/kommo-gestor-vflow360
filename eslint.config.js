@@ -21,6 +21,16 @@ const ghlAndLegacyIgnores = [
   "supabase/functions/ghl-sync/**",
   "supabase/functions/_shared/ghl-enrich.ts",
   "supabase/functions/_shared/ghl-sync.ts",
+  // Achado 2026-08-06: shared code sem "ghl" no nome, mas só consumido pelas
+  // functions GHL/legado já listadas acima (ai-insights-generate/ai-assistant)
+  // — ficou de fora da leva original por não bater no padrão de nome.
+  "supabase/functions/_shared/dashboard-metrics.ts",
+  "supabase/functions/_shared/ai-provider.ts",
+  "supabase/functions/_shared/ai-usage.ts",
+  // Mesmo achado no frontend: já tem @ts-nocheck próprio documentando que
+  // depende do schema antigo (public/GHL) ainda não migrado — não é dívida
+  // do Kommo, é decisão consciente de não migrar ainda.
+  "src/components/dashboard/AIUsageCard.tsx",
 ];
 
 export default tseslint.config(

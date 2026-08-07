@@ -62,13 +62,14 @@ serve(async (req) => {
     };
 
     // Credenciais Kommo (subdomínio + token do Vault) da integração conectada do workspace.
-    const { data: intg } = await db.from("integrations")
+    const { data: intgRow } = await db.from("integrations")
       .select("id,subdomain,status").eq("workspace_id", workspaceId).eq("type", "kommo").maybeSingle();
-    if (!intg || (intg as any).status !== "connected") throw new Error("Kommo não conectado neste workspace");
-    const { data: tok, error: tErr } = await db.rpc("get_integration_token", { p_integration_id: (intg as any).id });
+    const intg = intgRow as { id: string; subdomain: string; status: string } | null;
+    if (!intg || intg.status !== "connected") throw new Error("Kommo não conectado neste workspace");
+    const { data: tok, error: tErr } = await db.rpc("get_integration_token", { p_integration_id: intg.id });
     if (tErr) throw tErr;
     if (!tok) throw new Error("Token Kommo não encontrado no Vault");
-    const creds: KommoCreds = { subdomain: (intg as any).subdomain as string, token: tok as string };
+    const creds: KommoCreds = { subdomain: intg.subdomain, token: tok as string };
 
     if (kind === "task") {
       // Responsável: usa o do payload; se ausente, lê o do lead no Kommo.
@@ -107,7 +108,7 @@ serve(async (req) => {
       // O PATCH do Kommo SUBSTITUI o array de tags. Lemos as atuais e mandamos a união
       // para não apagar o que já existe no lead.
       const lead = await kommoFetch(creds, `/leads/${leadKommoId}?with=tags`);
-      const current: any[] = lead?._embedded?.tags ?? [];
+      const current: Array<{ id?: string | number; name?: string }> = lead?._embedded?.tags ?? [];
       const already = current.some((t) => String(t?.name || "").toLowerCase() === tagName.toLowerCase());
       if (already) {
         await recordAction();
