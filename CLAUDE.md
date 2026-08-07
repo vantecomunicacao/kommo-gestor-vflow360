@@ -109,6 +109,20 @@ chama uma API de IA externa (custo por request). Guardrail de CI
 (`scripts/check-auth-guardrail.mjs`) já detecta isso, mas está não-bloqueante
 até alguém decidir se é bug (precisa de auth) ou intencional (documentar).
 
+**Achado 2026-08-06 — `pdf-extract` é código do lado GHL, órfão neste projeto:**
+o único chamador de `pdf-extract` no repo é `_shared/ghl-enrich.ts` (enriquecimento
+de anexos de conversas GHL — "Conversas 2.0"), usado pelas functions
+`ghl-enrich-attachments`/`ghl-conversations-sync`. O frontend do Kommo (`src/`)
+nunca chama `pdf-extract`. E `supabase functions list` no projeto novo
+(`fjncmmqvmocwykpshgsh`) confirma que nenhuma dessas duas functions GHL está
+deployada aqui — só as 11 do Kommo. Ou seja, `pdf-extract` existe e foi
+deployado neste projeto (herança da cópia em bloco de 2026-08-02, redeployado
+em 2026-08-06 num fix de tipo do `deno check`), mas não tem chamador real
+funcionando neste projeto hoje. Não muda a Regra #1 (o nome não bate com
+nenhum item da lista protegida, e o `ghl-enrich.ts` real que roda em produção
+é o do projeto antigo), mas explica por que ninguém via esse endpoint sendo
+usado: não é bug de UI faltando, é infra órfã.
+
 **`supabase db push` está QUEBRADO no projeto novo** (confirmado 2026-08-05): a
 tabela de histórico de migrations do projeto novo não bate com o que já existe
 no banco (herança da replicação em bloco de 2026-08-02), então `db push` tenta

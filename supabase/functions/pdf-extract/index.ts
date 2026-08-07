@@ -23,7 +23,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const cleaned = b64.replace(/\s/g, "").replace(/^data:[^;]+;base64,/, "");
   const binary = atob(cleaned);
   const bytes = new Uint8Array(binary.length);
@@ -80,7 +80,7 @@ async function summarizeWithAI(
  * Retorna { text, summary } combinados em uma única chamada.
  */
 async function ocrWithOpenAI(
-  pdfBytes: Uint8Array,
+  pdfBytes: Uint8Array<ArrayBuffer>,
   apiKey: string,
   fileName: string,
   totalPages: number,
@@ -204,7 +204,7 @@ serve(async (req) => {
     }
 
     // Load PDF bytes
-    let pdfBytes: Uint8Array;
+    let pdfBytes: Uint8Array<ArrayBuffer>;
     if (pdf_base64) {
       pdfBytes = base64ToBytes(pdf_base64);
     } else {
