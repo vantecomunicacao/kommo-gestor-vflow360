@@ -21,12 +21,8 @@ jobs:
       - name: Unit tests
         run: npm test
       - name: Lint (Kommo-scoped only — GHL/legacy paths excluded, see eslint.config.js)
-        # Não-bloqueante até a Fase 2 do plano de remediação zerar os ~197
-        # erros restantes (majoritariamente @typescript-eslint/no-explicit-any
-        # em kommo-sync/kommo-report-snapshot/kommo-manage/pdf-extract).
-        # Critério de corte: remover `continue-on-error` quando `npm run lint`
-        # sair limpo localmente.
-        continue-on-error: true
+        # Bloqueante desde 2026-08-06: Fase 2 do plano de remediação zerou os
+        # ~340 erros/warnings originais nos arquivos Kommo-owned.
         run: npm run lint
 
   edge-functions:

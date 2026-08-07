@@ -40,18 +40,26 @@ pelo classificador de permissão do Claude Code e **ficou pendente** — nada fo
 alterado. Antes de mexer: confirmar que nada depende disso, e tratar como
 ação irreversível (perda de dado) separada de só pausar (reversível).
 
-**Fase 2 do plano de remediação (2026-08-05) — parcial:** `npm run lint` caiu de
-339 → 152 problemas (136 erros). Corrigidos: `tailwind.config.ts`, `pdf-extract`,
-e as 4 edge functions de maior risco (tocam API externa/dinheiro) —
+**Fase 2 do plano de remediação — CONCLUÍDA (2026-08-06):** `npm run lint` foi
+de 339 problemas (na análise original) a **0** (erros e warnings), no critério
+redefinido pela 3ª revisão do plano ("zero nos arquivos Kommo-owned", não no
+repo inteiro — 37% da dívida original era GHL, fora do escopo por Regra #1).
+2026-08-05: as 4 edge functions de maior risco (tocam API externa/dinheiro) —
 `kommo-sync` (25→0), `kommo-ai-analyze` (15→0), `kommo-manage` (9→0),
-`kommo-report-snapshot` (10→0). **Pendente:** ~136 erros ainda em
-`kommo-dashboard/index.ts` (27), `cooling-leads/index.ts` (26),
-`settings/DashboardSettings.tsx` (26), `Integrations.tsx` (8),
-`_shared/dashboard-metrics.ts` (7), `settings/AiSettings.tsx` (7),
-`kommo-actions/index.ts` (5), `_shared/kommo-client.ts` (5) + ~20 arquivos
-menores (frontend hooks/páginas/componentes ui). Nenhum desses toca API
-externa diretamente (menor risco de bug silencioso), mas o gate de lint da CI
-(Fase 1) continua não-bloqueante até isso ser zerado.
+`kommo-report-snapshot` (10→0) — e `tailwind.config.ts`/`pdf-extract`.
+2026-08-06: o resto — `cooling-leads` (25→0), `kommo-dashboard/index.ts`+
+`pure.ts` (24→0), `_shared/kommo-client.ts` (5→0), `kommo-actions` (4→0),
+`_shared/paginate.ts` (2→0), `kommo-admin-users` (1→0) no backend;
+`settings/DashboardSettings.tsx` (26→0), `Integrations.tsx` (8→0),
+`settings/AiSettings.tsx` (7→0) + ~15 arquivos menores no frontend. Achados
+relevantes dessa leva final: 3 arquivos `_shared/*` sem "ghl" no nome eram
+GHL puro (movidos pro `ghlAndLegacyIgnores`, ver seção acima);
+`src/integrations/supabase/types.ts` estava desatualizado há 5 tabelas
+(regenerado via `supabase gen types`), o que também zerou boa parte dos `any`
+do frontend sem tipagem manual; `kommo.leads.source` nunca é lido pelo
+`kommo-dashboard` (fallback morto, comportamento preservado, decisão de
+corrigir fica pendente). Gate de lint da CI (Fase 1) agora é **bloqueante**
+(`continue-on-error` removido em `.github/workflows/ci.yml`).
 
 **Fase 3 do plano de remediação (2026-08-06):** mapeamento de auth confirmou dois
 modelos reais (não duplicação por preguiça): `kommo-sync`/`kommo-dashboard`/
