@@ -9,12 +9,13 @@ import { AxisTabs } from "@/components/AxisTabs";
 import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
 import { DateBasis } from "@/lib/report-axis";
+import { type SavedFilters, filtersStorageKey, parseCsvParam, parseCustomFiltersParam } from "@/lib/dashboard-filters-storage";
 import { usePermissions } from "@/contexts/PermissionsContext";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useKommoData, DashboardFilters } from "@/hooks/useKommoData";
 import { useCoolingLeads } from "@/hooks/useCoolingLeads";
 import { resolveFunnelLabel } from "@/lib/dashboard-funnel";
-import { calcTrend, invertTrend, winRate, ticketAverage } from "@/lib/dashboard-metrics";
+import { deriveDashboardMetrics, ticketAverage } from "@/lib/dashboard-metrics";
 import { supabase } from "@/integrations/supabase/client";
 import { Header } from "@/components/dashboard/Header";
 import { MetricCard } from "@/components/dashboard/MetricCard";
@@ -39,44 +40,6 @@ import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
 import DashboardAiAnalysis from "@/components/dashboard/DashboardAiAnalysis";
 
-type SavedFilters = {
-  from?: string;
-  to?: string;
-  pipelineId?: string | null; // legado (seleção única)
-  pipelineIds?: string[];
-  stageId?: string | null; // legado (seleção única)
-  stageIds?: string[];
-  sellerId?: string | null; // legado (seleção única)
-  sellerIds?: string[];
-  utmMedium?: string | null; // legado (seleção única)
-  utmMediums?: string[];
-  utmCampaign?: string | null; // legado (seleção única)
-  utmCampaigns?: string[];
-  origin?: string | null; // legado (seleção única)
-  origins?: string[];
-  customFilters?: Record<string, string[]>;
-  dateBasis?: DateBasis;
-};
-
-const filtersStorageKey = (workspaceId: string) => `dashboard:filters:${workspaceId}`;
-
-// Filtros aceitos como query param (deep link) — arrays viram string separada por
-// vírgula. Ver docs/plano-filtros-dashboard.md § "Fase 5" pro design completo.
-const parseCsvParam = (v: string | null): string[] => (v ? v.split(",").filter(Boolean) : []);
-// Filtros personalizados: quantidade/ids são dinâmicos (definidos em Configurações),
-// então viram um único param JSON em vez de um param fixo por filtro.
-const parseCustomFiltersParam = (v: string | null): Record<string, string[]> => {
-  if (!v) return {};
-  try {
-    const parsed = JSON.parse(v);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out: Record<string, string[]> = {};
-    for (const [k, val] of Object.entries(parsed)) {
-      if (Array.isArray(val)) out[k] = val.filter((s) => typeof s === "string" && s);
-    }
-    return out;
-  } catch { return {}; }
-};
 
 export default function Dashboard() {
   const { activeWorkspace } = useWorkspace();
@@ -314,31 +277,13 @@ export default function Dashboard() {
     name: resolveFunnelLabel(s.id, stageLabels),
   }));
 
-  const currentWon = data.funnelStages.find((s) => s.id === "venda_ganha")?.count || 0;
-  const prevWon = prevData?.funnelStages.find((s) => s.id === "venda_ganha")?.count || 0;
-
-  const leadsTrend = prevData ? calcTrend(data.totalLeads, prevData.totalLeads) : undefined;
-  const wonTrend = prevData ? calcTrend(currentWon, prevWon) : undefined;
-  const convTrend = prevData ? calcTrend(data.conversionRates.overallConversion, prevData.conversionRates.overallConversion) : undefined;
-
-  const wonRevenue = data.wonMonetary ?? 0;
-  const negotiatingRevenue = data.negotiatingMonetary ?? 0;
-  const ticketAvg = ticketAverage(wonRevenue, currentWon);
-  const prevWonRevenue = prevData?.wonMonetary ?? 0;
-  const prevNegotiatingRevenue = prevData?.negotiatingMonetary ?? 0;
-  const prevTicketAvg = ticketAverage(prevWonRevenue, prevWon);
-  const revenueTrend = prevData ? calcTrend(wonRevenue, prevWonRevenue) : undefined;
-  const negotiatingTrend = prevData ? calcTrend(negotiatingRevenue, prevNegotiatingRevenue) : undefined;
-  const ticketTrend = prevData ? calcTrend(ticketAvg, prevTicketAvg) : undefined;
-
-  // Financeiro: taxa de ganho (win rate) entre os que fecharam, e receita perdida.
-  const currentWinRate = winRate(currentWon, data.lostLeads || 0);
-  const prevWinRate = winRate(prevWon, prevData?.lostLeads || 0);
-  const winRateTrend = prevData ? calcTrend(currentWinRate, prevWinRate) : undefined;
-  const lostRevenue = data.lostMonetary ?? 0;
-  const prevLostRevenue = prevData?.lostMonetary ?? 0;
-  // Perder MENOS dinheiro é positivo → invertemos o sinal da tendência.
-  const lostRevenueTrend = invertTrend(prevData ? calcTrend(lostRevenue, prevLostRevenue) : undefined);
+  // Tendências e métricas derivadas do período atual vs anterior — ver
+  // deriveDashboardMetrics em lib/dashboard-metrics.ts.
+  const {
+    currentWon, prevWon, leadsTrend, wonTrend, convTrend,
+    wonRevenue, negotiatingRevenue, ticketAvg, revenueTrend, negotiatingTrend, ticketTrend,
+    currentWinRate, winRateTrend, lostRevenue, lostRevenueTrend,
+  } = deriveDashboardMetrics(data, prevData);
   const currentLost = data.lostLeads || 0;
 
   // Receita em pipeline aberto e esfriando.

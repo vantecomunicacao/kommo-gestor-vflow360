@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { calcTrend, invertTrend, winRate, ticketAverage } from "./dashboard-metrics";
+import { calcTrend, invertTrend, winRate, ticketAverage, deriveDashboardMetrics, type DashboardMetricsInput } from "./dashboard-metrics";
 
 describe("calcTrend", () => {
   it("sobe para 100% quando prev=0 e cur>0", () => {
@@ -66,5 +66,52 @@ describe("ticketAverage", () => {
 
   it("divide receita pela quantidade de vendas", () => {
     expect(ticketAverage(1000, 4)).toBe(250);
+  });
+});
+
+function metricsInput(overrides: Partial<DashboardMetricsInput> = {}): DashboardMetricsInput {
+  return {
+    totalLeads: 100,
+    lostLeads: 10,
+    funnelStages: [{ id: "venda_ganha", count: 20 }],
+    conversionRates: { overallConversion: 20 },
+    wonMonetary: 10000,
+    negotiatingMonetary: 5000,
+    lostMonetary: 3000,
+    ...overrides,
+  };
+}
+
+describe("deriveDashboardMetrics", () => {
+  it("sem prevData: todas as tendências ficam undefined, valores atuais calculados normalmente", () => {
+    const r = deriveDashboardMetrics(metricsInput(), null);
+    expect(r.leadsTrend).toBeUndefined();
+    expect(r.wonTrend).toBeUndefined();
+    expect(r.revenueTrend).toBeUndefined();
+    expect(r.winRateTrend).toBeUndefined();
+    expect(r.lostRevenueTrend).toBeUndefined();
+    expect(r.currentWon).toBe(20);
+    expect(r.wonRevenue).toBe(10000);
+    expect(r.ticketAvg).toBe(500); // 10000 / 20
+    expect(r.currentWinRate).toBeCloseTo(66.6667, 3); // 20 / (20+10) * 100
+  });
+
+  it("com prevData: calcula tendências e inverte o sinal da receita perdida (cair é bom)", () => {
+    const cur = metricsInput({ lostMonetary: 1000 });
+    const prev = metricsInput({ lostMonetary: 2000 });
+    const r = deriveDashboardMetrics(cur, prev);
+    // funnelStages/conversionRates/monetary iguais entre cur/prev nesse fixture → sem
+    // variação real, só a receita perdida difere.
+    expect(r.leadsTrend).toBeUndefined(); // 100 vs 100, sem variação
+    expect(r.lostRevenue).toBe(1000);
+    // Perdeu MENOS (1000 < 2000) → isPositive deve ser true (invertTrend aplicado).
+    expect(r.lostRevenueTrend?.isPositive).toBe(true);
+  });
+
+  it("currentWon/prevWon caem pra 0 quando o bucket venda_ganha não existe no funil", () => {
+    const r = deriveDashboardMetrics(metricsInput({ funnelStages: [] }), metricsInput({ funnelStages: [] }));
+    expect(r.currentWon).toBe(0);
+    expect(r.prevWon).toBe(0);
+    expect(r.ticketAvg).toBe(0);
   });
 });
