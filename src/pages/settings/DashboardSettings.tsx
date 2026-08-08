@@ -12,7 +12,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { FUNNEL_BUCKETS } from "@/lib/dashboard-funnel";
 import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
-import { CustomMetric, customMetricsListSchema } from "@/lib/custom-metrics";
+import { CustomMetric, customMetricsListSchema, stageRefKey } from "@/lib/custom-metrics";
 import { CustomFilter, customFiltersListSchema } from "@/lib/custom-filters";
 import { REPORT_SNAPSHOT_MONTHS } from "@/lib/reports-metrics";
 import FunnelTab from "./dashboard/FunnelTab";
@@ -131,6 +131,16 @@ export default function DashboardSettings() {
     }
   };
 
+  // Impressão digital de tudo que afeta o CÁLCULO de uma Métrica Personalizada no
+  // Relatório (não nome/ícone, que são só exibição). Usada só pra decidir quais
+  // métricas precisam de backfill cirúrgico no histórico já travado — ver save().
+  const metricFingerprint = (m: CustomMetric) => JSON.stringify({
+    format: m.format,
+    numerator: [...m.numerator].map(stageRefKey).sort(),
+    denominator: [...m.denominator].map(stageRefKey).sort(),
+    reportVisible: m.reportVisible !== false,
+  });
+
   const save = async () => {
     if (!activeWorkspace?.id) return;
     const metricsCheck = customMetricsListSchema.safeParse(customMetrics);
@@ -147,6 +157,23 @@ export default function DashboardSettings() {
       });
       return;
     }
+    // Métricas novas ou alteradas desde o último save, entre as visíveis no
+    // Relatório — só essas precisam de backfill cirúrgico no histórico travado.
+    // Comparado contra o baseline (estado salvo anterior), capturado antes de
+    // sobrescrevê-lo abaixo.
+    let previousMetrics: CustomMetric[] = [];
+    try {
+      const prev = baselineRef.current ? JSON.parse(baselineRef.current) : null;
+      previousMetrics = Array.isArray(prev?.customMetrics) ? prev.customMetrics : [];
+    } catch { /* baseline malformado: trata como se não houvesse métrica anterior */ }
+    const backfillMetricIds = customMetrics
+      .filter((m) => m.reportVisible !== false)
+      .filter((m) => {
+        const prev = previousMetrics.find((p) => p.id === m.id);
+        return !prev || metricFingerprint(prev) !== metricFingerprint(m);
+      })
+      .map((m) => m.id);
+
     setSaving(true);
     try {
       const payload = {
@@ -177,9 +204,15 @@ export default function DashboardSettings() {
       baselineRef.current = editable; // novo baseline = estado salvo
       setDirty(false);
       toast.success("Configurações salvas");
-      // Recalcula as fotos do relatório (para refletir taxas de etapa recém-configuradas).
-      supabase.functions.invoke("kommo-report-snapshot", { body: { workspace_id: activeWorkspace.id, months: REPORT_SNAPSHOT_MONTHS } })
-        .catch(() => { /* silencioso: o cron diário também recalcula */ });
+      // Recalcula as fotos do relatório (para refletir configuração recém-salva). Meses
+      // já travados só são tocados se houver métrica nova/alterada (backfillMetricIds) —
+      // aí só o customRates dela é atualizado, sem reabrir won/lost/revenue congelados.
+      supabase.functions.invoke("kommo-report-snapshot", {
+        body: {
+          workspace_id: activeWorkspace.id, months: REPORT_SNAPSHOT_MONTHS,
+          ...(backfillMetricIds.length ? { backfillMetricIds } : {}),
+        },
+      }).catch(() => { /* silencioso: o cron diário também recalcula os meses não travados */ });
     } catch (e) {
       toast.error("Erro ao salvar", { description: (e as Error).message });
     } finally {

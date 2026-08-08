@@ -50,7 +50,13 @@ function monthEndDate(key: string): Date {
 // Dias de carência após o fechamento do mês (ou a conexão do workspace, o que
 // for mais tarde) antes da foto travar de vez — dá espaço pro sync assentar
 // (full-scan diário, correções de lead reaberto) antes de virar definitivo.
-const LOCK_GRACE_DAYS = 3;
+// Financeiro (data de fechamento) já nasce "decidido" quando o lead fecha, então
+// só precisa de um respiro curto pro sync. Comercial (data de criação) mede uma
+// SAFRA inteira — a maioria dos leads criados no mês ainda está em aberto pouco
+// depois do mês fechar, então precisa de bem mais tempo pra maturar antes de
+// congelar, senão a foto trava cedo demais e subestima a conversão pra sempre.
+const LOCK_GRACE_DAYS_FECHAMENTO = 3;
+const LOCK_GRACE_DAYS_CRIACAO = 60;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -67,6 +73,11 @@ serve(async (req) => {
     // "Forçar recálculo" (menu ⋯ do Relatório) — ver comentário perto do loop de
     // montagem de `rows`. O "Atualizar agora" comum e o cron nunca mandam isso.
     const forceUnlockActive = payload.force && !!payload.forceFrom && !!payload.forceTo;
+    // Backfill cirúrgico: só existe pro eixo Comercial (customRates só é calculado
+    // em "criacao" — ver `bump` abaixo), e só entra em ação em células JÁ TRAVADAS
+    // (célula destravada recalcula tudo, incluindo a métrica nova, naturalmente).
+    const backfillMetricIdSet = new Set(payload.backfillMetricIds || []);
+    const backfillActive = backfillMetricIdSet.size > 0;
 
     // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
     // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
@@ -124,8 +135,27 @@ serve(async (req) => {
     // jeito mais simples (sem precisar de função Postgres nova) é nunca colocar essas
     // células no array que vai pro upsert.
     const { data: lockedRows } = await db.from("report_snapshots")
-      .select("pipeline_id, month, date_basis").eq("workspace_id", workspaceId).eq("locked", true);
+      .select("pipeline_id, month, date_basis, metrics, locked_at, frozen_at, is_partial")
+      .eq("workspace_id", workspaceId).eq("locked", true);
     const lockedKeys = new Set((lockedRows || []).map((r) => `${r.pipeline_id}|${r.date_basis}|${r.month}`));
+    // Linha travada completa, por chave — usada só no caminho de backfill cirúrgico
+    // (precisa do metrics/locked_at/frozen_at ORIGINAIS pra não perder o congelamento
+    // dos campos que não são customRates).
+    const lockedRowByKey = new Map((lockedRows || []).map((r) => [`${r.pipeline_id}|${r.date_basis}|${r.month}`, r]));
+    // Merge não-destrutivo: troca só as entradas de `customRates` cujo id está em
+    // `ids`, preservando as demais métricas (e as de bySeller) como estavam.
+    const mergeCustomRates = (
+      existing: { id: string }[] | undefined, fresh: { id: string }[] | undefined, ids: Set<string>,
+    ) => {
+      const freshMap = new Map((fresh || []).map((r) => [r.id, r]));
+      const seen = new Set<string>();
+      const out = (existing || []).map((r) => {
+        seen.add(r.id);
+        return ids.has(r.id) && freshMap.has(r.id) ? freshMap.get(r.id)! : r;
+      });
+      for (const [id, r] of freshMap) if (ids.has(id) && !seen.has(id)) out.push(r);
+      return out;
+    };
 
     // ===== "Alcançou etapa X" — histórico de eventos por lead, pares livres =====
     // Diferente das antigas 4 fases (que tinham ORDEM total, "alcançou até aqui"),
@@ -171,14 +201,26 @@ serve(async (req) => {
     // ===== Agregação: funil × eixo × mês, com sub-bloco por vendedor =====
     type Acc = {
       leads: number; won: number; wonRevenue: number; lost: number; lostRevenue: number;
+      cycleDaysSum: number; cycleDaysCount: number;
       customPassed: Record<string, number>; customBase: Record<string, number>;
     };
-    const empty = (): Acc => ({ leads: 0, won: 0, wonRevenue: 0, lost: 0, lostRevenue: 0, customPassed: {}, customBase: {} });
+    const empty = (): Acc => ({
+      leads: 0, won: 0, wonRevenue: 0, lost: 0, lostRevenue: 0,
+      cycleDaysSum: 0, cycleDaysCount: 0, customPassed: {}, customBase: {},
+    });
+    const DAY_MS = 86_400_000;
     const bump = (a: Acc, l: LeadRow, axis: "criacao" | "fechamento") => {
       a.leads++;
       const price = Number(l.price) || 0;
       if (isWon(l)) { a.won++; a.wonRevenue += price; }
       else if (isLost(l)) { a.lost++; a.lostRevenue += price; }
+      // Ciclo médio (criação → fechamento) só faz sentido pela safra de criação —
+      // no eixo Financeiro cada mês já é o fechamento em si. Só vendas GANHAS (o
+      // "tempo até perder" não é comparável ao "tempo até vender").
+      if (axis === "criacao" && isWon(l) && l.kommo_created_at && l.closed_at) {
+        const ms = new Date(l.closed_at).getTime() - new Date(l.kommo_created_at).getTime();
+        if (ms >= 0) { a.cycleDaysSum += ms; a.cycleDaysCount++; }
+      }
       // Métricas Personalizadas no Relatório só na safra por criação (mesma
       // amarração que as antigas Taxas de fase já tinham).
       if (axis === "criacao") {
@@ -221,6 +263,10 @@ serve(async (req) => {
         ticket: a.won > 0 ? Math.round(a.wonRevenue / a.won) : 0,
         winRate: closed > 0 ? Math.round((a.won / closed) * 1000) / 10 : 0,
       };
+      if (axis === "criacao") {
+        m.cycleDays = a.cycleDaysCount > 0 ? Math.round((a.cycleDaysSum / a.cycleDaysCount / DAY_MS) * 10) / 10 : 0;
+        m.cycleDaysSampleSize = a.cycleDaysCount;
+      }
       if (axis === "criacao" && reportMetrics.length) {
         m.customRates = reportMetrics.map((cm) => ({
           id: cm.id, name: cm.name, format: cm.format,
@@ -235,17 +281,21 @@ serve(async (req) => {
     const now = new Date();
     let skippedLocked = 0;
     let forcedUnlocked = 0;
+    let backfilled = 0;
     const rows: Record<string, unknown>[] = [];
     for (const p of ["__all__", ...pipelinesSeen]) {
       for (const axis of ["criacao", "fechamento"] as const) {
         for (const key of monthKeys) {
           const monthDate = monthKeyToDate(key);
-          const isLocked = lockedKeys.has(`${p}|${axis}|${monthDate}`);
+          const cellKey = `${p}|${axis}|${monthDate}`;
+          const isLocked = lockedKeys.has(cellKey);
           // "Forçar recálculo" (payload.force + forceFrom/forceTo): só ignora a trava
           // pros meses explicitamente pedidos — nunca pro "Atualizar agora" comum
           // nem pro cron, que nunca mandam esses campos (forceUnlockActive = false).
           const isForceUnlocked = forceUnlockActive && monthDate >= payload.forceFrom! && monthDate <= payload.forceTo!;
-          if (isLocked && !isForceUnlocked) { skippedLocked++; continue; }
+          // Backfill cirúrgico só se aplica ao eixo Comercial (onde customRates existe).
+          const isBackfillTarget = backfillActive && axis === "criacao" && !isForceUnlocked;
+          if (isLocked && !isForceUnlocked && !isBackfillTarget) { skippedLocked++; continue; }
           if (isLocked && isForceUnlocked) forcedUnlocked++;
 
           const ck = `${p}|${axis}|${key}`;
@@ -257,15 +307,54 @@ serve(async (req) => {
           }
           metrics.bySeller = bySeller;
 
+          // Célula travada + backfill pedido pra ela: NÃO recongela do zero. Só troca
+          // as entradas de customRates das métricas pedidas, preservando leads/won/lost/
+          // revenue/winRate/bySeller (e o customRates das demais métricas) exatamente
+          // como estavam na foto original — é o que mantém a "essência congelada" do
+          // resto da célula intacta.
+          if (isLocked && isBackfillTarget) {
+            const existing = lockedRowByKey.get(cellKey);
+            if (!existing) { skippedLocked++; continue; } // trava sem linha gravada não deveria acontecer, mas não quebra
+            const existingMetrics = (existing.metrics as Record<string, unknown>) || {};
+            const existingBySeller = (existingMetrics.bySeller as Record<string, { customRates?: { id: string }[] }>) || {};
+            const freshBySeller = bySeller as Record<string, { customRates?: { id: string }[] }>;
+            const mergedBySeller: Record<string, unknown> = {};
+            for (const sid of new Set([...Object.keys(existingBySeller), ...Object.keys(freshBySeller)])) {
+              const exS = existingBySeller[sid] || {};
+              const frS = freshBySeller[sid];
+              mergedBySeller[sid] = frS
+                ? { ...exS, customRates: mergeCustomRates(exS.customRates, frS.customRates, backfillMetricIdSet) }
+                : exS;
+            }
+            rows.push({
+              workspace_id: workspaceId, pipeline_id: p, month: monthDate, date_basis: axis,
+              metrics: {
+                ...existingMetrics,
+                customRates: mergeCustomRates(
+                  existingMetrics.customRates as { id: string }[] | undefined,
+                  metrics.customRates as { id: string }[] | undefined,
+                  backfillMetricIdSet,
+                ),
+                bySeller: mergedBySeller,
+              },
+              is_partial: existing.is_partial, frozen_at: existing.frozen_at, updated_at: frozenAt,
+              locked: true, locked_at: existing.locked_at,
+            });
+            backfilled++;
+            continue;
+          }
+
           const isPartial = key === nowMonthKey;
           // Mês corrente nunca trava (ainda em andamento). Mês fechado trava depois
           // da carência, contada do que vier mais tarde: fechamento do mês ou conexão
-          // do workspace — ver comentário acima de `workspaceCreatedAt`.
+          // do workspace — ver comentário acima de `workspaceCreatedAt`. Carência varia
+          // por eixo — ver comentário de LOCK_GRACE_DAYS_CRIACAO.
           let locked = false;
           let lockedAt: string | null = null;
           if (!isPartial) {
+            const graceDays = axis === "criacao" ? LOCK_GRACE_DAYS_CRIACAO : LOCK_GRACE_DAYS_FECHAMENTO;
             const graceStart = new Date(Math.max(monthEndDate(key).getTime(), workspaceCreatedAt.getTime()));
-            const lockAt = new Date(graceStart.getTime() + LOCK_GRACE_DAYS * 86_400_000);
+            const lockAt = new Date(graceStart.getTime() + graceDays * 86_400_000);
             if (now >= lockAt) { locked = true; lockedAt = now.toISOString(); }
           }
 
@@ -335,7 +424,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       ok: true, workspace_id: workspaceId, months, rows: rows.length,
       pipelines: pipelinesSeen.size, monthKeys, leadsScanned: leads.length,
-      frozenAt, quality, skippedLocked, forcedUnlocked,
+      frozenAt, quality, skippedLocked, forcedUnlocked, backfilled,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     // Body fora do formato esperado (ex.: sem workspace_id) → 400 com mensagem clara.

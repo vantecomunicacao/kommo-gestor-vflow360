@@ -840,17 +840,17 @@ export default function Reports() {
             </div>
             {dateBasis === "criacao" && (
               <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
-                <strong className="font-medium text-foreground">Leitura por coorte:</strong> as taxas medem a safra de leads que <em>entrou</em> em cada mês, contando as vendas quando quer que tenham fechado. Meses recentes (marcados <span className="text-accent-foreground">parcial</span>) ainda estão maturando e tendem a subir — compare com segurança apenas os meses já fechados.
+                <strong className="font-medium text-foreground">Coorte:</strong> toda esta aba soma a safra de leads que <em>entrou</em> em cada mês, contando venda quando quer que tenha fechado — até travar (<Lock className="inline-block w-2.5 h-2.5 mx-0.5 mb-0.5" />, definitivo ~60 dias após o mês fechar). Meses <span className="text-accent-foreground">parcial</span> ainda maturam; compare com segurança só os já travados.
               </p>
             )}
-            {dateBasis === "criacao" && !catalog.some((m) => m.id.startsWith("reach:") || m.id.startsWith("count:")) && (
+            {dateBasis === "criacao" && !catalog.some((m) => m.id.startsWith("reach:") || m.id.startsWith("count:") || m.id.startsWith("custom:")) && (
               <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
-                <strong className="font-medium text-foreground">Sem taxas de etapa configuradas.</strong> Escolha quais fases do funil entram nesse relatório em Configurações → Dashboard, seção "Taxas de fase (Relatório)".
+                <strong className="font-medium text-foreground">Sem métricas de etapa.</strong> Configure em Configurações → Dashboard → aba "Métricas &amp; Relatório".
               </p>
             )}
             {dateBasis === "fechamento" && (
               <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
-                <strong className="font-medium text-foreground">Sobre meses já fechados:</strong> um mês trava em definitivo (<Lock className="inline-block w-2.5 h-2.5 mx-0.5 mb-0.5" />) até 3 dias depois de fechar — antes disso, se um negócio for reaberto e ganho/perdido de novo, o número ainda pode mudar no próximo recálculo. Depois de travado, não muda mais, mesmo que o negócio seja reaberto.
+                <strong className="font-medium text-foreground">Foto do mês:</strong> trava (<Lock className="inline-block w-2.5 h-2.5 mx-0.5 mb-0.5" />) ~3 dias após fechar. Antes disso, reaberturas ainda podem mudar o número; depois, não muda mais.
               </p>
             )}
           </div>

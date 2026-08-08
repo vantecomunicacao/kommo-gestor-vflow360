@@ -19,6 +19,8 @@ export interface ReportMetrics {
   lostRevenue: number;
   ticket: number;
   winRate: number;
+  cycleDays?: number; // dias médios criação→fechamento das vendas GANHAS da safra (só eixo Comercial)
+  cycleDaysSampleSize?: number; // nº de vendas usadas no cálculo acima — 0 = sem amostra, não confiar no valor
   reached?: ReachStage[]; // legado (Taxas de fase, descontinuado) — meses já travados antes disso continuam com esse campo
   customRates?: CustomRate[]; // Métricas Personalizadas visíveis no Relatório, safra por criação
   bySeller?: Record<string, ReportMetrics>; // sub-bloco por vendedor (id -> métricas)

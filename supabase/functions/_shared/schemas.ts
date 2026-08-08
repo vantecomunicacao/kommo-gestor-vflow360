@@ -93,5 +93,10 @@ export const KommoReportSnapshotPayloadSchema = z.object({
   force: z.boolean().optional().default(false),
   forceFrom: z.string().optional(),
   forceTo: z.string().optional(),
+  // Backfill cirúrgico (disparado ao salvar Configurações quando uma Métrica
+  // Personalizada é criada/alterada): recalcula SÓ o customRates dessas métricas
+  // nos meses travados, sem tocar em leads/won/lost/revenue/winRate congelados.
+  // Ver comentário perto de `backfillMetricIdSet` no index.ts.
+  backfillMetricIds: z.array(z.string()).optional(),
 });
 export type KommoReportSnapshotPayload = z.infer<typeof KommoReportSnapshotPayloadSchema>;

@@ -347,6 +347,37 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-08-08 (sem migration — só `kommo-report-snapshot/index.ts`, deployada em
+  produção): carência da trava ("period lock", ver entrada abaixo) deixou de ser
+  única (3 dias pros dois eixos) e virou diferenciada por eixo —
+  `LOCK_GRACE_DAYS_FECHAMENTO = 3` (Financeiro, por `closed_at`) continua igual,
+  `LOCK_GRACE_DAYS_CRIACAO = 60` (Comercial, por `kommo_created_at`) é novo.
+  Motivo: a trava de 3 dias travava a safra do mês Comercial cedo demais — a
+  maioria dos leads criados no mês ainda está em aberto poucos dias depois do
+  mês fechar, então a conversão ficava subestimada pra sempre (célula travada
+  nunca mais recalcula sozinha). Meses que já travaram sob a regra antiga de 3
+  dias **não destravam retroativamente** — a mudança só vale pra células ainda
+  não travadas no momento do deploy (confirmado em teste manual: mês Comercial
+  travado sob a regra antiga, ao passar por "Forçar recálculo", volta a ficar
+  destravado de verdade quando ainda não passou dos 60 dias sob a regra nova).
+  Junto: novo modo de **backfill cirúrgico** no payload da function
+  (`backfillMetricIds: string[]`, campo aditivo em `KommoReportSnapshotPayloadSchema`
+  em `_shared/schemas.ts`) — permite recalcular SÓ o `customRates` de Métricas
+  Personalizadas específicas dentro de células já travadas (célula + cada
+  `bySeller`), sem tocar em `leads`/`won`/`lost`/`wonRevenue`/`lostRevenue`/
+  `winRate`/`locked_at`/`frozen_at`. Resolve o problema de "métrica nova só
+  aparece no mês corrente" sem precisar do "Forçar recálculo" geral (que reabre
+  a célula inteira, inclusive won/lost/revenue, e por isso deve ficar reservado
+  só pra corrigir erro de configuração — ver `MetricsReportTab.tsx`/
+  `custom-metrics.ts`). Disparado automaticamente por
+  `DashboardSettings.tsx` → `save()`: compara as Métricas Personalizadas atuais
+  contra o baseline salvo anterior (`metricFingerprint`, ignora nome/ícone, olha
+  só formato/numerador/denominador/visibilidade no Relatório) e manda só os ids
+  que mudaram. Testado manualmente em produção (`dda1bf53-...`): backfill
+  preservou `leads`/`won`/`wonRevenue`/`locked_at` e só atualizou `customRates`;
+  chamada normal (sem `backfillMetricIds`) confirmada que não toca em célula
+  travada (`skippedLocked` incrementa, `updated_at` intocado); "Forçar
+  recálculo" continua bypassando a trava normalmente nos dois eixos.
 - 2026-08-08 (`20260808160000_kommo_report_snapshots_lock.sql`): adiciona colunas
   `kommo.report_snapshots.locked boolean default false` e `locked_at timestamptz`
   — trava definitiva ("period lock") dos meses do Relatório: uma vez travado, o

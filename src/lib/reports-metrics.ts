@@ -31,13 +31,19 @@ export const CATALOG: Record<DateBasis, MetricDef[]> = {
   criacao: [
     { id: "leads", label: "Leads Criados", fmt: "num", value: (m) => m.leads, desc: "Leads criados no mês (safra por data de criação)." },
     { id: "won", label: "Vendas", fmt: "num", value: (m) => m.won, desc: "Da safra criada no mês, quantos viraram venda ganha." },
+    { id: "lost", label: "Perdas", fmt: "num", invert: true, value: (m) => m.lost, desc: "Da safra criada no mês, quantos viraram venda perdida. Cair é bom." },
+    { id: "leadsOpen", label: "Em Aberto", fmt: "num", value: (m) => Math.max(0, m.leads - m.won - m.lost),
+      desc: "Da safra criada no mês, quantos ainda não ganharam nem perderam. Alto em meses recentes não é ruim — é sinal de que a safra ainda está maturando (ver aviso de coorte abaixo)." },
     { id: "wonRevenue", label: "Receita Ganha", fmt: "brl", value: (m) => m.wonRevenue, desc: "Soma do valor das vendas ganhas da safra." },
+    { id: "lostRevenue", label: "Receita Perdida", fmt: "brl", invert: true, value: (m) => m.lostRevenue, desc: "Soma do valor das vendas perdidas da safra. Cair é bom." },
     { id: "ticket", label: "Ticket Médio", fmt: "brl", value: (m) => m.ticket, desc: "Receita ganha ÷ nº de vendas ganhas." },
     // Conversão por coorte: da entrada (leads criados no mês) até a venda ganha,
     // tenha o lead fechado quando tiver fechado. Meses recentes ainda amadurecem.
-    { id: "convGeral", label: "Taxa de Conversão", tag: "coorte", fmt: "pct", showDirection: true,
+    { id: "convGeral", label: "Taxa de Conversão", fmt: "pct", showDirection: true,
       value: (m) => m.leads > 0 ? (m.won / m.leads) * 100 : 0,
       desc: "Vendas ganhas ÷ leads que ENTRARAM no mês (por safra de criação), independente de quando fecharam. Meses recentes ainda estão maturando: a taxa tende a subir conforme os leads em aberto fecham." },
+    { id: "cycleDays", label: "Ciclo Médio", fmt: "num", value: (m) => m.cycleDays ?? 0,
+      desc: "Dias médios entre a criação do lead e o fechamento, só das vendas GANHAS da safra (em dias). Sem amostra suficiente = 0." },
   ],
   fechamento: [
     { id: "won", label: "Vendas Ganhas", fmt: "num", value: (m) => m.won, desc: "Negócios ganhos no mês (por data de fechamento)." },
@@ -52,7 +58,7 @@ export const CATALOG: Record<DateBasis, MetricDef[]> = {
 };
 
 export const DEFAULT_VISIBLE: Record<DateBasis, string[]> = {
-  criacao: ["leads", "won", "wonRevenue", "ticket", "convGeral"],
+  criacao: ["leads", "won", "lost", "leadsOpen", "wonRevenue", "ticket", "convGeral"],
   fechamento: ["won", "lost", "wonRevenue", "lostRevenue", "ticket"],
 };
 
@@ -136,11 +142,20 @@ export function aggregateBySellers(rawMonths: ReportMonth[], sellerIds: string[]
     const reachedCount = new Map<string, number>();
     const customPassed = new Map<string, number>();
     const customBase = new Map<string, number>();
+    // cycleDays é uma MÉDIA por vendedor, não soma — pra recombinar sem viés,
+    // pondera pelo tamanho da amostra de cada um (não dá pra simplesmente somar
+    // ou tirar média simples das médias, senão vendedor com 1 venda pesa igual
+    // a vendedor com 50).
+    let cycleDaysWeightedSum = 0, cycleDaysSampleTotal = 0;
     for (const id of sellerIds) {
       const s = mo.metrics.bySeller?.[id];
       if (!s) continue;
       acc.leads += s.leads; acc.won += s.won; acc.wonRevenue += s.wonRevenue;
       acc.lost += s.lost; acc.lostRevenue += s.lostRevenue;
+      if (s.cycleDaysSampleSize) {
+        cycleDaysWeightedSum += (s.cycleDays ?? 0) * s.cycleDaysSampleSize;
+        cycleDaysSampleTotal += s.cycleDaysSampleSize;
+      }
       for (const r of s.reached ?? []) reachedCount.set(r.id, (reachedCount.get(r.id) ?? 0) + r.count);
       for (const r of s.customRates ?? []) {
         customPassed.set(r.id, (customPassed.get(r.id) ?? 0) + r.passed);
@@ -158,6 +173,8 @@ export function aggregateBySellers(rawMonths: ReportMonth[], sellerIds: string[]
         ...acc,
         ticket: acc.won > 0 ? acc.wonRevenue / acc.won : 0,
         winRate: closed > 0 ? (acc.won / closed) * 100 : 0,
+        cycleDays: cycleDaysSampleTotal > 0 ? Math.round((cycleDaysWeightedSum / cycleDaysSampleTotal) * 10) / 10 : 0,
+        cycleDaysSampleSize: cycleDaysSampleTotal,
         reached,
         customRates,
       },
