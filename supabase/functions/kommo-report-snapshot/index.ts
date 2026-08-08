@@ -11,7 +11,7 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
-import { KommoReportSnapshotPayloadSchema } from "../_shared/schemas.ts";
+import { KommoReportSnapshotPayloadSchema, CustomMetricsListSchema } from "../_shared/schemas.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
 // Formato das linhas lidas de kommo.leads/lead_stage_events, só os campos usados aqui.
@@ -42,6 +42,15 @@ function brtMonth(d: Date): string {
 function monthKeyToDate(key: string): string {
   return `${key}-01`; // 1º dia do mês (date)
 }
+// Instante em que o mês `key` fecha = 1º dia do mês SEGUINTE (UTC).
+function monthEndDate(key: string): Date {
+  const [y, m] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 1));
+}
+// Dias de carência após o fechamento do mês (ou a conexão do workspace, o que
+// for mais tarde) antes da foto travar de vez — dá espaço pro sync assentar
+// (full-scan diário, correções de lead reaberto) antes de virar definitivo.
+const LOCK_GRACE_DAYS = 3;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -55,24 +64,18 @@ serve(async (req) => {
     const payload = KommoReportSnapshotPayloadSchema.parse(await req.json().catch(() => ({})));
     const workspaceId = payload.workspace_id;
     const months = payload.months;
+    // "Forçar recálculo" (menu ⋯ do Relatório) — ver comentário perto do loop de
+    // montagem de `rows`. O "Atualizar agora" comum e o cron nunca mandam isso.
+    const forceUnlockActive = payload.force && !!payload.forceFrom && !!payload.forceTo;
 
     // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
     // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
     await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
 
-    // ===== Settings: mapeamento das 4 fases + fases-alvo das taxas =====
+    // ===== Settings: mapeamento das 4 fases (ganho/perda) + Métricas Personalizadas =====
     const { data: settingsRow } = await db.from("dashboard_settings")
-      .select("funnel_stage_mapping, funnel_stage_labels, report_rate_stages").eq("workspace_id", workspaceId).maybeSingle();
+      .select("funnel_stage_mapping, custom_metrics").eq("workspace_id", workspaceId).maybeSingle();
     const settings = (settingsRow || {}) as Record<string, unknown>;
-    // report_rate_stages agora guarda CHAVES DE FASE (bucket), não ids de etapa do Kommo.
-    const reportRateBuckets: string[] = Array.isArray(settings?.report_rate_stages) ? settings.report_rate_stages.map(String) : [];
-
-    // Ordem e rótulos padrão das 4 fases do funil analítico.
-    const BUCKET_ORDER: Record<string, number> = { contato_inicial: 0, proposta_enviada: 1, fechamento: 2, venda_ganha: 3 };
-    const DEFAULT_LABEL: Record<string, string> = {
-      contato_inicial: "Contato Inicial", proposta_enviada: "Proposta Enviada", fechamento: "Fechamento", venda_ganha: "Venda Ganha",
-    };
-    const funnelLabels = (settings?.funnel_stage_labels || {}) as Record<string, string>;
 
     // (funil, status_id) -> fase, a partir do mapeamento configurado. As chaves podem
     // vir como "<pipelineId>:<statusId>" (atual) ou "<statusId>" (legado, vale p/ todos
@@ -81,14 +84,27 @@ serve(async (req) => {
     const parsedMapping = parseFunnelMapping(settings?.funnel_stage_mapping as Record<string, unknown>);
     const statusBucket = buildBucketResolver(parsedMapping);
     // Ganho = status de sistema do Kommo (o 142) OU etapa mapeada como venda_ganha
-    // NAQUELE funil.
+    // NAQUELE funil. Independente das Métricas Personalizadas abaixo.
     const isWon = (l: LeadRow) => l.status === "won" || statusBucket(l.pipeline_id, l.status_id) === "venda_ganha";
     const isLost = (l: LeadRow) => l.status === "lost";
 
-    // Alvos = fases escolhidas (subconjunto das 4), com ordem e rótulo (custom ou padrão).
-    const targets = reportRateBuckets
-      .filter((b) => b in BUCKET_ORDER)
-      .map((b) => ({ id: b, label: funnelLabels[b] || DEFAULT_LABEL[b], order: BUCKET_ORDER[b] }));
+    // ===== Métricas Personalizadas visíveis no Relatório =====
+    // Mesma configuração usada pelo Dashboard ao vivo (kommo-dashboard), mas
+    // calculada aqui como COORTE MENSAL: numerador E denominador = "alcançou"
+    // (histórico via lead_stage_events + status atual), nunca "está atualmente
+    // em" — esse conceito não faz sentido pra uma foto de mês já fechado/travado.
+    // Substitui as antigas "Taxas de fase" (4 fases fixas) por pares pipeline+
+    // status livres, os mesmos que o usuário já configura em Configurações.
+    const customMetricsParsed = CustomMetricsListSchema.safeParse(settings?.custom_metrics ?? []);
+    const reportMetrics = (customMetricsParsed.success ? customMetricsParsed.data : [])
+      .filter((m) => m.reportVisible !== false);
+    const stageRefKey = (r: { pipelineId: string; statusId: string }) => `${r.pipelineId}:${r.statusId}`;
+    const metricNumKeys = new Map<string, Set<string>>();
+    const metricDenKeys = new Map<string, Set<string>>();
+    for (const m of reportMetrics) {
+      metricNumKeys.set(m.id, new Set(m.numerator.map(stageRefKey)));
+      metricDenKeys.set(m.id, new Set(m.denominator.map(stageRefKey)));
+    }
 
     // ===== Leads (TODOS os funis — o escopo por funil é resolvido na agregação) =====
     const leadsRows = await fetchAllRows((from, to) => db.from("leads")
@@ -96,28 +112,47 @@ serve(async (req) => {
       .eq("workspace_id", workspaceId).eq("is_deleted", false).order("kommo_id").range(from, to));
     const leads = leadsRows as LeadRow[];
 
-    // ===== Taxas de fase ("chegou até a fase X") — cohort por data de criação =====
-    // As 4 fases são a linguagem comum entre TODOS os funis, então isto funciona
-    // corretamente inclusive no "Todos os funis". Reconstrói a fase mais avançada
-    // alcançada por lead (fase atual + histórico de eventos; ganho alcança tudo).
-    const maxBucketByLead = new Map<string, number>();
-    if (targets.length) {
+    // ===== Trava ("period lock"): âncora da carência + células já travadas =====
+    // Âncora = quando o workspace entrou no VFlow (não recria em reconexões — ver
+    // kommo-manage, workspace só é criado uma vez). Sem isso, uma conta com meses
+    // "fechados" há anos no calendário travaria tudo instantaneamente no 1º cálculo,
+    // sem o sync ter tido chance de assentar o histórico ainda.
+    const { data: wsRow } = await db.from("workspaces").select("created_at").eq("id", workspaceId).maybeSingle();
+    const workspaceCreatedAt = wsRow?.created_at ? new Date(wsRow.created_at) : new Date(0);
+    // Células já travadas não são recalculadas nem regravadas — ver loop de montagem
+    // de `rows` abaixo. supabase-js não suporta upsert com WHERE condicional, então o
+    // jeito mais simples (sem precisar de função Postgres nova) é nunca colocar essas
+    // células no array que vai pro upsert.
+    const { data: lockedRows } = await db.from("report_snapshots")
+      .select("pipeline_id, month, date_basis").eq("workspace_id", workspaceId).eq("locked", true);
+    const lockedKeys = new Set((lockedRows || []).map((r) => `${r.pipeline_id}|${r.date_basis}|${r.month}`));
+
+    // ===== "Alcançou etapa X" — histórico de eventos por lead, pares livres =====
+    // Diferente das antigas 4 fases (que tinham ORDEM total, "alcançou até aqui"),
+    // pares pipeline+status livres não têm ordem — é só "algum evento bateu nesse
+    // conjunto de pares", igual countPassedThrough do Dashboard (kommo-dashboard/
+    // pure.ts), mas comparando pelo pipeline do PRÓPRIO evento, não pelo pipeline
+    // atual do lead (aqui trabalhamos com todos os funis de uma vez).
+    const reachedKeysByLead = new Map<string, Set<string>>();
+    if (reportMetrics.length) {
       const evRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
         .select("lead_id,pipeline_id,after_status_id").eq("workspace_id", workspaceId).order("id").range(from, to));
       for (const e of (evRows || []) as StageEventRow[]) {
-        const b = statusBucket(e.pipeline_id, e.after_status_id);
-        if (b == null || !e.lead_id) continue;
+        if (!e.lead_id || !e.pipeline_id || !e.after_status_id) continue;
         const k = String(e.lead_id);
-        maxBucketByLead.set(k, Math.max(maxBucketByLead.get(k) ?? -1, BUCKET_ORDER[b]));
+        let set = reachedKeysByLead.get(k); if (!set) { set = new Set(); reachedKeysByLead.set(k, set); }
+        set.add(`${e.pipeline_id}:${e.after_status_id}`);
       }
     }
-    const reachedTargetIds = (l: LeadRow): string[] => {
-      if (!targets.length) return [];
-      if (isWon(l)) return targets.map((t) => t.id);
-      const curB = statusBucket(l.pipeline_id, l.status_id);
-      let maxOrder = maxBucketByLead.get(String(l.kommo_id)) ?? -1;
-      if (curB != null) maxOrder = Math.max(maxOrder, BUCKET_ORDER[curB]);
-      return targets.filter((t) => maxOrder >= t.order).map((t) => t.id);
+    // "Alcançou algum dos pares em `keys`": status atual bate OU tem evento histórico.
+    const leadReachedAnyOf = (l: LeadRow, keys: Set<string> | undefined): boolean => {
+      if (!keys || keys.size === 0) return false;
+      const curKey = l.pipeline_id != null && l.status_id != null ? `${l.pipeline_id}:${l.status_id}` : null;
+      if (curKey && keys.has(curKey)) return true;
+      const hist = reachedKeysByLead.get(String(l.kommo_id));
+      if (!hist) return false;
+      for (const k of keys) if (hist.has(k)) return true;
+      return false;
     };
 
     // ===== Janela de meses a gravar (últimos N + corrente), em BRT =====
@@ -134,15 +169,24 @@ serve(async (req) => {
     const inRange = new Set(monthKeys);
 
     // ===== Agregação: funil × eixo × mês, com sub-bloco por vendedor =====
-    type Acc = { leads: number; won: number; wonRevenue: number; lost: number; lostRevenue: number; reached: Record<string, number> };
-    const empty = (): Acc => ({ leads: 0, won: 0, wonRevenue: 0, lost: 0, lostRevenue: 0, reached: {} });
+    type Acc = {
+      leads: number; won: number; wonRevenue: number; lost: number; lostRevenue: number;
+      customPassed: Record<string, number>; customBase: Record<string, number>;
+    };
+    const empty = (): Acc => ({ leads: 0, won: 0, wonRevenue: 0, lost: 0, lostRevenue: 0, customPassed: {}, customBase: {} });
     const bump = (a: Acc, l: LeadRow, axis: "criacao" | "fechamento") => {
       a.leads++;
       const price = Number(l.price) || 0;
       if (isWon(l)) { a.won++; a.wonRevenue += price; }
       else if (isLost(l)) { a.lost++; a.lostRevenue += price; }
-      // Taxas de etapa só na safra por criação (denominador = criados).
-      if (axis === "criacao") for (const id of reachedTargetIds(l)) a.reached[id] = (a.reached[id] || 0) + 1;
+      // Métricas Personalizadas no Relatório só na safra por criação (mesma
+      // amarração que as antigas Taxas de fase já tinham).
+      if (axis === "criacao") {
+        for (const m of reportMetrics) {
+          if (leadReachedAnyOf(l, metricNumKeys.get(m.id))) a.customPassed[m.id] = (a.customPassed[m.id] || 0) + 1;
+          if (m.format === "percent" && leadReachedAnyOf(l, metricDenKeys.get(m.id))) a.customBase[m.id] = (a.customBase[m.id] || 0) + 1;
+        }
+      }
     };
 
     const agg = new Map<string, Acc>();                 // `${pipeline}|${axis}|${month}`
@@ -177,18 +221,33 @@ serve(async (req) => {
         ticket: a.won > 0 ? Math.round(a.wonRevenue / a.won) : 0,
         winRate: closed > 0 ? Math.round((a.won / closed) * 1000) / 10 : 0,
       };
-      if (axis === "criacao" && targets.length) {
-        m.reached = targets.map((t) => ({ id: t.id, label: t.label, count: a.reached[t.id] || 0 }));
+      if (axis === "criacao" && reportMetrics.length) {
+        m.customRates = reportMetrics.map((cm) => ({
+          id: cm.id, name: cm.name, format: cm.format,
+          passed: a.customPassed[cm.id] || 0, base: a.customBase[cm.id] || 0,
+        }));
       }
       return m;
     };
 
     // ===== Monta as linhas de upsert (uma por funil + '__all__') =====
     const frozenAt = new Date().toISOString();
+    const now = new Date();
+    let skippedLocked = 0;
+    let forcedUnlocked = 0;
     const rows: Record<string, unknown>[] = [];
     for (const p of ["__all__", ...pipelinesSeen]) {
       for (const axis of ["criacao", "fechamento"] as const) {
         for (const key of monthKeys) {
+          const monthDate = monthKeyToDate(key);
+          const isLocked = lockedKeys.has(`${p}|${axis}|${monthDate}`);
+          // "Forçar recálculo" (payload.force + forceFrom/forceTo): só ignora a trava
+          // pros meses explicitamente pedidos — nunca pro "Atualizar agora" comum
+          // nem pro cron, que nunca mandam esses campos (forceUnlockActive = false).
+          const isForceUnlocked = forceUnlockActive && monthDate >= payload.forceFrom! && monthDate <= payload.forceTo!;
+          if (isLocked && !isForceUnlocked) { skippedLocked++; continue; }
+          if (isLocked && isForceUnlocked) forcedUnlocked++;
+
           const ck = `${p}|${axis}|${key}`;
           const metrics = buildMetrics(agg.get(ck) || empty(), axis);
           const bySeller: Record<string, unknown> = {};
@@ -197,9 +256,23 @@ serve(async (req) => {
             if (s) bySeller[sid] = buildMetrics(s, axis);
           }
           metrics.bySeller = bySeller;
+
+          const isPartial = key === nowMonthKey;
+          // Mês corrente nunca trava (ainda em andamento). Mês fechado trava depois
+          // da carência, contada do que vier mais tarde: fechamento do mês ou conexão
+          // do workspace — ver comentário acima de `workspaceCreatedAt`.
+          let locked = false;
+          let lockedAt: string | null = null;
+          if (!isPartial) {
+            const graceStart = new Date(Math.max(monthEndDate(key).getTime(), workspaceCreatedAt.getTime()));
+            const lockAt = new Date(graceStart.getTime() + LOCK_GRACE_DAYS * 86_400_000);
+            if (now >= lockAt) { locked = true; lockedAt = now.toISOString(); }
+          }
+
           rows.push({
-            workspace_id: workspaceId, pipeline_id: p, month: monthKeyToDate(key),
-            date_basis: axis, metrics, is_partial: key === nowMonthKey, frozen_at: frozenAt, updated_at: frozenAt,
+            workspace_id: workspaceId, pipeline_id: p, month: monthDate,
+            date_basis: axis, metrics, is_partial: isPartial, frozen_at: frozenAt, updated_at: frozenAt,
+            locked, locked_at: lockedAt,
           });
         }
       }
@@ -229,6 +302,26 @@ serve(async (req) => {
       }
     }
     addCheck("__all__ = soma dos funis", mismatch === 0, mismatch ? `${mismatch} mês/eixo divergente(s)` : undefined);
+    // 3) Soma dos sub-blocos bySeller bate com o total da célula — só leads/won/lost
+    //    (inteiros, soma exata). wonRevenue/lostRevenue ficam de fora de propósito:
+    //    são arredondadas independentemente em cada nível (célula e por vendedor),
+    //    então a soma dos arredondados por vendedor diverge do arredondado da célula
+    //    por ±1 em casos normais — incluir aqui geraria falso positivo constante.
+    let sellerSumMismatch = 0;
+    for (const r of rows) {
+      const bySeller = (r.metrics as Record<string, unknown>).bySeller as Record<string, Record<string, unknown>> | undefined;
+      if (!bySeller) continue;
+      let leadsSum = 0, wonSum = 0, lostSum = 0;
+      for (const s of Object.values(bySeller)) { leadsSum += num(s, "leads"); wonSum += num(s, "won"); lostSum += num(s, "lost"); }
+      if (leadsSum !== num(r.metrics, "leads") || wonSum !== num(r.metrics, "won") || lostSum !== num(r.metrics, "lost")) sellerSumMismatch++;
+    }
+    addCheck("soma bySeller (leads/won/lost) = total da célula", sellerSumMismatch === 0,
+      sellerSumMismatch ? `${sellerSumMismatch} célula(s) com soma por vendedor divergente` : undefined);
+    // 4) Receita nunca deveria ser negativa (price negativo indicaria dado sujo no Kommo).
+    let negativeRevenue = 0;
+    for (const r of rows) if (num(r.metrics, "wonRevenue") < 0 || num(r.metrics, "lostRevenue") < 0) negativeRevenue++;
+    addCheck("wonRevenue/lostRevenue ≥ 0", negativeRevenue === 0,
+      negativeRevenue ? `${negativeRevenue} célula(s) com receita negativa` : undefined);
 
     // Upsert em lotes (evita payloads grandes com muitos funis).
     for (let i = 0; i < rows.length; i += 500) {
@@ -242,7 +335,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       ok: true, workspace_id: workspaceId, months, rows: rows.length,
       pipelines: pipelinesSeen.size, monthKeys, leadsScanned: leads.length,
-      frozenAt, quality,
+      frozenAt, quality, skippedLocked, forcedUnlocked,
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     // Body fora do formato esperado (ex.: sem workspace_id) → 400 com mensagem clara.

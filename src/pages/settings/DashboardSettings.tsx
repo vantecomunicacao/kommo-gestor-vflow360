@@ -14,6 +14,7 @@ import { FUNNEL_BUCKETS } from "@/lib/dashboard-funnel";
 import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
 import { CustomMetric, customMetricsListSchema } from "@/lib/custom-metrics";
 import { CustomFilter, customFiltersListSchema } from "@/lib/custom-filters";
+import { REPORT_SNAPSHOT_MONTHS } from "@/lib/reports-metrics";
 import FunnelTab from "./dashboard/FunnelTab";
 import OriginUtmTab from "./dashboard/OriginUtmTab";
 import MetricsReportTab from "./dashboard/MetricsReportTab";
@@ -48,7 +49,6 @@ export default function DashboardSettings() {
   const [businessEnd, setBusinessEnd] = useState<string>("18:00");
   const [wonStageKeys, setWonStageKeys] = useState<string[]>(["venda_ganha"]);
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({}); // bucket key -> rótulo customizado
-  const [reportRateStages, setReportRateStages] = useState<string[]>([]); // etapas p/ taxas do relatório
   const [reportGoals, setReportGoals] = useState<Record<string, number>>({}); // metas do relatório ("<eixo>:<metricId>" -> valor)
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [customMetrics, setCustomMetrics] = useState<CustomMetric[]>([]);
@@ -58,11 +58,11 @@ export default function DashboardSettings() {
   const editable = useMemo(() => JSON.stringify({
     defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
-    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportGoals,
     customMetrics, customFilters,
   }), [defaultPipelines, stageMapping, utmSourceField, utmMediumField, utmCampaignField,
     utmContentField, utmTermField, additionalDateField, originFieldName, visibleFields,
-    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportRateStages, reportGoals,
+    chartFields, businessStart, businessEnd, wonStageKeys, stageLabels, reportGoals,
     customMetrics, customFilters]);
   const baselineRef = useRef<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -117,9 +117,6 @@ export default function DashboardSettings() {
         setBusinessEnd(settings.business_hours_end || "18:00");
         setWonStageKeys(settings.won_stage_keys || ["venda_ganha"]);
         setStageLabels((settings.funnel_stage_labels as Record<string, string>) || {});
-        // report_rate_stages guarda CHAVES DE FASE; descarta valores legados (ids de etapa).
-        setReportRateStages((settings.report_rate_stages || []).filter((x: string) =>
-          FUNNEL_BUCKETS.some((b) => b.key === x)));
         setReportGoals((settings.report_goals as Record<string, number>) || {});
         // Descarta entradas malformadas em vez de quebrar a tela (ex.: editado direto no banco).
         const parsedMetrics = customMetricsListSchema.safeParse(settings.custom_metrics ?? []);
@@ -169,7 +166,6 @@ export default function DashboardSettings() {
         business_hours_end: businessEnd || "18:00",
         won_stage_keys: wonStageKeys,
         funnel_stage_labels: stageLabels,
-        report_rate_stages: reportRateStages,
         report_goals: reportGoals,
         custom_metrics: customMetrics,
         custom_filters: customFilters,
@@ -182,7 +178,7 @@ export default function DashboardSettings() {
       setDirty(false);
       toast.success("Configurações salvas");
       // Recalcula as fotos do relatório (para refletir taxas de etapa recém-configuradas).
-      supabase.functions.invoke("kommo-report-snapshot", { body: { workspace_id: activeWorkspace.id, months: 12 } })
+      supabase.functions.invoke("kommo-report-snapshot", { body: { workspace_id: activeWorkspace.id, months: REPORT_SNAPSHOT_MONTHS } })
         .catch(() => { /* silencioso: o cron diário também recalcula */ });
     } catch (e) {
       toast.error("Erro ao salvar", { description: (e as Error).message });
@@ -232,17 +228,15 @@ export default function DashboardSettings() {
   const applyTemplate = () => {
     const template = SEGMENT_TEMPLATES.find((t) => t.id === selectedTemplateId);
     if (!template) return;
-    // Se já houver rótulos, taxas ou metas configurados, confirma antes de sobrescrever.
+    // Se já houver rótulos ou metas configurados, confirma antes de sobrescrever.
     const hasExisting =
       Object.keys(stageLabels).length > 0 ||
-      reportRateStages.length > 0 ||
       Object.keys(reportGoals).length > 0;
     if (hasExisting && !window.confirm(
-      `Aplicar o template "${template.label}"? Isso substitui os rótulos das fases, as taxas do Relatório e as metas que ele define. Suas demais configurações não são afetadas. Nada é salvo até você clicar em Salvar.`
+      `Aplicar o template "${template.label}"? Isso substitui os rótulos das fases e as metas que ele define. Suas demais configurações não são afetadas. Nada é salvo até você clicar em Salvar.`
     )) return;
-    const next = applyTemplateToSettings(template, { stageLabels, reportRateStages, reportGoals });
+    const next = applyTemplateToSettings(template, { stageLabels, reportGoals });
     setStageLabels(next.stageLabels);
-    setReportRateStages(next.reportRateStages);
     setReportGoals(next.reportGoals);
     toast.success(`Template "${template.label}" aplicado`, {
       description: "Revise os campos abaixo e clique em Salvar para confirmar.",
@@ -319,13 +313,16 @@ export default function DashboardSettings() {
             const t = SEGMENT_TEMPLATES.find((x) => x.id === selectedTemplateId);
             if (!t) return null;
             const labels = FUNNEL_BUCKETS.map((b) => t.stageLabels[b.key]).filter(Boolean);
-            const rates = t.reportRateStages.map((k) => t.stageLabels[k] || FUNNEL_BUCKETS.find((b) => b.key === k)?.label);
             return (
               <div className="rounded-lg border bg-muted/40 p-3 text-sm space-y-1">
                 <p className="text-muted-foreground">{t.description}</p>
                 <p><span className="font-medium">Fases:</span> {labels.join(" → ")}</p>
-                {rates.length > 0 && (
-                  <p><span className="font-medium">Taxas no Relatório:</span> {rates.map((r) => `Taxa ${r}`).join(", ")}</p>
+                {t.metricSuggestions && t.metricSuggestions.length > 0 && (
+                  <p>
+                    <span className="font-medium">Sugestão de Métrica Personalizada:</span>{" "}
+                    {t.metricSuggestions.map((s) => `${s.name} (${s.hint})`).join("; ")}
+                    {" — configure na aba \"Métricas & Relatório\", esse template não cria automaticamente."}
+                  </p>
                 )}
                 <p><span className="font-medium">Metas pré-definidas:</span> {Object.keys(t.reportGoals).length}</p>
               </div>
@@ -381,9 +378,6 @@ export default function DashboardSettings() {
             customFields={customFields}
             customMetrics={customMetrics}
             setCustomMetrics={setCustomMetrics}
-            stageLabels={stageLabels}
-            reportRateStages={reportRateStages}
-            setReportRateStages={setReportRateStages}
             visibleFields={visibleFields}
             setVisibleFields={setVisibleFields}
             chartFields={chartFields}

@@ -49,6 +49,10 @@ export const customMetricSchema = z.object({
   icon: z.enum(CUSTOM_METRIC_ICON_KEYS as [CustomMetricIconKey, ...CustomMetricIconKey[]]).catch(DEFAULT_CUSTOM_METRIC_ICON),
   numerator: z.array(stageRefSchema).min(1, "Escolha ao menos 1 etapa").max(MAX_STAGE_REFS_PER_SIDE),
   denominator: z.array(stageRefSchema).max(MAX_STAGE_REFS_PER_SIDE),
+  // Também aparece no Relatório (coorte mensal: "alcançou/alcançou"), não só no
+  // Dashboard ao vivo ("está atualmente em"). Default true — quem configura
+  // provavelmente quer ver nos dois lugares; desliga por métrica se não quiser.
+  reportVisible: z.boolean().default(true),
 });
 export type CustomMetric = z.infer<typeof customMetricSchema>;
 

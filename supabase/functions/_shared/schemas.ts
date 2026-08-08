@@ -72,6 +72,9 @@ export const CustomMetricSchema = z.object({
   icon: z.enum(CUSTOM_METRIC_ICON_KEYS).catch("sparkles"),
   numerator: z.array(stageRef).min(1).max(3),
   denominator: z.array(stageRef).max(3),
+  // Também aparece no Relatório (coorte mensal), não só no Dashboard ao vivo —
+  // ver src/lib/custom-metrics.ts (mantido em sincronia).
+  reportVisible: z.boolean().default(true),
 });
 export type CustomMetric = z.infer<typeof CustomMetricSchema>;
 export const CustomMetricsListSchema = z.array(CustomMetricSchema).max(3);
@@ -83,5 +86,12 @@ export const KommoReportSnapshotPayloadSchema = z.object({
     (v) => (Number.isFinite(v) ? Math.max(1, Math.min(36, Number(v))) : 12),
     z.number().min(1).max(36),
   ),
+  // "Forçar recálculo" (menu ⋯ do Relatório): ignora a trava só para os meses no
+  // intervalo [forceFrom, forceTo] (mês ISO "YYYY-MM-01"), só quando force=true.
+  // O "Atualizar agora" comum e o cron NUNCA mandam esses campos — comportamento
+  // de hoje (respeitar a trava sempre) fica intacto por padrão.
+  force: z.boolean().optional().default(false),
+  forceFrom: z.string().optional(),
+  forceTo: z.string().optional(),
 });
 export type KommoReportSnapshotPayload = z.infer<typeof KommoReportSnapshotPayloadSchema>;

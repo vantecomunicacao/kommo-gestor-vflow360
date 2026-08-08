@@ -9,6 +9,12 @@ import type { DateBasis, ReportMetrics, ReportMonth } from "@/hooks/useReportSna
 
 export type Fmt = "num" | "brl" | "pct";
 
+// Janela de meses que o kommo-report-snapshot calcula/grava (cron + recompute
+// manual). 24, não 12: "Comparar com: mesmo mês, ano passado" precisa do mês
+// 12 meses antes de cada um dos 12 meses exibidos por padrão — com janela de
+// só 12, o YoY quase nunca teria base. Ver supabase/migrations/*_kommo_report_snapshot_months_24.sql.
+export const REPORT_SNAPSHOT_MONTHS = 24;
+
 export interface MetricDef {
   id: string;
   label: string;
@@ -70,28 +76,90 @@ export function pctChange(curr: number, prev: number): string {
   return `${ch > 0 ? "+" : ""}${ch.toFixed(0)}%`;
 }
 
+export type CompareMode = "previous" | "yoy" | "movavg3" | "none";
+
+// Desloca um mês ISO ("YYYY-MM-DD", 1º dia do mês) por `n` meses (negativo =
+// pra trás). Aritmética pura sobre ano/mês — sem Date/timezone envolvidos.
+export function shiftMonthKey(monthISO: string, n: number): string {
+  const [y, m] = monthISO.split("-").map(Number);
+  const total = y * 12 + (m - 1) + n;
+  const ny = Math.floor(total / 12);
+  const nm = total - ny * 12 + 1;
+  return `${ny}-${String(nm).padStart(2, "0")}-01`;
+}
+
+/**
+ * Resolve o valor de referência pra comparar `targetMonth`, buscando por
+ * MÊS-CALENDÁRIO na série completa (não por posição/índice de um array
+ * recortado) — assim a 1ª coluna visível também pode ter comparação, se o mês
+ * anterior já estiver carregado. Retorna `null` quando não há base suficiente
+ * — nunca finge um valor parcial (ex.: média móvel com só 1 de 3 meses).
+ */
+export function resolveComparisonValue(
+  months: ReportMonth[],
+  targetMonth: string,
+  mode: CompareMode,
+  value: (m: ReportMetrics) => number,
+): number | null {
+  if (mode === "none") return null;
+  const byMonth = new Map(months.map((m) => [m.month, m]));
+  if (mode === "previous") {
+    const ref = byMonth.get(shiftMonthKey(targetMonth, -1));
+    return ref ? value(ref.metrics) : null;
+  }
+  if (mode === "yoy") {
+    const ref = byMonth.get(shiftMonthKey(targetMonth, -12));
+    return ref ? value(ref.metrics) : null;
+  }
+  // movavg3: exige os 3 meses anteriores presentes — senão seria uma média
+  // parcial ambígua (ex.: média de 1 mês só, disfarçada de "móvel de 3").
+  const refs = [1, 2, 3].map((n) => byMonth.get(shiftMonthKey(targetMonth, -n)));
+  if (refs.some((r) => !r)) return null;
+  const sum = refs.reduce((acc, r) => acc + value(r!.metrics), 0);
+  return sum / 3;
+}
+
 /**
  * Aplica os vendedores selecionados: soma os sub-blocos bySeller escolhidos, mês a
  * mês, recalculando ticket (receita/vendas) e winRate (vendas/fechados) — proporções
  * não podem ser somadas. Vazio = todos (usa a foto agregada como está).
+ *
+ * `reached` (taxas de etapa) usa a célula agregada (`mo.metrics.reached`) como
+ * template de ORDEM e RÓTULO — não reconstrói a lista a partir dos sub-blocos de
+ * vendedor, pois a ordem vem de `report_rate_stages` (configurável) e precisa ficar
+ * igual à visão "todos os vendedores" ao alternar o filtro. Só o `count` é recalculado.
  */
 export function aggregateBySellers(rawMonths: ReportMonth[], sellerIds: string[]): ReportMonth[] {
   if (sellerIds.length === 0) return rawMonths;
   return rawMonths.map((mo) => {
     const acc = { leads: 0, won: 0, wonRevenue: 0, lost: 0, lostRevenue: 0 };
+    const reachedCount = new Map<string, number>();
+    const customPassed = new Map<string, number>();
+    const customBase = new Map<string, number>();
     for (const id of sellerIds) {
       const s = mo.metrics.bySeller?.[id];
       if (!s) continue;
       acc.leads += s.leads; acc.won += s.won; acc.wonRevenue += s.wonRevenue;
       acc.lost += s.lost; acc.lostRevenue += s.lostRevenue;
+      for (const r of s.reached ?? []) reachedCount.set(r.id, (reachedCount.get(r.id) ?? 0) + r.count);
+      for (const r of s.customRates ?? []) {
+        customPassed.set(r.id, (customPassed.get(r.id) ?? 0) + r.passed);
+        customBase.set(r.id, (customBase.get(r.id) ?? 0) + r.base);
+      }
     }
     const closed = acc.won + acc.lost;
+    const reached = mo.metrics.reached?.map((r) => ({ ...r, count: reachedCount.get(r.id) ?? 0 }));
+    const customRates = mo.metrics.customRates?.map((r) => ({
+      ...r, passed: customPassed.get(r.id) ?? 0, base: customBase.get(r.id) ?? 0,
+    }));
     return {
       ...mo,
       metrics: {
         ...acc,
         ticket: acc.won > 0 ? acc.wonRevenue / acc.won : 0,
         winRate: closed > 0 ? (acc.won / closed) * 100 : 0,
+        reached,
+        customRates,
       },
     };
   });
@@ -128,4 +196,41 @@ export function buildReachCatalog(dateBasis: DateBasis, months: ReportMonth[]): 
     return [countDef, rateDef];
   });
   return [...base, ...reachDefs];
+}
+
+/**
+ * Métricas Personalizadas visíveis no Relatório (safra por criação) — substitui
+ * as antigas "Taxas de fase" por pares pipeline+status livres, a mesma
+ * configuração que já alimenta o Dashboard ao vivo, só que calculada como
+ * coorte mensal ("alcançou/alcançou") em vez de "está atualmente em". Ver
+ * kommo-report-snapshot/index.ts. Devolve só os itens novos — compor com
+ * `buildReachCatalog` (que já traz o catálogo base do eixo).
+ */
+export function buildCustomRateCatalog(dateBasis: DateBasis, months: ReportMonth[]): MetricDef[] {
+  if (dateBasis !== "criacao") return [];
+  const latest = [...months].reverse().find((mo) => (mo.metrics.customRates?.length ?? 0) > 0);
+  return (latest?.metrics.customRates ?? []).map((r): MetricDef => {
+    if (r.format === "number") {
+      return {
+        id: `custom:${r.id}`,
+        label: r.name,
+        fmt: "num",
+        tag: "personalizada",
+        value: (m: ReportMetrics) => m.customRates?.find((x) => x.id === r.id)?.passed ?? 0,
+        desc: `Métrica personalizada — nº de leads da safra que alcançaram "${r.name}".`,
+      };
+    }
+    return {
+      id: `custom:${r.id}`,
+      label: r.name,
+      fmt: "pct",
+      tag: "personalizada",
+      showDirection: true,
+      value: (m: ReportMetrics) => {
+        const item = m.customRates?.find((x) => x.id === r.id);
+        return item && item.base > 0 ? (item.passed / item.base) * 100 : 0;
+      },
+      desc: `Métrica personalizada — % da safra que alcançou o numerador, entre quem alcançou o denominador ("${r.name}").`,
+    };
+  });
 }

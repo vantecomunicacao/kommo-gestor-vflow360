@@ -289,6 +289,13 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
+- `20260808150000_kommo_report_snapshot_months_24.sql` — recria só
+  `trigger_report_snapshot_all()` trocando `'months', 12` por `'months', 24`.
+  Motivo: a comparação "Comparar com: mesmo mês, ano passado" (YoY) no
+  Relatório precisa que exista o mês 12 meses antes de cada mês exibido —
+  com janela de 12 meses isso nunca tinha base. **NÃO aplicada em produção
+  ainda** (pendente de `supabase db query --linked` + confirmação do
+  usuário, mesmo padrão das migrations anteriores desse cron).
 - `20260805130000_kommo_cron_url_drift_fix.sql` — recria as 3 funções de cron
   (`trigger_sync_all`, `trigger_sync_all_full`, `trigger_report_snapshot_all`)
   só pra recapturar a URL/anon key do projeto novo (`fjncmmqvmocwykpshgsh`).
@@ -340,6 +347,21 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-08-08 (`20260808160000_kommo_report_snapshots_lock.sql`): adiciona colunas
+  `kommo.report_snapshots.locked boolean default false` e `locked_at timestamptz`
+  — trava definitiva ("period lock") dos meses do Relatório: uma vez travado, o
+  `kommo-report-snapshot` nunca mais recalcula aquela célula, mesmo que um lead
+  reabra depois. Trava acontece 3 dias após o fechamento do mês OU a conexão do
+  workspace (`kommo.workspaces.created_at`), o que for mais tarde — evita travar
+  instantaneamente o histórico inteiro de uma conta que acabou de conectar.
+  Acompanha correção em `kommo-sync` (sem migration): backfill de
+  `lead_stage_events` passou de teto por CONTAGEM (1.500, imprevisível) pra teto
+  por DATA (24 meses, alinhado com `REPORT_SNAPSHOT_MONTHS`), com aviso em
+  `sync_status.last_sync_warning` quando mesmo essa janela não couber numa
+  passada (antes não avisava nada). Aditiva; sem mudança de RLS. **NÃO aplicada
+  em produção ainda** — rollout precisa ser em ordem (fix do sync → deixar rodar
+  1 ciclo → só então aplicar esta migration), pra não travar dado que ainda ia
+  melhorar no dia seguinte; pendente de confirmação do usuário em cada etapa.
 - 2026-08-05 (`20260805130000_kommo_cron_url_drift_fix.sql`): sem mudança
   estrutural — corrige divergência repo-vs-banco nas 3 funções de cron (ver
   entrada na seção de migrations acima). Achada durante a auditoria/plano de

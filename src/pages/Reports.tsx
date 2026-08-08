@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { format } from "date-fns";
+import { format, differenceInHours } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Link } from "react-router-dom";
-import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw, MoreHorizontal, RefreshCw } from "lucide-react";
+import { LayoutDashboard, GitBranch, Users, Target, ChevronDown, Printer, GripVertical, Save, RotateCcw, MoreHorizontal, RefreshCw, CalendarRange, Lock, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatBRL } from "@/lib/format";
-import { CATALOG, DEFAULT_VISIBLE, fmtValue, monthLabel, trendClass, pctChange, aggregateBySellers, buildReachCatalog, type MetricDef } from "@/lib/reports-metrics";
+import { CATALOG, DEFAULT_VISIBLE, fmtValue, monthLabel, trendClass, pctChange, aggregateBySellers, buildReachCatalog, buildCustomRateCatalog, resolveComparisonValue, REPORT_SNAPSHOT_MONTHS, type MetricDef, type Fmt, type CompareMode } from "@/lib/reports-metrics";
 import { Sparkline } from "@/components/reports/Sparkline";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,9 @@ import { MultiFilterSelect } from "@/components/filters/MultiFilterSelect";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { AxisTabs } from "@/components/AxisTabs";
+import { ErrorState } from "@/components/dashboard/ErrorState";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { useReportSnapshots, DateBasis, ReportMonth, ReportMetrics } from "@/hooks/useReportSnapshots";
@@ -24,11 +27,26 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 
+// Opções do seletor "Comparar com" — cada uma diz explicitamente o que calcula,
+// pra não deixar o usuário assumir "mês anterior" quando na verdade é outra base.
+const COMPARE_OPTIONS: { value: CompareMode; label: string; desc: string }[] = [
+  { value: "previous", label: "Mês anterior", desc: "Cada mês contra o imediatamente anterior. Sensível a ruído em baixo volume." },
+  { value: "yoy", label: "Mesmo mês, ano passado", desc: "Controla sazonalidade — compara com o mesmo mês do ano anterior (YoY)." },
+  { value: "movavg3", label: "Média móvel (3 meses)", desc: "Suaviza oscilações — compara contra a média dos 3 meses anteriores." },
+  { value: "none", label: "Sem comparação", desc: "Mostra só os valores do período, sem seta de tendência." },
+];
+
 export default function Reports() {
   const { activeWorkspace } = useWorkspace();
   const wsId = activeWorkspace?.id || null;
   const [dateBasis, setDateBasis] = useState<DateBasis>("fechamento");
   const [rangeMonths, setRangeMonths] = useState<number>(6);
+  // Período customizado (granularidade de MÊS, não de dia — a foto é mensal).
+  // periodMode "preset" usa rangeMonths (últimos N); "custom" usa customFrom/To.
+  const [periodMode, setPeriodMode] = useState<"preset" | "custom">("preset");
+  const [customFrom, setCustomFrom] = useState<string>(""); // mês ISO "YYYY-MM-01"
+  const [customTo, setCustomTo] = useState<string>("");
+  const [compareMode, setCompareMode] = useState<CompareMode>("previous");
   const [mode, setMode] = useState<"valores" | "variacao">("valores");
   const [visibleIds, setVisibleIds] = useState<string[]>(DEFAULT_VISIBLE.fechamento);
   const [chartMetric, setChartMetric] = useState<string>("wonRevenue");
@@ -43,12 +61,23 @@ export default function Reports() {
   const [refreshing, setRefreshing] = useState(false); // re-disparo manual das fotos
   const queryClient = useQueryClient();
 
+  // Liga automaticamente as taxas de etapa recém-configuradas (só na 1ª vez que
+  // aparecem) — declarado aqui (antes da persistência) porque o payload salvo
+  // inclui `seenReachIds`, lido deste ref no momento em que é montado.
+  const seenReach = useRef<Set<string>>(new Set());
+
   // Persistência da visão (localStorage, por workspace): lembra a última configuração
   // sem botão. Hidrata ao trocar de conta e regrava a cada mudança relevante.
   const viewKey = wsId ? `kommo-report-view:${wsId}` : null;
   const hydrated = useRef(false);
+  const buildViewPayload = () => ({
+    dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder,
+    seenReachIds: [...seenReach.current],
+    periodMode, customFrom, customTo, compareMode,
+  });
   useEffect(() => {
     hydrated.current = false;
+    seenReach.current = new Set();
     if (!viewKey) return;
     try {
       const raw = localStorage.getItem(viewKey);
@@ -64,6 +93,14 @@ export default function Reports() {
         if (typeof v.pipelineId === "string") setPipelineId(v.pipelineId === "__all__" ? null : v.pipelineId);
         if (Array.isArray(v.sellerIds)) setSellerIds(v.sellerIds);
         if (Array.isArray(v.metricOrder)) setMetricOrder(v.metricOrder);
+        // Métricas de taxa já vistas (evita reativar de novo o que o usuário desligou).
+        if (Array.isArray(v.seenReachIds)) seenReach.current = new Set(v.seenReachIds);
+        // Período customizado e comparação — views salvas antes desta feature não
+        // têm esses campos, então os defaults (preset + "previous") se aplicam.
+        if (v.periodMode === "preset" || v.periodMode === "custom") setPeriodMode(v.periodMode);
+        if (typeof v.customFrom === "string") setCustomFrom(v.customFrom);
+        if (typeof v.customTo === "string") setCustomTo(v.customTo);
+        if (["previous", "yoy", "movavg3", "none"].includes(v.compareMode)) setCompareMode(v.compareMode);
       }
     } catch { /* visão inválida: ignora e segue com os defaults */ }
     hydrated.current = true;
@@ -71,11 +108,17 @@ export default function Reports() {
   useEffect(() => {
     if (!viewKey || !hydrated.current) return;
     try {
-      localStorage.setItem(viewKey, JSON.stringify({
-        dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder,
-      }));
+      localStorage.setItem(viewKey, JSON.stringify(buildViewPayload()));
     } catch { /* quota/priv mode: ignora */ }
-  }, [viewKey, dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey, dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder, periodMode, customFrom, customTo, compareMode]);
+
+  // "Variação" não existe sem uma base de comparação — se o usuário desligar a
+  // comparação enquanto está nessa leitura, volta pra "Valores" (senão ficaria
+  // preso numa leitura cujo botão de sair sumiu do toggle "Leitura").
+  useEffect(() => {
+    if (compareMode === "none" && mode === "variacao") setMode("valores");
+  }, [compareMode, mode]);
 
   // Nomes de funil e vendedor (para os seletores) — buscados ao vivo, fora da foto.
   const { data: pipelines = [] } = useQuery({
@@ -138,13 +181,22 @@ export default function Reports() {
     }
   };
 
-  const { months: rawMonths, isLoading, error } = useReportSnapshots(wsId, dateBasis, pipelineId ?? "__all__");
+  const { months: rawMonths, isLoading, error, refetch } = useReportSnapshots(wsId, dateBasis, pipelineId ?? "__all__");
+  useEffect(() => {
+    if (error) console.error("Reports: falha ao carregar report_snapshots:", error);
+  }, [error]);
 
   // Momento da foto atual (todas as linhas de um recompute compartilham o frozen_at).
   const lastFrozen = useMemo(() => {
     const ts = rawMonths.map((m) => m.frozenAt).filter(Boolean).sort();
     return ts.length ? ts[ts.length - 1] : null;
   }, [rawMonths]);
+  // Cron roda 1x/dia; > 36h sem atualizar sugere falha silenciosa (sem retry/alerta
+  // do lado do cron) — avisa na tela em vez de deixar o usuário confiar num dado velho.
+  const isStale = useMemo(
+    () => (lastFrozen ? differenceInHours(new Date(), new Date(lastFrozen)) > 36 : false),
+    [lastFrozen],
+  );
 
   // Re-dispara o recompute (mesma edge function do cron) e recarrega as fotos.
   // Também mostra o resultado do check de integridade que a função devolve.
@@ -153,7 +205,7 @@ export default function Reports() {
     setRefreshing(true);
     try {
       const { data, error: fnErr } = await supabase.functions.invoke("kommo-report-snapshot", {
-        body: { workspace_id: wsId, months: 12 },
+        body: { workspace_id: wsId, months: REPORT_SNAPSHOT_MONTHS },
       });
       if (fnErr) throw fnErr;
       await queryClient.invalidateQueries({ queryKey: ["report-snapshots"] });
@@ -174,6 +226,41 @@ export default function Reports() {
     }
   };
 
+  // "Forçar recálculo" — ação separada e deliberada (menu ⋯, não o "Atualizar
+  // agora" comum): ignora a trava só pro intervalo de meses escolhido, pra
+  // corrigir configuração errada (ex. mapeamento de funil, Métricas Personalizadas)
+  // em meses já travados. O "Atualizar agora" continua sempre respeitando a trava.
+  const [forceDialogOpen, setForceDialogOpen] = useState(false);
+  const [forceFromMonth, setForceFromMonth] = useState("");
+  const [forceToMonth, setForceToMonth] = useState("");
+  const [forcing, setForcing] = useState(false);
+  const openForceDialog = () => {
+    setForceFromMonth(months[0]?.month || "");
+    setForceToMonth(months[months.length - 1]?.month || "");
+    setForceDialogOpen(true);
+  };
+  const forceRecompute = async () => {
+    if (!wsId || !forceFromMonth || !forceToMonth) return;
+    if (!window.confirm(
+      `Recalcular mesmo os meses já travados, de ${monthLabel(forceFromMonth)} até ${monthLabel(forceToMonth)}? ` +
+      "Use só pra corrigir configuração errada (ex. mapeamento de funil) — o número volta a travar depois.",
+    )) return;
+    setForcing(true);
+    try {
+      const { error: fnErr } = await supabase.functions.invoke("kommo-report-snapshot", {
+        body: { workspace_id: wsId, months: REPORT_SNAPSHOT_MONTHS, force: true, forceFrom: forceFromMonth, forceTo: forceToMonth },
+      });
+      if (fnErr) throw fnErr;
+      await queryClient.invalidateQueries({ queryKey: ["report-snapshots"] });
+      toast.success("Recálculo forçado concluído", { description: "Os meses no intervalo escolhido foram recalculados e travam de novo a partir de agora." });
+      setForceDialogOpen(false);
+    } catch (e) {
+      toast.error("Erro ao forçar recálculo", { description: (e as Error).message });
+    } finally {
+      setForcing(false);
+    }
+  };
+
   // Aplica os vendedores selecionados (soma os sub-blocos bySeller escolhidos, mês a
   // mês) — ver aggregateBySellers em lib/reports-metrics.ts.
   const months: ReportMonth[] = useMemo(
@@ -190,10 +277,11 @@ export default function Reports() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [rawMonths, userName]);
 
-  // Catálogo = métricas do eixo + (na aba Comercial) taxas de etapa derivadas das
-  // fotos — ver buildReachCatalog em lib/reports-metrics.ts.
+  // Catálogo = métricas do eixo + (na aba Comercial) taxas de etapa legadas
+  // (meses antigos já travados, ver buildReachCatalog) + Métricas Personalizadas
+  // visíveis no Relatório (buildCustomRateCatalog) — lib/reports-metrics.ts.
   const catalog = useMemo<MetricDef[]>(
-    () => buildReachCatalog(dateBasis, months),
+    () => [...buildReachCatalog(dateBasis, months), ...buildCustomRateCatalog(dateBasis, months)],
     [dateBasis, months],
   );
 
@@ -206,9 +294,13 @@ export default function Reports() {
     if (chartMetric2 && !CATALOG[axis].some((m) => m.id === chartMetric2)) setChartMetric2("");
   };
 
-  // Liga automaticamente as taxas de etapa recém-configuradas (só na 1ª vez que aparecem).
-  const seenReach = useRef<Set<string>>(new Set());
-  const reachIds = useMemo(() => catalog.filter((m) => m.id.startsWith("reach:")).map((m) => m.id), [catalog]);
+  // Liga automaticamente as taxas/métricas dinâmicas recém-configuradas (só na
+  // 1ª vez que aparecem — inclui taxas de etapa legadas E Métricas Personalizadas
+  // novas) — `seenReach` é declarado acima, junto da persistência da visão.
+  const reachIds = useMemo(
+    () => catalog.filter((m) => m.id.startsWith("reach:") || m.id.startsWith("custom:")).map((m) => m.id),
+    [catalog],
+  );
   useEffect(() => {
     const fresh = reachIds.filter((id) => !seenReach.current.has(id));
     if (fresh.length) {
@@ -217,7 +309,12 @@ export default function Reports() {
     }
   }, [reachIds]);
 
-  const shown: ReportMonth[] = useMemo(() => months.slice(-rangeMonths), [months, rangeMonths]);
+  const shown: ReportMonth[] = useMemo(() => {
+    if (periodMode === "custom" && customFrom && customTo) {
+      return months.filter((m) => m.month >= customFrom && m.month <= customTo);
+    }
+    return months.slice(-rangeMonths);
+  }, [months, rangeMonths, periodMode, customFrom, customTo]);
 
   // Aplica a ordem custom do usuário: primeiro as ids na ordem escolhida, depois as
   // demais do catálogo (métricas novas entram no fim). Pills e linhas seguem isto.
@@ -249,9 +346,7 @@ export default function Reports() {
   const saveView = () => {
     if (!viewKey) return;
     try {
-      localStorage.setItem(viewKey, JSON.stringify({
-        dateBasis, rangeMonths, mode, visibleIds, chartMetric, chartMetric2, pipelineId, sellerIds, metricOrder,
-      }));
+      localStorage.setItem(viewKey, JSON.stringify(buildViewPayload()));
       toast.success("Visualização salva");
     } catch {
       toast.error("Não foi possível salvar a visualização");
@@ -260,6 +355,10 @@ export default function Reports() {
   // Restaura os padrões do eixo atual (período, leitura, métricas visíveis, ordem e filtros).
   const resetView = () => {
     setRangeMonths(6);
+    setPeriodMode("preset");
+    setCustomFrom("");
+    setCustomTo("");
+    setCompareMode("previous");
     setMode("valores");
     setVisibleIds(DEFAULT_VISIBLE[dateBasis]);
     setMetricOrder([]);
@@ -283,6 +382,20 @@ export default function Reports() {
   const axisFmt = (fmt: Fmt) => (v: number | string) =>
     fmt === "brl" ? formatBRL(Number(v)) : fmt === "pct" ? `${v}%` : String(v);
 
+  // Marca o último ponto com um contorno vazado/tracejado quando o mês é parcial —
+  // evita que uma queda no ponto mais recente seja lida como tendência fechada.
+  const lastIsPartial = shown.length > 0 && shown[shown.length - 1].isPartial;
+  const partialAwareDot = (color: string) => (props: { cx?: number; cy?: number; index?: number }) => {
+    const { cx, cy, index } = props;
+    if (cx == null || cy == null) return <g key={`dot-${index}`} />;
+    const isLastPartial = lastIsPartial && index === chartData.length - 1;
+    return (
+      <circle key={`dot-${index}`} cx={cx} cy={cy} r={isLastPartial ? 4 : 3}
+        fill={isLastPartial ? "hsl(var(--card))" : color} stroke={color}
+        strokeWidth={isLastPartial ? 2 : 0} strokeDasharray={isLastPartial ? "2 2" : undefined} />
+    );
+  };
+
   if (!activeWorkspace) {
     return <div className="p-6 text-muted-foreground">Selecione uma conta para ver os relatórios.</div>;
   }
@@ -298,13 +411,90 @@ export default function Reports() {
             <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80 px-0.5">Período</span>
             <div className="flex items-center gap-1.5 h-8">
               {[3, 6, 12].map((n) => (
-                <button key={n} onClick={() => setRangeMonths(n)}
+                <button key={n} onClick={() => { setPeriodMode("preset"); setRangeMonths(n); }}
                   className={cn("px-2.5 h-8 rounded-md text-xs font-semibold border transition-colors",
-                    rangeMonths === n ? "bg-primary text-primary-foreground border-primary" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
+                    periodMode === "preset" && rangeMonths === n ? "bg-primary text-primary-foreground border-primary" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
                   {n}m
                 </button>
               ))}
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    className={cn("flex items-center gap-1.5 px-2.5 h-8 rounded-md text-xs font-semibold border transition-colors",
+                      periodMode === "custom" ? "bg-primary text-primary-foreground border-primary" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
+                    <CalendarRange className="w-3.5 h-3.5" />
+                    {periodMode === "custom" && customFrom && customTo
+                      ? `${monthLabel(customFrom)} – ${monthLabel(customTo)}`
+                      : "Personalizado"}
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80">
+                  <p className="text-xs text-muted-foreground leading-relaxed mb-3">
+                    Foto mensal congelada — escolha o mês inicial e final, não um intervalo de dias.
+                  </p>
+                  <div className="flex items-end gap-2">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80">De</label>
+                      <select
+                        className="h-8 text-xs font-semibold rounded-md border border-border/60 bg-background px-2"
+                        value={customFrom || months[0]?.month || ""}
+                        onChange={(e) => setCustomFrom(e.target.value)}>
+                        {months.map((m) => <option key={m.month} value={m.month}>{monthLabel(m.month)}</option>)}
+                      </select>
+                    </div>
+                    <span className="text-muted-foreground text-xs pb-2">→</span>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80">Até</label>
+                      <select
+                        className="h-8 text-xs font-semibold rounded-md border border-border/60 bg-background px-2"
+                        value={customTo || months[months.length - 1]?.month || ""}
+                        onChange={(e) => setCustomTo(e.target.value)}>
+                        {months.map((m) => <option key={m.month} value={m.month}>{monthLabel(m.month)}</option>)}
+                      </select>
+                    </div>
+                    <Button size="sm" className="h-8 text-xs" disabled={months.length === 0}
+                      onClick={() => {
+                        setCustomFrom((f) => f || months[0]?.month || "");
+                        setCustomTo((t) => t || months[months.length - 1]?.month || "");
+                        setPeriodMode("custom");
+                      }}>
+                      Aplicar
+                    </Button>
+                  </div>
+                  {months.length > 0 && (
+                    <p className="text-[11px] text-muted-foreground mt-3">
+                      Dados disponíveis desde <strong className="text-foreground font-medium">{monthLabel(months[0].month)}</strong>.
+                    </p>
+                  )}
+                </PopoverContent>
+              </Popover>
             </div>
+          </div>
+
+          <Separator orientation="vertical" className="h-10 hidden md:block self-end mb-1" />
+
+          <div className="flex flex-col gap-1 shrink-0">
+            <span className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80 px-0.5">Comparar com</span>
+            <Popover>
+              <PopoverTrigger asChild>
+                <button className="flex items-center gap-1.5 h-8 px-2.5 rounded-md text-xs font-semibold border border-border/60 text-muted-foreground hover:bg-accent/50 transition-colors min-w-[168px] justify-between">
+                  {COMPARE_OPTIONS.find((o) => o.value === compareMode)?.label}
+                  <ChevronDown className="w-3.5 h-3.5 opacity-60" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-72 p-1.5">
+                {COMPARE_OPTIONS.map((opt) => (
+                  <button key={opt.value} onClick={() => setCompareMode(opt.value)}
+                    className={cn("w-full text-left px-2.5 py-2 rounded-md transition-colors",
+                      compareMode === opt.value ? "bg-accent/60" : "hover:bg-accent/40")}>
+                    <div className={cn("text-xs font-semibold", compareMode === opt.value ? "text-primary-ink" : "text-foreground")}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{opt.desc}</div>
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
           </div>
 
           <Separator orientation="vertical" className="h-10 hidden md:block self-end mb-1" />
@@ -347,9 +537,10 @@ export default function Reports() {
                 : "resultados por fechamento"} (fotos mensais)
             </p>
             {lastFrozen && (
-              <p className="text-xs text-muted-foreground/80 mt-1 flex items-center gap-1.5">
-                <span className="inline-block w-1.5 h-1.5 rounded-full bg-success" />
-                Dados atualizados até {format(new Date(lastFrozen), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+              <p className={cn("text-xs mt-1 flex items-center gap-1.5", isStale ? "text-accent-foreground" : "text-muted-foreground/80")}>
+                <span className={cn("inline-block w-1.5 h-1.5 rounded-full", isStale ? "bg-accent-foreground" : "bg-success")} />
+                {isStale ? "Dados desatualizados — última foto de" : "Dados atualizados até"} {format(new Date(lastFrozen), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}
+                {isStale && " · clique em “Atualizar agora”"}
               </p>
             )}
           </div>
@@ -379,10 +570,53 @@ export default function Reports() {
               <DropdownMenuItem asChild>
                 <Link to="/dashboard"><LayoutDashboard className="w-3.5 h-3.5 mr-2" /> Ver dashboard (ao vivo)</Link>
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={openForceDialog} disabled={!wsId}>
+                <ShieldOff className="w-3.5 h-3.5 mr-2" /> Forçar recálculo
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
       </div>
+
+      <Dialog open={forceDialogOpen} onOpenChange={setForceDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Forçar recálculo</DialogTitle>
+            <DialogDescription>
+              Recalcula os meses escolhidos mesmo que já estejam travados — use só pra
+              corrigir configuração errada (ex. mapeamento de funil, Métricas Personalizadas).
+              Depois de recalculados, os meses voltam a travar normalmente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-end gap-2 py-2">
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80">De</label>
+              <select
+                className="h-8 text-xs font-semibold rounded-md border border-border/60 bg-background px-2"
+                value={forceFromMonth}
+                onChange={(e) => setForceFromMonth(e.target.value)}>
+                {months.map((m) => <option key={m.month} value={m.month}>{monthLabel(m.month)}</option>)}
+              </select>
+            </div>
+            <span className="text-muted-foreground text-xs pb-2">→</span>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] uppercase tracking-wider font-medium text-muted-foreground/80">Até</label>
+              <select
+                className="h-8 text-xs font-semibold rounded-md border border-border/60 bg-background px-2"
+                value={forceToMonth}
+                onChange={(e) => setForceToMonth(e.target.value)}>
+                {months.map((m) => <option key={m.month} value={m.month}>{monthLabel(m.month)}</option>)}
+              </select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setForceDialogOpen(false)}>Cancelar</Button>
+            <Button size="sm" onClick={forceRecompute} disabled={forcing || !forceFromMonth || !forceToMonth}>
+              {forcing ? "Recalculando…" : "Recalcular mesmo travado"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Cabeçalho (impressão): metadados do relatório — só aparece no PDF */}
       {hasData && (
@@ -390,7 +624,8 @@ export default function Reports() {
           <h1 className="text-xl font-bold text-foreground">Relatório {dateBasis === "criacao" ? "Comercial" : "Financeiro"}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{activeWorkspace.name}</p>
           <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground max-w-2xl">
-            <span><strong className="text-foreground font-medium">Período:</strong> {shown.length > 0 ? `${monthLabel(shown[0].month)} – ${monthLabel(shown[shown.length - 1].month)} (${rangeMonths} meses)` : "—"}</span>
+            <span><strong className="text-foreground font-medium">Período:</strong> {shown.length > 0 ? `${monthLabel(shown[0].month)} – ${monthLabel(shown[shown.length - 1].month)} (${shown.length} ${shown.length === 1 ? "mês" : "meses"})` : "—"}</span>
+            <span><strong className="text-foreground font-medium">Comparar com:</strong> {COMPARE_OPTIONS.find((o) => o.value === compareMode)?.label}</span>
             <span><strong className="text-foreground font-medium">Funil:</strong> {pipelineId ? (pipelineName.get(pipelineId) || pipelineId) : "Todos os funis"}</span>
             <span><strong className="text-foreground font-medium">Vendedor:</strong> {sellerIds.length === 0 ? "Todos" : sellerIds.map((id) => sellerOptions.find((s) => s.id === id)?.name || id).join(", ")}</span>
             <span><strong className="text-foreground font-medium">Emitido em:</strong> {format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</span>
@@ -399,7 +634,12 @@ export default function Reports() {
       )}
 
       {isLoading && <div className="dashboard-section text-muted-foreground">Carregando fotos…</div>}
-      {error && <div className="dashboard-section text-destructive">Erro: {error}</div>}
+      {error && (
+        <ErrorState
+          error="Não foi possível carregar os relatórios. Tente novamente em instantes."
+          onRetry={() => { refetch(); }}
+        />
+      )}
 
       {!isLoading && !error && (!hasData ? (
         <div className="dashboard-section text-center py-10">
@@ -453,7 +693,7 @@ export default function Reports() {
             <div className="print:hidden flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 border-b border-border">
               <div className="flex items-center gap-1.5">
                 <span className="text-xs font-semibold text-muted-foreground">Leitura:</span>
-                {(["valores", "variacao"] as const).map((m) => (
+                {(compareMode === "none" ? (["valores"] as const) : (["valores", "variacao"] as const)).map((m) => (
                   <button key={m} onClick={() => setMode(m)}
                     className={cn("px-2.5 py-1 rounded-md text-xs font-semibold border transition-colors",
                       mode === m ? "bg-primary text-primary-foreground border-primary" : "border-border/60 text-muted-foreground hover:bg-accent/50")}>
@@ -499,13 +739,16 @@ export default function Reports() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm" onMouseLeave={() => setHoveredCol(null)}>
+                <caption className="sr-only">
+                  Comparativo mensal de métricas do relatório {dateBasis === "criacao" ? "comercial" : "financeiro"}, por métrica e mês.
+                </caption>
                 <thead>
                   <tr className="border-b border-border bg-card">
-                    <th className="sticky left-0 z-10 bg-inherit text-left font-semibold text-muted-foreground px-4 py-3 min-w-[160px]">Métrica</th>
+                    <th scope="col" className="sticky left-0 z-10 bg-inherit text-left font-semibold text-muted-foreground px-4 py-3 min-w-[160px]">Métrica</th>
                     {shown.map((mo, i) => {
                       const isLast = i === shown.length - 1;
                       return (
-                        <th key={mo.month}
+                        <th key={mo.month} scope="col"
                           onMouseEnter={() => setHoveredCol(i)}
                           className={cn("text-right font-semibold px-4 py-3 whitespace-nowrap border-l border-border/40 transition-colors",
                             hoveredCol === i ? "bg-primary/10" : isLast ? "bg-primary/5" : "",
@@ -521,10 +764,15 @@ export default function Reports() {
                               (parcial)
                             </span>
                           )}
+                          {mo.locked && (
+                            <Lock className="inline-block w-2.5 h-2.5 ml-1 mb-0.5 text-muted-foreground cursor-help"
+                              aria-label="Travado"
+                              title="Travado — número final, não muda mais (mesmo que um lead reabra depois)." />
+                          )}
                         </th>
                       );
                     })}
-                    <th className="text-right font-semibold text-muted-foreground px-4 py-3 border-l border-border/40">Tendência</th>
+                    <th scope="col" className="text-right font-semibold text-muted-foreground px-4 py-3 border-l border-border/40">Tendência</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -534,17 +782,20 @@ export default function Reports() {
                       <tr key={met.id}
                         className={cn("border-b border-border/60 last:border-0 transition-colors hover:bg-accent",
                           rowIdx % 2 === 1 ? "bg-muted" : "bg-card")}>
-                        <td className="sticky left-0 z-10 bg-inherit font-medium px-4 py-3 whitespace-nowrap" title={met.desc}>
+                        <th scope="row" className="sticky left-0 z-10 bg-inherit text-left font-medium px-4 py-3 whitespace-nowrap" title={met.desc}>
                           {met.desc ? <span className="cursor-help decoration-dotted underline-offset-4 hover:underline">{met.label}</span> : met.label}
                           {met.tag && (
                             <span className="ml-1.5 px-1.5 py-px rounded text-[9px] font-semibold uppercase tracking-wide bg-accent/60 text-accent-foreground border border-border/50 align-middle">
                               {met.tag}
                             </span>
                           )}
-                        </td>
+                        </th>
                         {shown.map((mo, i) => {
                           const v = met.value(mo.metrics);
-                          const prev = i > 0 ? met.value(shown[i - 1].metrics) : null;
+                          // Busca por mês-calendário na série completa (não pelo índice de `shown`)
+                          // — ver resolveComparisonValue em lib/reports-metrics.ts.
+                          const prev = compareMode === "none" ? null : resolveComparisonValue(months, mo.month, compareMode, met.value);
+                          const noBase = compareMode !== "none" && prev === null;
                           const variacao = mode === "variacao" && prev !== null;
                           const isLast = i === shown.length - 1;
                           return (
@@ -553,9 +804,14 @@ export default function Reports() {
                               className={cn("text-right px-4 py-3 whitespace-nowrap tabular-nums border-l border-border/40 transition-colors",
                                 hoveredCol === i ? "bg-primary/10" : isLast ? "bg-primary/5" : "",
                                 variacao ? trendClass(v, prev!, met.invert) : "text-foreground")}>
-                              {variacao ? pctChange(v, prev!) : fmtValue(v, met.fmt)}
+                              {mode === "variacao" && noBase ? (
+                                <span className="text-[11px] italic text-muted-foreground">sem base</span>
+                              ) : variacao ? pctChange(v, prev!) : fmtValue(v, met.fmt)}
                               {!variacao && met.showDirection && prev !== null && v !== prev && (
                                 <span className={cn("ml-1 text-[10px]", trendClass(v, prev, met.invert))}>{v > prev ? "▲" : "▼"}</span>
+                              )}
+                              {mode === "valores" && met.showDirection && noBase && (
+                                <span className="ml-1 text-[10px] italic text-muted-foreground">s/ base</span>
                               )}
                               {isLast && !variacao && (() => {
                                 const g = goals[goalKey(met.id)];
@@ -585,6 +841,16 @@ export default function Reports() {
             {dateBasis === "criacao" && (
               <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
                 <strong className="font-medium text-foreground">Leitura por coorte:</strong> as taxas medem a safra de leads que <em>entrou</em> em cada mês, contando as vendas quando quer que tenham fechado. Meses recentes (marcados <span className="text-accent-foreground">parcial</span>) ainda estão maturando e tendem a subir — compare com segurança apenas os meses já fechados.
+              </p>
+            )}
+            {dateBasis === "criacao" && !catalog.some((m) => m.id.startsWith("reach:") || m.id.startsWith("count:")) && (
+              <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
+                <strong className="font-medium text-foreground">Sem taxas de etapa configuradas.</strong> Escolha quais fases do funil entram nesse relatório em Configurações → Dashboard, seção "Taxas de fase (Relatório)".
+              </p>
+            )}
+            {dateBasis === "fechamento" && (
+              <p className="px-4 py-3 text-[11px] leading-relaxed text-muted-foreground border-t border-border/40">
+                <strong className="font-medium text-foreground">Sobre meses já fechados:</strong> um mês trava em definitivo (<Lock className="inline-block w-2.5 h-2.5 mx-0.5 mb-0.5" />) até 3 dias depois de fechar — antes disso, se um negócio for reaberto e ganho/perdido de novo, o número ainda pode mudar no próximo recálculo. Depois de travado, não muda mais, mesmo que o negócio seja reaberto.
               </p>
             )}
           </div>
@@ -645,10 +911,10 @@ export default function Reports() {
                       label={{ value: "Meta", position: "insideTopRight", fill: "hsl(var(--funnel-3-ink))", fontSize: 11 }} />
                   )}
                   <Line yAxisId="left" type="monotone" dataKey="v1" name="v1" stroke="hsl(var(--primary))" strokeWidth={2.5}
-                    dot={{ r: 3, fill: "hsl(var(--primary))" }} activeDot={{ r: 5 }} />
+                    dot={partialAwareDot("hsl(var(--primary))")} activeDot={{ r: 5 }} />
                   {chartDef2 && (
                     <Line yAxisId="right" type="monotone" dataKey="v2" name="v2" stroke="hsl(var(--funnel-3))" strokeWidth={2.5}
-                      dot={{ r: 3, fill: "hsl(var(--funnel-3))" }} activeDot={{ r: 5 }} />
+                      dot={partialAwareDot("hsl(var(--funnel-3))")} activeDot={{ r: 5 }} />
                   )}
                 </LineChart>
               </ResponsiveContainer>

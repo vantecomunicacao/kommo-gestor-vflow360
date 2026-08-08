@@ -200,7 +200,20 @@ serve(async (req) => {
     const leadsSince    = forceFull ? "" : sinceParam(wm?.leads_last_seen_at,    "updated_at");
     const contactsSince = forceFull ? "" : sinceParam(wm?.contacts_last_seen_at, "updated_at");
     const tasksSince    = forceFull ? "" : sinceParam(wm?.tasks_last_seen_at,    "updated_at");
-    const eventsSince   = forceFull ? "" : sinceParam(wm?.events_last_seen_at,   "created_at");
+    // Eventos de etapa: backfill limitado por DATA (24 meses), não por contagem —
+    // sem isso, uma conta sem watermark (1ª sync) buscava "o que coubesse" no teto
+    // de página (imprevisível: 2 anos numa conta de baixo volume, 2 semanas numa de
+    // alto volume) e nunca mais revisitava o que ficou de fora. Alinhado com
+    // REPORT_SNAPSHOT_MONTHS (src/lib/reports-metrics.ts) — o Relatório nunca
+    // mostra mais que isso mesmo, então não faz sentido sincronizar mais eventos do
+    // que o produto usa. `full:true` também respeita esse chão (não faz sentido
+    // "recarregar tudo" trazer eventos de antes do que qualquer tela usa).
+    const EVENTS_BACKFILL_MONTHS = 24;
+    const eventsFloor = new Date(startTs);
+    eventsFloor.setUTCMonth(eventsFloor.getUTCMonth() - EVENTS_BACKFILL_MONTHS);
+    const eventsWatermark = !forceFull && wm?.events_last_seen_at ? new Date(wm.events_last_seen_at) : null;
+    const eventsFrom = eventsWatermark && eventsWatermark > eventsFloor ? eventsWatermark : eventsFloor;
+    const eventsSince = sinceParam(eventsFrom.toISOString(), "created_at");
     const newWatermark  = new Date(startTs - OVERLAP_MS).toISOString();
 
     await db.from("sync_status").upsert(
@@ -417,9 +430,19 @@ serve(async (req) => {
     // Resiliente: se falhar, NÃO derruba o sync (leads já foram gravados). Limitado
     // para não estourar o tempo da função (incremental fica como melhoria futura).
     try {
+      const EVENTS_MAX_PAGES = 15, EVENTS_PAGE = 100;
       const stageEvents = await kommoFetchAll(
-        creds, `/events?limit=100&filter[type]=lead_status_changed&filter[entity]=lead${eventsSince}`, "events", { maxPages: 15 },
+        creds, `/events?limit=${EVENTS_PAGE}&filter[type]=lead_status_changed&filter[entity]=lead${eventsSince}`, "events", { maxPages: EVENTS_MAX_PAGES },
       ) as KommoStageChangeEvent[];
+      // Mesmo com o chão de 24 meses (não mais "sem teto"), uma conta de volume muito
+      // alto ainda pode ter mais mudanças de etapa que o teto de página numa passada —
+      // isso deixava "taxa de etapa"/"tempo por etapa" incompletos SEM aviso nenhum
+      // (diferente de leads/contacts, que já avisavam). Agora também avisa.
+      if (stageEvents.length >= EVENTS_MAX_PAGES * EVENTS_PAGE) {
+        warnings.push(
+          `eventos de etapa: atingiu o teto de ${EVENTS_MAX_PAGES * EVENTS_PAGE} registros dentro da janela de ${EVENTS_BACKFILL_MONTHS} meses — taxa de etapa/tempo por etapa podem estar incompletos`,
+        );
+      }
       if (stageEvents.length) {
         const evRows = stageEvents.map((e) => {
           const after = e?.value_after?.[0]?.lead_status ?? {};

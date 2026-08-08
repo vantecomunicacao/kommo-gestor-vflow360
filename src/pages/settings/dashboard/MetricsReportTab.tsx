@@ -7,7 +7,6 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Sparkles, Plus, X } from "lucide-react";
-import { FUNNEL_BUCKETS } from "@/lib/dashboard-funnel";
 import {
   CustomMetric, MAX_CUSTOM_METRICS, MAX_STAGE_REFS_PER_SIDE, StageRef,
   stageRefKey, CUSTOM_METRIC_ICONS, DEFAULT_CUSTOM_METRIC_ICON, getCustomMetricIcon,
@@ -22,9 +21,6 @@ interface MetricsReportTabProps {
   customFields: CustomField[];
   customMetrics: CustomMetric[];
   setCustomMetrics: React.Dispatch<React.SetStateAction<CustomMetric[]>>;
-  stageLabels: Record<string, string>;
-  reportRateStages: string[];
-  setReportRateStages: React.Dispatch<React.SetStateAction<string[]>>;
   visibleFields: string[];
   setVisibleFields: React.Dispatch<React.SetStateAction<string[]>>;
   chartFields: string[];
@@ -33,7 +29,6 @@ interface MetricsReportTabProps {
 
 export default function MetricsReportTab({
   pipelines, customFields, customMetrics, setCustomMetrics,
-  stageLabels, reportRateStages, setReportRateStages,
   visibleFields, setVisibleFields, chartFields, setChartFields,
 }: MetricsReportTabProps) {
   // Lista achatada de etapas ("Funil › Etapa") pra montar os seletores das Métricas
@@ -53,7 +48,8 @@ export default function MetricsReportTab({
   const addCustomMetric = () => {
     if (customMetrics.length >= MAX_CUSTOM_METRICS) return;
     setCustomMetrics((prev) => [...prev, {
-      id: crypto.randomUUID(), name: "", format: "percent", icon: DEFAULT_CUSTOM_METRIC_ICON, numerator: [], denominator: [],
+      id: crypto.randomUUID(), name: "", format: "percent", icon: DEFAULT_CUSTOM_METRIC_ICON,
+      numerator: [], denominator: [], reportVisible: true,
     }]);
   };
   const removeCustomMetric = (id: string) => setCustomMetrics((prev) => prev.filter((m) => m.id !== id));
@@ -166,6 +162,14 @@ export default function MetricsReportTab({
                 </Button>
               </div>
 
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
+                <Checkbox
+                  checked={m.reportVisible !== false}
+                  onCheckedChange={(c) => patchCustomMetric(m.id, { reportVisible: c !== false })}
+                />
+                Aparece no Relatório (tendência mensal, além do Dashboard ao vivo)
+              </label>
+
               {/* Numerador: sempre "passaram por" */}
               <div className="space-y-1.5">
                 <Label className="text-xs">
@@ -253,33 +257,6 @@ export default function MetricsReportTab({
           {pipelines.length === 0 && (
             <p className="text-sm text-muted-foreground">Sincronize pipelines primeiro pra escolher etapas.</p>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Taxas de fase do Relatório */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Taxas de fase (Relatório)</CardTitle>
-          <CardDescription>
-            Escolha uma ou mais das 4 fases do funil para virarem taxas no Relatório (aba
-            Comercial), ex.: "Taxa de Agendamento". Cada taxa = leads da safra do mês que
-            alcançaram a fase ÷ leads criados no mês. Como as 4 fases são comuns a todos os
-            funis, a taxa funciona corretamente inclusive em "Todos os funis". Use os nomes
-            personalizados acima ("Nomes das etapas do funil") para adequar ao seu negócio.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {FUNNEL_BUCKETS.map((b) => (
-            <label key={b.key} className="flex items-center gap-2 pl-1 text-sm cursor-pointer">
-              <Checkbox
-                checked={reportRateStages.includes(b.key)}
-                onCheckedChange={(c) =>
-                  setReportRateStages((prev) => c ? [...prev, b.key] : prev.filter((x) => x !== b.key))
-                }
-              />
-              {stageLabels[b.key] || b.label}
-            </label>
-          ))}
         </CardContent>
       </Card>
 

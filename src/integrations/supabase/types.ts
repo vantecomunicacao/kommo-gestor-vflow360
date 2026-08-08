@@ -629,6 +629,8 @@ export type Database = {
           frozen_at: string
           id: string
           is_partial: boolean
+          locked: boolean
+          locked_at: string | null
           metrics: Json
           month: string
           pipeline_id: string
@@ -641,6 +643,8 @@ export type Database = {
           frozen_at?: string
           id?: string
           is_partial?: boolean
+          locked?: boolean
+          locked_at?: string | null
           metrics?: Json
           month: string
           pipeline_id?: string
@@ -653,6 +657,8 @@ export type Database = {
           frozen_at?: string
           id?: string
           is_partial?: boolean
+          locked?: boolean
+          locked_at?: string | null
           metrics?: Json
           month?: string
           pipeline_id?: string
