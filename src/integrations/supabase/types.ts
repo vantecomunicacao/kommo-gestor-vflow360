@@ -442,7 +442,6 @@ export type Database = {
           pipeline_id: string | null
           price: number | null
           responsible_user_id: string | null
-          source: string | null
           status: string | null
           status_id: string | null
           updated_at: string
@@ -468,7 +467,6 @@ export type Database = {
           pipeline_id?: string | null
           price?: number | null
           responsible_user_id?: string | null
-          source?: string | null
           status?: string | null
           status_id?: string | null
           updated_at?: string
@@ -494,7 +492,6 @@ export type Database = {
           pipeline_id?: string | null
           price?: number | null
           responsible_user_id?: string | null
-          source?: string | null
           status?: string | null
           status_id?: string | null
           updated_at?: string

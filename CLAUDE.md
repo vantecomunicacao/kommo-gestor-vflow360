@@ -153,16 +153,19 @@ do repo, entrada tirada de `supabase/config.toml`, links mortos corrigidos em
 `docs/ARCHITECTURE.md`/`docs/CAPABILITIES.md`. Não muda a Regra #1 (a
 instância real que o GHL usa continua intacta no projeto antigo).
 
-**Achado 2026-08-06 — `kommo.leads.source` nunca é lido pelo `kommo-dashboard`:**
-a tabela `kommo.leads` tem uma coluna `source text` ("origem derivada de UTM/origem
-do lead", populada pelo `kommo-sync`), mas o `SELECT` de `leadsRows` em
-`kommo-dashboard/index.ts` nunca a inclui na lista de colunas. O helper `getOrigin`
-tinha um fallback pra `l.source` que por isso sempre avaliava `undefined` — código
-morto desde sempre. Achado ao tipar `DashboardLead` de verdade (era mascarado por
-`any`) durante o fechamento da Fase 2. Comportamento preservado nesta leva (só
-removi o termo morto do fallback, sem incluir a coluna no SELECT) porque incluir
-a coluna mudaria números reais do gráfico de Origem — decisão de fazer isso ou
-não fica pendente, fora do escopo de uma leva de lint.
+**`kommo.leads.source` REMOVIDA em 2026-08-08** (achado original de 2026-08-06
+preservado pelo histórico): a coluna existia com o comentário "origem derivada
+de UTM/origem do lead", e o `kommo-dashboard` tinha um fallback morto pra ela
+(nunca lida no SELECT). Ao investigar pra decidir se valia corrigir, descobrimos
+que a premissa do achado original estava errada: a coluna **nunca foi populada
+de verdade** — o `kommo-sync` sempre gravava `source: null` (funcionalidade de
+origem automática começada e nunca terminada), então não existia dado real
+sendo perdido. Como a origem do lead já é coberta por "Origem do lead" (custom
+field configurável) + os 5 campos de UTM — todos já lidos corretamente —, não
+havia motivo pra terminar a funcionalidade. Removida a coluna (migration
+`20260808120000_kommo_drop_dead_leads_source.sql`, aplicada via
+`supabase db query --linked`) e o `source: null` morto no `kommo-sync`
+(redeployado). `types.ts` regenerado.
 
 **`supabase db push` está QUEBRADO no projeto novo** (confirmado 2026-08-05): a
 tabela de histórico de migrations do projeto novo não bate com o que já existe

@@ -359,7 +359,6 @@ serve(async (req) => {
           price: typeof l.price === "number" ? l.price : null,
           responsible_user_id: l.responsible_user_id != null ? String(l.responsible_user_id) : null,
           loss_reason_id: l.loss_reason_id != null ? String(l.loss_reason_id) : null,
-          source: null,
           contact_id: mainContactId != null ? String(mainContactId) : null,
           contact_name: contact?.name ?? null,
           contact_phone: contact?.phone ?? null,
