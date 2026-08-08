@@ -54,11 +54,6 @@ export default function Admin() {
     view_settings: false,
   });
   const [creating, setCreating] = useState(false);
-  // vendedor (acesso só a Sugestões, vinculado a um GHL user)
-  const [isVendor, setIsVendor] = useState(false);
-  const [ghlUsers, setGhlUsers] = useState<{ ghl_id: string; name: string | null; email: string | null }[]>([]);
-  const [newGhlUser, setNewGhlUser] = useState<string>("");
-  const [loadingGhlUsers, setLoadingGhlUsers] = useState(false);
 
   // password dialog
   const [pwUser, setPwUser] = useState<AdminUser | null>(null);
@@ -125,21 +120,6 @@ export default function Admin() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleLoading, isAdmin]);
 
-  // Carrega os usuários do GHL do workspace quando criando um vendedor.
-  useEffect(() => {
-    if (!isVendor || !newWorkspace) { setGhlUsers([]); return; }
-    let active = true;
-    setLoadingGhlUsers(true);
-    callAdmin<{ ghl_users?: { ghl_id: string; name: string | null; email: string | null }[] }>(
-      "list_ghl_users",
-      { workspace_id: newWorkspace },
-    )
-      .then((d) => { if (active) setGhlUsers(d?.ghl_users || []); })
-      .catch(() => { if (active) setGhlUsers([]); })
-      .finally(() => { if (active) setLoadingGhlUsers(false); });
-    return () => { active = false; };
-  }, [isVendor, newWorkspace]);
-
   const promoteSelf = async () => {
     setBootstrapping(true);
     try {
@@ -167,10 +147,6 @@ export default function Admin() {
       toast.error("Email e senha são obrigatórios");
       return;
     }
-    if (isVendor && (!newWorkspace || !newGhlUser)) {
-      toast.error("Vendedor: selecione o workspace e o usuário do GHL");
-      return;
-    }
     setCreating(true);
     try {
       await callAdmin("create_user", {
@@ -178,15 +154,13 @@ export default function Admin() {
         password: newPassword,
         full_name: newName || null,
         workspace_id: newWorkspace || null,
-        role: isVendor ? "user" : newRole,
+        role: newRole,
         permissions: newPerms,
-        ghl_user_id: isVendor ? newGhlUser : null,
       });
-      toast.success(isVendor ? "Vendedor criado" : "Usuário criado");
+      toast.success("Usuário criado");
       setCreateOpen(false);
       setNewEmail(""); setNewPassword(""); setNewName(""); setNewWorkspace(""); setNewRole("user");
       setNewPerms({ view_suggestions: false, view_integrations: false, view_settings: false });
-      setIsVendor(false); setNewGhlUser(""); setGhlUsers([]);
       refresh();
     } catch (e) {
       toast.error("Erro ao criar", { description: (e as Error).message });
@@ -321,31 +295,6 @@ export default function Admin() {
                 </Select>
               </div>
 
-              <div className="flex items-center justify-between pt-2 border-t border-border">
-                <div>
-                  <Label>Vendedor (acesso só a Sugestões)</Label>
-                  <p className="text-xs text-muted-foreground">Vê e aceita apenas as sugestões atribuídas a ele no GHL.</p>
-                </div>
-                <Switch checked={isVendor} onCheckedChange={setIsVendor} />
-              </div>
-              {isVendor && (
-                <div>
-                  <Label>Usuário do GHL *</Label>
-                  <Select value={newGhlUser} onValueChange={setNewGhlUser} disabled={!newWorkspace || loadingGhlUsers}>
-                    <SelectTrigger>
-                      <SelectValue placeholder={!newWorkspace ? "Selecione a conta primeiro" : loadingGhlUsers ? "Carregando..." : "Selecione o vendedor"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {ghlUsers.map((g) => <SelectItem key={g.ghl_id} value={g.ghl_id}>{g.name || g.email || g.ghl_id}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {newWorkspace && !loadingGhlUsers && ghlUsers.length === 0 && (
-                    <p className="text-xs text-muted-foreground mt-1">Nenhum usuário do GHL sincronizado nesta conta.</p>
-                  )}
-                </div>
-              )}
-
-              {!isVendor && (<>
               <div className="flex items-center justify-between">
                 <Label>Promover a admin</Label>
                 <Switch checked={newRole === "admin"} onCheckedChange={(v) => setNewRole(v ? "admin" : "user")} />
@@ -354,10 +303,10 @@ export default function Admin() {
               <div className="space-y-2 pt-2 border-t border-border">
                 <Label className="text-sm font-semibold">Permissões de acesso</Label>
                 <p className="text-xs text-muted-foreground">
-                  Dashboard e Conversas são liberados para todos. Marque as áreas extras que este usuário poderá acessar.
+                  Dashboard e Relatórios são liberados para todos. Marque as áreas extras que este usuário poderá acessar.
                 </p>
                 <div className="flex items-center justify-between pt-1">
-                  <Label className="font-normal">Ver Sugestões IA</Label>
+                  <Label className="font-normal">Ver Leads esfriando</Label>
                   <Switch
                     checked={newPerms.view_suggestions}
                     onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_suggestions: v }))}
@@ -378,7 +327,6 @@ export default function Admin() {
                   />
                 </div>
               </div>
-              </>)}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancelar</Button>
@@ -499,11 +447,11 @@ export default function Admin() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Dashboard e Conversas são liberados para todos os usuários.
+              Dashboard e Relatórios são liberados para todos os usuários.
               Ative apenas as áreas extras que este usuário poderá acessar.
             </p>
             <div className="flex items-center justify-between">
-              <Label className="font-normal">Ver Sugestões IA</Label>
+              <Label className="font-normal">Ver Leads esfriando</Label>
               <Switch
                 checked={permsDraft.view_suggestions}
                 onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_suggestions: v }))}

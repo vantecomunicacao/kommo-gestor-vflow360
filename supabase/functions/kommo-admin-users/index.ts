@@ -72,7 +72,6 @@ Deno.serve(async (req) => {
               view_integrations: !!p?.view_integrations,
               view_settings: !!p?.view_settings,
             },
-            ghl_links: [], // vendedor/GHL é do módulo de Sugestões (futuramente)
           };
         });
         return json({ users });
@@ -82,11 +81,6 @@ Deno.serve(async (req) => {
         const { data, error } = await db.from("workspaces").select("id, name, owner_id").order("created_at");
         if (error) throw error;
         return json({ workspaces: data });
-      }
-
-      case "list_ghl_users": {
-        // Vendedor/GHL fora de escopo no Kommo (futuramente) — devolve vazio.
-        return json({ ghl_users: [] });
       }
 
       case "create_user": {
@@ -187,11 +181,6 @@ Deno.serve(async (req) => {
         const { user_id, workspace_id } = body;
         if (!user_id || !workspace_id) return json({ error: "user_id e workspace_id obrigatórios" }, 400);
         await db.from("workspace_members").delete().eq("user_id", user_id).eq("workspace_id", workspace_id);
-        return json({ ok: true });
-      }
-
-      case "set_ghl_link": {
-        // Vendedor/GHL fora de escopo (futuramente) — no-op.
         return json({ ok: true });
       }
 
