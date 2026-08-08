@@ -25,20 +25,52 @@ manualmente o restante dos workspaces pro projeto novo. Só desligar
 (`cron.unschedule`) ou remover algo do lado Kommo desse projeto antigo com
 autorização explícita — mesmo sendo "nosso", é código morto pendente, não órfão.
 
-**Achado 2026-08-05 — o projeto novo NÃO é 100% "zero GHL" como a tabela acima
-descreve:** o schema `public` desse projeto (`fjncmmqvmocwykpshgsh`) tem 27
-tabelas de um sistema "GHL v2" (`ghl_contacts`, `ghl_conversations`,
-`suggestions`, `integrations`, `workspaces` etc.) e **6 crons ativos**
-(`ghl-v2-sync-tick`, `ghl-v2-analyze-tick`, `ghl-v2-auto-execute-tick`,
-`cleanup-system-logs-daily`, `purge-trashed-workspaces`, `ai-insights-tick`)
-que leem esses dados e disparam chamadas (a cada 2-10min) pra edge functions
-de produção no projeto **antigo** (`ghl-manage`, `ai-analyze-v2`,
-`ai-insights-generate`, `ghl-conversations-sync`). Não é código morto — está
-rodando de verdade. O usuário acredita que é de um "sistema antigo" e pode ser
-apagado, mas a tentativa de pausar os crons (`cron.unschedule`) foi bloqueada
-pelo classificador de permissão do Claude Code e **ficou pendente** — nada foi
-alterado. Antes de mexer: confirmar que nada depende disso, e tratar como
-ação irreversível (perda de dado) separada de só pausar (reversível).
+**Achado 2026-08-05, RESOLVIDO 2026-08-08 — o schema `public` (GHL v2) foi
+removido deste projeto.** O achado original: o schema `public` desse projeto
+(`fjncmmqvmocwykpshgsh`) tinha 27 tabelas de um sistema "GHL v2" (`ghl_contacts`,
+`ghl_conversations`, `suggestions`, `integrations`, `workspaces` etc.), 17
+funções e 6 crons (`ghl-v2-sync-tick`, `ghl-v2-analyze-tick`,
+`ghl-v2-auto-execute-tick`, `cleanup-system-logs-daily`,
+`purge-trashed-workspaces`, `ai-insights-tick`) que disparavam chamadas pra
+edge functions de produção no projeto **antigo** (`ghl-manage`, `ai-analyze-v2`,
+`ai-insights-generate`, `ghl-conversations-sync`).
+
+Antes de remover, uma auditoria confirmou (2026-08-08): (1) as 27 tabelas
+estavam **100% vazias** (0 linhas) — as 4 funções de trigger dos crons fazem
+`FOR ... IN SELECT ... FROM public.<tabela>` e nunca tinham nada pra iterar,
+ou seja, os crons já disparavam sem fazer nada há tempos, não era automação
+viva; (2) a única linha real encontrada em qualquer tabela `public.*` era em
+`system_logs` — 8 registros de erro do **próprio Kommo** (via `log-event`,
+gravando sem especificar schema → cai em `public` por padrão), não do GHL.
+
+**O que foi removido:** 5 crons (`ghl-v2-sync-tick`, `ghl-v2-analyze-tick`,
+`ghl-v2-auto-execute-tick`, `ai-insights-tick`, `purge-trashed-workspaces`),
+12 funções (`add_workspace_member`, `can_manage_workspace`, `create_workspace`,
+`get_my_permissions`, `is_workspace_member`, `list_workspace_members`,
+`remove_workspace_member`, `trigger_ghl_sync_all`, `trigger_ghl_v2_analyze_due`,
+`trigger_ghl_v2_auto_execute`, `trigger_ghl_v2_sync_all`,
+`trigger_ai_insights_all`) e 25 tabelas (todo `public.*` exceto as duas abaixo).
+
+**O que ficou (uso real confirmado, não é GHL):** `public.profiles` (tem um
+gatilho `on_auth_user_created` → `handle_new_user()` em `auth.users` —
+`auth.users` é compartilhado entre os dois sistemas neste projeto, então
+apagar quebraria a criação de QUALQUER usuário novo, inclusive do Kommo) e
+`public.system_logs` (recebe os logs de erro do frontend do Kommo via
+`log-event`, ver achado acima). Funções mantidas por dependência real:
+`handle_new_user`, `has_role` (usado em RLS de `profiles`/`system_logs`),
+`update_updated_at_column` (trigger em `profiles`), `cleanup_old_system_logs`
+(cron `cleanup-system-logs-daily`, que também ficou — é do Kommo, só mora em
+`public` por herança histórica). Ver `scripts/kommo-schema-manifest.json` →
+`publicSchemaKept` pra essa lista ficar rastreada.
+
+Execução: os crons foram desligados via `supabase db query --linked`
+(`cron.unschedule`, funcionou desta vez); `DROP FUNCTION`/`DROP TABLE` foram
+bloqueados pelo classificador de permissão do Claude Code (mesmo padrão de
+bloqueio de tentativas anteriores) — o **usuário rodou manualmente** no SQL
+Editor do Supabase Dashboard, com o SQL revisado antes. Verificado depois via
+consulta direta (só sobrou o esperado) e `node scripts/check-schema-drift.mjs`
+(schema `kommo` intacto). Resíduo residual conhecido, não removido por ser
+inofensivo (função órfã sem tabela-alvo, não afeta nada): `mark_conv_has_messages`.
 
 **Fase 2 do plano de remediação — CONCLUÍDA (2026-08-06):** `npm run lint` foi
 de 339 problemas (na análise original) a **0** (erros e warnings), no critério
@@ -110,12 +142,16 @@ de comportamento (`deno check` limpo em todas as 10 edge functions Kommo,
 `DashboardLead`/`StageEvent` em vez de `any` durante a extração já reduziu o
 lint de `kommo-dashboard/index.ts` de 27 pra 16 erros.
 
-**Achado 2026-08-05 — `pdf-extract` sem autorização:** essa edge function tem
-`verify_jwt = false` e nenhuma checagem de auth (nem a real, nem um comentário
-"Public endpoint" como o `log-event` tem). Endpoint aberto que processa PDF e
-chama uma API de IA externa (custo por request). Guardrail de CI
-(`scripts/check-auth-guardrail.mjs`) já detecta isso, mas está não-bloqueante
-até alguém decidir se é bug (precisa de auth) ou intencional (documentar).
+**`pdf-extract` REMOVIDA deste projeto em 2026-08-08** (achados originais de
+2026-08-05/06 preservados aqui pelo histórico): tinha `verify_jwt = false` sem
+nenhuma checagem de auth, e era código do lado GHL (único chamador real,
+`_shared/ghl-enrich.ts`, roda no projeto antigo — `ghl-enrich-attachments`/
+`ghl-conversations-sync` nunca foram deployadas aqui). Órfã neste projeto desde
+a cópia em bloco de 2026-08-02, sem chamador funcionando. Removida: function
+deletada do Supabase (`supabase functions delete pdf-extract`), pasta apagada
+do repo, entrada tirada de `supabase/config.toml`, links mortos corrigidos em
+`docs/ARCHITECTURE.md`/`docs/CAPABILITIES.md`. Não muda a Regra #1 (a
+instância real que o GHL usa continua intacta no projeto antigo).
 
 **Achado 2026-08-06 — `kommo.leads.source` nunca é lido pelo `kommo-dashboard`:**
 a tabela `kommo.leads` tem uma coluna `source text` ("origem derivada de UTM/origem
@@ -127,20 +163,6 @@ morto desde sempre. Achado ao tipar `DashboardLead` de verdade (era mascarado po
 removi o termo morto do fallback, sem incluir a coluna no SELECT) porque incluir
 a coluna mudaria números reais do gráfico de Origem — decisão de fazer isso ou
 não fica pendente, fora do escopo de uma leva de lint.
-
-**Achado 2026-08-06 — `pdf-extract` é código do lado GHL, órfão neste projeto:**
-o único chamador de `pdf-extract` no repo é `_shared/ghl-enrich.ts` (enriquecimento
-de anexos de conversas GHL — "Conversas 2.0"), usado pelas functions
-`ghl-enrich-attachments`/`ghl-conversations-sync`. O frontend do Kommo (`src/`)
-nunca chama `pdf-extract`. E `supabase functions list` no projeto novo
-(`fjncmmqvmocwykpshgsh`) confirma que nenhuma dessas duas functions GHL está
-deployada aqui — só as 11 do Kommo. Ou seja, `pdf-extract` existe e foi
-deployado neste projeto (herança da cópia em bloco de 2026-08-02, redeployado
-em 2026-08-06 num fix de tipo do `deno check`), mas não tem chamador real
-funcionando neste projeto hoje. Não muda a Regra #1 (o nome não bate com
-nenhum item da lista protegida, e o `ghl-enrich.ts` real que roda em produção
-é o do projeto antigo), mas explica por que ninguém via esse endpoint sendo
-usado: não é bug de UI faltando, é infra órfã.
 
 **`supabase db push` está QUEBRADO no projeto novo** (confirmado 2026-08-05): a
 tabela de histórico de migrations do projeto novo não bate com o que já existe

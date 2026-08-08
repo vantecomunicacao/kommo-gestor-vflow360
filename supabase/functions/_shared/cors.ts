@@ -15,7 +15,7 @@ export const corsHeadersBase = {
   "Access-Control-Allow-Headers": BASE_ALLOW_HEADERS,
 };
 
-/** kommo-actions, kommo-ai-analyze, kommo-manage, kommo-report-snapshot, cooling-leads, kommo-dashboard, pdf-extract. */
+/** kommo-actions, kommo-ai-analyze, kommo-manage, kommo-report-snapshot, cooling-leads, kommo-dashboard. */
 export const corsHeadersExtended = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": EXTENDED_ALLOW_HEADERS,

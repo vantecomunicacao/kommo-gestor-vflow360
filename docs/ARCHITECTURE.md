@@ -23,8 +23,7 @@ O sistema está **migrado para o Kommo** e opera como um **painel de gestão/ana
   análise de IA sob demanda, relatório mês a mês com snapshots.
 - **Edge functions vivas (schema `kommo`):** `kommo-sync`, `kommo-manage`,
   `kommo-dashboard`, `kommo-report-snapshot`, `kommo-actions`, `kommo-ai-analyze`,
-  `cooling-leads`, `kommo-admin-bootstrap`, `kommo-admin-users`, `log-event`,
-  `pdf-extract`.
+  `cooling-leads`, `kommo-admin-bootstrap`, `kommo-admin-users`, `log-event`.
 - **Fora do produto (Fase 2, ver `ROADMAP_FASE2_COPILOTO.md`):** o **copiloto de IA**
   (Sugestões, Conversas, Analista) e a observabilidade (Logs/Sistema). O schema `kommo`
   **não tem** conversations/messages/suggestions/ai_config — a IA por conversa depende
@@ -163,7 +162,7 @@ para as novas functions reusarem sem clonar).
 | [`admin-bootstrap`](../supabase/functions/admin-bootstrap/index.ts) | Primeiro usuário vira admin |
 | [`admin-users`](../supabase/functions/admin-users/index.ts) | Gestão de usuários |
 | [`log-event`](../supabase/functions/log-event/index.ts) | Front grava em `system_logs` (observabilidade) |
-| [`pdf-extract`](../supabase/functions/pdf-extract/index.ts) | Extrai texto de PDF (mídia → IA) |
+| `pdf-extract` | Extrai texto de PDF (mídia → IA) — removida deste repo em 2026-08-08 (órfã aqui, sem chamador real; a instância que o GHL usa de verdade roda no projeto antigo) |
 
 ### Código compartilhado — [`_shared/`](../supabase/functions/_shared/)
 `error-reporter.ts` · `ghl-enrich.ts` · `ghl-sync.ts` · `media-extractor.ts` · `webhook-hmac.ts`

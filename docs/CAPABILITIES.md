@@ -70,7 +70,7 @@ do Kommo — ver `ROADMAP_FASE2_COPILOTO.md`. O schema `kommo` não tem conversa
 - **Input:** anexo (áudio/imagem/PDF) · **Output:** `enriched_body` na mensagem
 - **Efeitos:** o conteúdo da mídia vira texto que a IA consegue ler
 - **Custo:** **LLM/transcrição** (chave de IA do workspace) · **Tipo:** IA (auxiliar)
-- **Código:** [`_shared/ghl-enrich.ts`](../supabase/functions/_shared/ghl-enrich.ts) · [`pdf-extract`](../supabase/functions/pdf-extract/index.ts)
+- **Código:** [`_shared/ghl-enrich.ts`](../supabase/functions/_shared/ghl-enrich.ts) · `pdf-extract` (removida deste repo 2026-08-08 — era órfã aqui; a instância real do GHL roda no projeto antigo)
 
 ## C. Decisão da IA (o "Cérebro")
 

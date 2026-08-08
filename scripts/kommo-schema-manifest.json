@@ -43,6 +43,12 @@
   "kommoOwnedCrons": [
     "kommo-report-snapshot-daily",
     "kommo-sync-full-daily",
-    "kommo-sync-tick"
-  ]
+    "kommo-sync-tick",
+    "cleanup-system-logs-daily"
+  ],
+  "publicSchemaKept": {
+    "_comment": "2026-08-08: schema public deste projeto era resíduo do GHL v2 (27 tabelas + 17 funções + 6 crons, achado 2026-08-05), removido — ver CLAUDE.md > 'Limpeza do schema public'. Só sobrou o que é usado de verdade (gatilho de auth compartilhado + log de erro do próprio Kommo). Não confundir com o schema kommo acima.",
+    "tables": ["profiles", "system_logs"],
+    "functions": ["handle_new_user", "has_role", "update_updated_at_column", "cleanup_old_system_logs"]
+  }
 }

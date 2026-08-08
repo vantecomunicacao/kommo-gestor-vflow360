@@ -49,11 +49,9 @@ jobs:
             deno check "$dir/index.ts"
           done
       - name: Auth guardrail (verify_jwt=false ⇒ alguma autorização explícita)
-        # Não-bloqueante por enquanto: achado real pendente em pdf-extract
-        # (verify_jwt=false sem nenhuma checagem) — decisão de correção fica
-        # pra fora desta configuração de CI. Remover `continue-on-error`
-        # quando resolvido.
-        continue-on-error: true
+        # Bloqueante desde 2026-08-08: a única pendência (pdf-extract, sem
+        # nenhuma checagem de auth) foi removida junto com a function — ver
+        # CLAUDE.md.
         run: node scripts/check-auth-guardrail.mjs
       - name: Unit tests (Deno)
         # Runner separado do vitest (que só enxerga src/). Lista de paths
