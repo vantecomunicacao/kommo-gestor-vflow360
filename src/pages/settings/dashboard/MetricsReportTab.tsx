@@ -13,8 +13,9 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   CustomMetric, MAX_CUSTOM_METRICS, MAX_STAGE_REFS_PER_SIDE, StageRef,
   stageRefKey, CUSTOM_METRIC_ICONS, DEFAULT_CUSTOM_METRIC_ICON, getCustomMetricIcon,
-  formatCustomMetricValue,
+  formatCustomMetricValue, CUSTOM_METRIC_COLORS, DEFAULT_CUSTOM_METRIC_COLOR,
 } from "@/lib/custom-metrics";
+import { cn } from "@/lib/utils";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
@@ -147,7 +148,7 @@ export default function MetricsReportTab({
     if (customMetrics.length >= MAX_CUSTOM_METRICS) return;
     setCustomMetrics((prev) => [...prev, {
       id: crypto.randomUUID(), name: "", format: "percent", icon: DEFAULT_CUSTOM_METRIC_ICON,
-      numerator: [], denominator: [], reportVisible: true,
+      color: DEFAULT_CUSTOM_METRIC_COLOR, numerator: [], denominator: [], reportVisible: true,
     }]);
   };
   const removeCustomMetric = (id: string) => setCustomMetrics((prev) => prev.filter((m) => m.id !== id));
@@ -279,6 +280,39 @@ export default function MetricsReportTab({
                 />
                 Aparece no Relatório (tendência mensal, além do Dashboard ao vivo)
               </label>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Cor do card</Label>
+                <div className="flex items-center gap-2">
+                  {Object.entries(CUSTOM_METRIC_COLORS).map(([key, { label }]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      title={label}
+                      aria-label={label}
+                      aria-pressed={(m.color || DEFAULT_CUSTOM_METRIC_COLOR) === key}
+                      onClick={() => patchCustomMetric(m.id, { color: key as CustomMetric["color"] })}
+                      className={cn(
+                        "h-6 w-6 rounded-full border-2 transition-transform",
+                        key === "accent" && "bg-accent",
+                        key === "success" && "bg-success",
+                        key === "warning" && "bg-warning",
+                        key === "destructive" && "bg-destructive",
+                        (m.color || DEFAULT_CUSTOM_METRIC_COLOR) === key
+                          ? "border-foreground scale-110"
+                          : "border-transparent opacity-60 hover:opacity-100",
+                      )}
+                    />
+                  ))}
+                  <span className="text-xs text-muted-foreground">
+                    {CUSTOM_METRIC_COLORS[m.color || DEFAULT_CUSTOM_METRIC_COLOR].label}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Escolha manual — não é calculado. Use vermelho pra métricas onde um número alto é ruim
+                  (ex.: Taxa de No Show).
+                </p>
+              </div>
 
               {/* Numerador: sempre "passaram por" */}
               <div className="space-y-1.5">

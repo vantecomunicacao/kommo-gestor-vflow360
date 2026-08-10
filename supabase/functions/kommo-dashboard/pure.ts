@@ -235,3 +235,25 @@ export function countPassedThrough(
   }
   return n;
 }
+
+export interface StageRefLabel { pipelineName: string; stageName: string; }
+
+/**
+ * Resolve pares (funil, etapa) pra nomes legíveis — usado pro card de Métrica
+ * Personalizada mostrar de onde ela vem (ex.: "Comercial: Agendamento"), já
+ * que o numerador/denominador podem misturar etapas de funis diferentes.
+ */
+export function describeStageRefs(
+  pipelines: Array<{ kommo_id: string; name: string; statuses: KommoStatus[] | null }>,
+  refs: { pipelineId: string; statusId: string }[],
+): StageRefLabel[] {
+  const pipelineById = new Map(pipelines.map((p) => [p.kommo_id, p]));
+  return refs.map((r) => {
+    const pipeline = pipelineById.get(r.pipelineId);
+    const stage = pipeline?.statuses?.find((s) => s.id === r.statusId);
+    return {
+      pipelineName: pipeline?.name ?? r.pipelineId,
+      stageName: stage?.name ?? r.statusId,
+    };
+  });
+}

@@ -22,6 +22,7 @@ import {
   computeTimePerStage as computeTimePerStagePure,
   countCurrentlyIn as countCurrentlyInPure,
   countPassedThrough as countPassedThroughPure,
+  describeStageRefs,
 } from "./pure.ts";
 
 interface DashboardSettingsRow {
@@ -586,9 +587,15 @@ serve(async (req) => {
     const customMetricsConfig = customMetricsParsed.success ? customMetricsParsed.data : [];
     const customMetrics = customMetricsConfig.map((m) => {
       const passed = countPassedThroughPure(leads, eventsByLead, m.numerator);
-      if (m.format === "number") return { id: m.id, name: m.name, format: m.format, icon: m.icon, value: passed };
+      // Nomes de funil/etapa por trás do numerador/denominador — o card no
+      // Dashboard usa isso pra mostrar de onde a métrica vem (útil quando ela
+      // mistura etapas de funis diferentes, algo permitido pelo schema).
+      const numeratorRefs = describeStageRefs(allPipelines, m.numerator);
+      const denominatorRefs = describeStageRefs(allPipelines, m.denominator);
+      const common = { id: m.id, name: m.name, format: m.format, icon: m.icon, color: m.color, numeratorRefs, denominatorRefs };
+      if (m.format === "number") return { ...common, value: passed };
       const base = countCurrentlyInPure(leads, m.denominator);
-      return { id: m.id, name: m.name, format: m.format, icon: m.icon, value: base > 0 ? (passed / base) * 100 : null };
+      return { ...common, value: base > 0 ? (passed / base) * 100 : null };
     });
 
     return new Response(JSON.stringify({

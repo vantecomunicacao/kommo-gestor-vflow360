@@ -2,9 +2,15 @@ import { useCallback, useEffect, useMemo } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import type { StageRefLabel } from "@/lib/custom-metrics";
 
 export interface StageLead { id: number; name: string; contactName?: string | null; }
-export interface CustomMetricResult { id: string; name: string; format: "percent" | "number"; icon?: string; value: number | null; }
+export interface CustomMetricResult {
+  id: string; name: string; format: "percent" | "number"; icon?: string; value: number | null;
+  color?: "accent" | "success" | "warning" | "destructive";
+  numeratorRefs?: StageRefLabel[];
+  denominatorRefs?: StageRefLabel[];
+}
 export interface FunnelStage { id: string; name: string; count: number; currentCount?: number; leads?: StageLead[]; }
 export interface Seller {
   id?: string;

@@ -65,11 +65,16 @@ const CUSTOM_METRIC_ICON_KEYS = [
   "sparkles", "star", "repeat", "gauge", "clock", "trending-up", "percent", "users",
   "target", "award", "heart", "zap", "phone", "calendar", "thumbs-up", "message-circle",
 ] as const;
+// Mesma lista de src/lib/custom-metrics.ts (CUSTOM_METRIC_COLOR_KEYS) — cor
+// manual escolhida por quem configura (ex.: "Taxa de No Show" em vermelho),
+// não calculada a partir de threshold/meta.
+const CUSTOM_METRIC_COLOR_KEYS = ["accent", "success", "warning", "destructive"] as const;
 export const CustomMetricSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1).max(60),
   format: z.enum(["percent", "number"]),
   icon: z.enum(CUSTOM_METRIC_ICON_KEYS).catch("sparkles"),
+  color: z.enum(CUSTOM_METRIC_COLOR_KEYS).catch("accent").default("accent"),
   numerator: z.array(stageRef).min(1).max(3),
   denominator: z.array(stageRef).max(3),
   // Também aparece no Relatório (coorte mensal), não só no Dashboard ao vivo —

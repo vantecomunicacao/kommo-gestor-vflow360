@@ -32,7 +32,9 @@ import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
 import { FunnelVelocity } from "@/components/dashboard/FunnelVelocity";
-import { formatCustomMetricValue, getCustomMetricIcon } from "@/lib/custom-metrics";
+import {
+  formatCustomMetricValue, getCustomMetricIcon, customMetricPipelineSummary, customMetricTooltip,
+} from "@/lib/custom-metrics";
 import { FollowUpCard } from "@/components/dashboard/FollowUpCard";
 import { DashboardSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { ErrorState } from "@/components/dashboard/ErrorState";
@@ -313,9 +315,10 @@ export default function Dashboard() {
                 key={m.id}
                 title={m.name}
                 value={formatCustomMetricValue(m.value, m.format)}
+                subtitle={customMetricPipelineSummary(m.numeratorRefs, m.denominatorRefs)}
                 icon={getCustomMetricIcon(m.icon)}
-                variant="accent"
-                tooltip="Métrica que você criou para o seu negócio, configurável em Personalizar."
+                variant={m.color || "accent"}
+                tooltip={customMetricTooltip(m)}
               />
             ))}
           </div>
@@ -349,9 +352,10 @@ export default function Dashboard() {
                   key={m.id}
                   title={m.name}
                   value={formatCustomMetricValue(m.value, m.format)}
+                  subtitle={customMetricPipelineSummary(m.numeratorRefs, m.denominatorRefs)}
                   icon={getCustomMetricIcon(m.icon)}
-                  variant="accent"
-                  tooltip="Métrica que você criou para o seu negócio, configurável em Personalizar."
+                  variant={m.color || "accent"}
+                  tooltip={customMetricTooltip(m)}
                 />
               ))}
             </div>

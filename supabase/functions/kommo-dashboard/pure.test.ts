@@ -2,7 +2,7 @@ import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
 import {
   extractCf, extractCfDate, extractCfValues, inferFunnelMapping, type KommoStatus,
   safeRate, isWonLead, stageBucket, buildDist, cycleDays, computeTimePerStage,
-  countCurrentlyIn, countPassedThrough,
+  countCurrentlyIn, countPassedThrough, describeStageRefs,
   type Bucket, type BucketResolver, type DashboardLead, type StageEvent,
 } from "./pure.ts";
 
@@ -210,6 +210,27 @@ Deno.test("countPassedThrough - conta quem está atualmente na etapa OU passou p
   ]);
   assertEquals(countPassedThrough(leads, eventsByLead, [{ pipelineId: "P1", statusId: "20" }]), 1);
   assertEquals(countPassedThrough(leads, eventsByLead, [{ pipelineId: "P1", statusId: "999" }]), 0);
+});
+
+Deno.test("describeStageRefs - resolve nomes de funil e etapa a partir dos ids", () => {
+  const pipelines = [
+    { kommo_id: "P1", name: "Comercial", statuses: [{ id: "20", name: "Agendamento" }] },
+    { kommo_id: "P2", name: "Reativação", statuses: [{ id: "30", name: "Agendamento" }] },
+  ];
+  const out = describeStageRefs(pipelines, [
+    { pipelineId: "P1", statusId: "20" },
+    { pipelineId: "P2", statusId: "30" },
+  ]);
+  assertEquals(out, [
+    { pipelineName: "Comercial", stageName: "Agendamento" },
+    { pipelineName: "Reativação", stageName: "Agendamento" },
+  ]);
+});
+
+Deno.test("describeStageRefs - funil ou etapa não encontrados caem no id bruto (não quebra)", () => {
+  const pipelines = [{ kommo_id: "P1", name: "Comercial", statuses: [{ id: "20", name: "Agendamento" }] }];
+  const out = describeStageRefs(pipelines, [{ pipelineId: "P9", statusId: "99" }]);
+  assertEquals(out, [{ pipelineName: "P9", stageName: "99" }]);
 });
 
 Deno.test("countPassedThrough - refs vazio devolve 0 sem iterar", () => {

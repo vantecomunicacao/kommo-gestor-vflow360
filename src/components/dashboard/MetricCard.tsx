@@ -9,7 +9,7 @@ interface MetricCardProps {
   subtitle?: string;
   icon: LucideIcon;
   trend?: { value: number; isPositive: boolean };
-  variant?: "default" | "accent" | "success" | "warning";
+  variant?: "default" | "accent" | "success" | "warning" | "destructive";
   tooltip?: string;
   className?: string;
 }
@@ -22,6 +22,16 @@ export function MetricCard({
     accent: "bg-accent/10 text-accent-foreground",
     success: "bg-success/10 text-success",
     warning: "bg-warning/10 text-warning-ink",
+    destructive: "bg-destructive/10 text-destructive",
+  };
+  // Só tinge o valor quando a cor carrega um julgamento (bom/ruim/atenção) —
+  // "accent"/"default" ficam com a cor de texto padrão, sem destaque.
+  const valueColorVariants = {
+    default: "",
+    accent: "",
+    success: "text-success",
+    warning: "text-warning-ink",
+    destructive: "text-destructive",
   };
 
   return (
@@ -34,7 +44,7 @@ export function MetricCard({
         {tooltip && <SectionTooltip text={tooltip} />}
       </div>
       <div className="flex items-baseline gap-2 mt-2 min-w-0">
-        <p className="metric-value truncate">{value}</p>
+        <p className={cn("metric-value truncate", valueColorVariants[variant])}>{value}</p>
         {trend && (
           <TooltipProvider delayDuration={200}>
             <Tooltip>
