@@ -1,4 +1,4 @@
-import { LayoutDashboard, Plug, Settings, LogOut, ShieldCheck, Snowflake, BarChart3 } from "lucide-react";
+import { LayoutDashboard, Plug, Settings, LogOut, ShieldCheck, Snowflake, BarChart3, NotebookPen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
@@ -39,10 +39,11 @@ export function AppSidebar() {
   // Fase 1 (produto de analytics Kommo): copiloto de IA (Analista/Conversas/
   // Sugestões) e observabilidade (Sistema/Logs) ficam fora do menu até a Fase 2.
   // Ver docs/ROADMAP_FASE2_COPILOTO.md.
-  const navItems: { title: string; url: string; icon: typeof LayoutDashboard; show: boolean; end?: boolean }[] = [
+  const navItems: { title: string; url: string; icon: typeof LayoutDashboard; show: boolean; end?: boolean; badge?: string }[] = [
     { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: gestor },
     { title: "Relatórios", url: "/relatorios", icon: BarChart3, show: gestor },
     { title: "Leads esfriando", url: "/leads-esfriando", icon: Snowflake, show: viewSuggestions || isAdmin },
+    { title: "Anotações", url: "/anotacoes", icon: NotebookPen, show: gestor, badge: "beta" },
     { title: "Integrações", url: "/integrations", icon: Plug, show: viewIntegrations },
     { title: "Admin", url: "/admin", icon: ShieldCheck, show: isAdmin },
   ].filter((i) => i.show);
@@ -102,7 +103,16 @@ export function AppSidebar() {
                       activeClassName="bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-sm hover:bg-sidebar-primary hover:text-sidebar-primary-foreground"
                     >
                       <item.icon className="w-5 h-5 shrink-0 transition-colors" />
-                      {!collapsed && <span>{item.title}</span>}
+                      {!collapsed && (
+                        <span className="flex items-center gap-1.5">
+                          {item.title}
+                          {item.badge && (
+                            <span className="rounded-full bg-sidebar-accent px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-sidebar-accent-foreground/80">
+                              {item.badge}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

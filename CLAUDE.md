@@ -368,6 +368,32 @@ Kommo, porque ele é compartilhado com produção viva do GHL.
 > lista na MESMA alteração**, anotando a data e a migration responsável. Esta
 > lista é a fonte de verdade — não deixe ela divergir do banco.
 >
+- 2026-08-10 (`20260810170000_kommo_workspace_notes.sql`): **nova tabela**
+  `kommo.workspace_notes` — página "Anotações" (`/anotacoes`, fora de
+  `/settings/*`), bloco de notas mensal para o usuário registrar o que foi
+  combinado/observado na reunião mensal (pontos bons/ruins), sem nenhuma
+  relação com dashboard/relatório/leads — feature isolada, fase de teste.
+  Colunas: `title`, `content jsonb` (doc do editor rich text Tiptap, novo em
+  `package.json`: `@tiptap/react`/`@tiptap/pm`/`@tiptap/starter-kit`),
+  `reference_month date` (mês da reunião, sempre dia 1 — permite mais de uma
+  nota por mês). CRUD direto do frontend via `supabase-js`/RLS (mesmo padrão
+  de `kommo.dashboard_settings`: membros leem/inserem/atualizam/excluem,
+  service_role tudo), sem edge function. Aditiva; RLS nova por `workspace_id`.
+  _(APLICADA em prod 2026-08-10 via `supabase db push --linked`; `types.ts`
+  regenerado; `deno check` n/a — não toca em edge functions.)_ **Bug achado e
+  corrigido no mesmo dia** (usuário reportou "não está sendo possível
+  salvar"): a FK original de `created_by` apontava pra `kommo.profiles(id)`,
+  mas essa coluna é um uuid próprio da tabela (o vínculo com o usuário logado
+  é via `profiles.user_id`) — o frontend grava `auth.users.id` (o `user.id`
+  real da sessão), então todo insert violava a constraint. Corrigido em
+  `20260810180000_kommo_workspace_notes_fix_created_by_fk.sql` (dropa a FK;
+  `created_by` vira coluna solta, mesmo padrão de
+  `kommo.dashboard_analyses.user_id`). Também nesta leva: o editor rico
+  (Tiptap, classes `prose`) não aplicava tamanho visual de título (H2/H3) —
+  `@tailwindcss/typography` já estava como dependência no `package.json` mas
+  nunca tinha sido registrado no array `plugins` de `tailwind.config.ts`;
+  adicionado.
+
 > **Verificação mecânica (Fase 0, 2026-08-06):** `node scripts/check-schema-drift.mjs`
 > compara essa lista (espelhada em `scripts/kommo-schema-manifest.json`, junto com
 > funções/RPCs e os 3 crons do Kommo) contra o banco real, via `supabase db query
@@ -402,6 +428,7 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.dashboard_analyses` | Histórico das análises de IA sob demanda do Dashboard (prompt + params + resultado + custo) |
 | `kommo.ai_provider_config` | Chave OpenAI/modelo por usuário (tela Configurações › IA) — antes gravava no public/GHL e falhava |
 | `kommo.tasks` | Tarefas do CRM Kommo (prazo, responsável, concluída) — base de "tarefas atrasadas" por vendedor. Criada em `20260626130000_kommo_tasks.sql`, que também adiciona `kommo.leads.closest_task_at` |
+| `kommo.workspace_notes` | Bloco de notas mensal do usuário (ata de reunião: pontos bons/ruins, combinados) — sem relação com métricas/leads, só texto livre (rich text, doc JSON do Tiptap). `created_by` é `auth.users.id` solto (sem FK — ver changelog 2026-08-10). Criada em `20260810170000_kommo_workspace_notes.sql` |
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 

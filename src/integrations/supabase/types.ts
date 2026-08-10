@@ -946,6 +946,47 @@ export type Database = {
           },
         ]
       }
+      workspace_notes: {
+        Row: {
+          content: Json
+          created_at: string
+          created_by: string | null
+          id: string
+          reference_month: string
+          title: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          content?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reference_month: string
+          title?: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          content?: Json
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          reference_month?: string
+          title?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_notes_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           ai_analysis_enabled: boolean

@@ -39,6 +39,7 @@ const Integrations = lazy(() => import("./pages/Integrations"));
 const AccountSettings = lazy(() => import("./pages/settings/AccountSettings"));
 const AiSettings = lazy(() => import("./pages/settings/AiSettings"));
 const DashboardSettings = lazy(() => import("./pages/settings/DashboardSettings"));
+const Notes = lazy(() => import("./pages/Notes"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Admin = lazy(() => import("./pages/Admin"));
 // Rotas do copiloto de IA (Sugestões, Conversas, Analista) e de observabilidade
@@ -73,6 +74,7 @@ const App = () => (
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
                 <Route path="/dashboard" element={<GestorGuard>{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</GestorGuard>} />
                 <Route path="/relatorios" element={<GestorGuard>{lazyRoute(<Reports />, <GenericPageSkeleton />)}</GestorGuard>} />
+                <Route path="/anotacoes" element={<GestorGuard>{lazyRoute(<Notes />, <GenericPageSkeleton />)}</GestorGuard>} />
                 <Route
                   path="/leads-esfriando"
                   element={<PermissionGuard require="viewSuggestions">{lazyRoute(<CoolingLeads />, <GenericPageSkeleton />)}</PermissionGuard>}

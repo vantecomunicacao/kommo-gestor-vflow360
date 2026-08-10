@@ -21,6 +21,7 @@
     "user_roles",
     "users",
     "workspace_members",
+    "workspace_notes",
     "workspaces"
   ],
   "functions": [
