@@ -67,6 +67,7 @@ interface SellerAgg {
   propostaEnviada: number;
   fechamento: number;
   vendaGanha: number;
+  lost: number;
   wonRevenue: number;
   avgResponseMinutes: number | null;
   responseCount: number;
@@ -466,13 +467,13 @@ serve(async (req) => {
 
     // ===== Sellers =====
     const sellersMap = new Map<string, SellerAgg>();
-    for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
+    for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
     for (const l of leads) {
       const b = stageBucket(l.pipeline_id, l.status_id);
       if (!b) continue;
       const key = l.responsible_user_id || "__unassigned__";
       let s = sellersMap.get(key);
-      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
+      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
       if (b === "contato_inicial") s.contatoInicial++;
       else if (b === "proposta_enviada") s.propostaEnviada++;
       else if (b === "fechamento") s.fechamento++;
@@ -484,7 +485,16 @@ serve(async (req) => {
       const s = sellersMap.get(key);
       if (s) s.wonRevenue += Number(l.price) || 0;
     }
-    const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha > 0);
+    // Perdidos por vendedor — coluna à parte (não soma em Contato Inicial nem no
+    // "Total de Leads" acima), já que o status "perdido" não resolve pra nenhuma
+    // etapa via stageBucket (ver loop anterior, `if (!b) continue`).
+    for (const l of lostOpps) {
+      const key = l.responsible_user_id || "__unassigned__";
+      let s = sellersMap.get(key);
+      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
+      s.lost++;
+    }
+    const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha + s.lost > 0);
 
     // ===== Origem / UTM =====
     const origem = buildDist(getOrigin, leads);

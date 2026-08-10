@@ -35,12 +35,14 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
     conversionRates.fechamentoToVenda,
   ];
 
+  // "Contato Inicial" (funnelStages[0]) já SOMA os leads perdidos desde a mudança
+  // que os inclui nessa etapa no backend (kommo-dashboard/index.ts) — ou seja,
+  // `topPassage` já é o total de leads que entraram no funil no período, perdidos
+  // inclusos. Dividir `lostLeads` de novo por (topPassage + lostLeads), como era
+  // antes dessa mudança, contava os perdidos duas vezes e subestimava a taxa pela
+  // metade (ex.: 291 perdidos em 409 leads dava 41,6% em vez dos 71,1% reais).
   const topPassage = funnelStages[0]?.count ?? 0;
-  // Total de leads que entraram no funil no período = os que seguem vivos/ganharam
-  // (topPassage) + os perdidos. Dividir só por topPassage (como era antes) inflava
-  // a taxa acima de 100% quando havia mais perdas do que leads em aberto no topo.
-  const totalEnteredFunnel = topPassage + lostLeads;
-  const lostPercentage = totalEnteredFunnel > 0 ? (lostLeads / totalEnteredFunnel) * 100 : 0;
+  const lostPercentage = topPassage > 0 ? (lostLeads / topPassage) * 100 : 0;
 
   // Tapering widths to keep the funnel feel without trapezoidal shapes
   const stageWidths = ["w-full", "w-[92%]", "w-[80%]", "w-[66%]"];

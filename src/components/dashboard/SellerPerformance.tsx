@@ -56,8 +56,8 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
           Performance por Vendedor
           <SectionTooltip text={
             interactive
-              ? "Comparativo entre vendedores: total de leads e oportunidades atribuídas por etapa, e taxa de conversão. Clique em uma linha para filtrar o dashboard inteiro por esse vendedor."
-              : "Comparativo entre vendedores: total de leads e oportunidades atribuídas por etapa, e taxa de conversão."
+              ? "Comparativo entre vendedores: total de leads e oportunidades atribuídas por etapa, taxa de conversão e leads perdidos (coluna à parte, não soma no total). Clique em uma linha para filtrar o dashboard inteiro por esse vendedor."
+              : "Comparativo entre vendedores: total de leads e oportunidades atribuídas por etapa, taxa de conversão e leads perdidos (coluna à parte, não soma no total)."
           } />
         </h2>
         <div className="flex items-center gap-3 ml-auto">
@@ -97,6 +97,7 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
               <th className="text-center">Fechamento</th>
               <th className="text-center">Venda Ganha</th>
               <th className="text-center">Taxa Conversão</th>
+              <th className="text-center">Perdidos</th>
             </tr>
           </thead>
           <tbody>
@@ -146,12 +147,15 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
                     <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-4/10 text-funnel-4-ink rounded-lg font-bold text-sm">{s.vendaGanha}</span>
                   </td>
                   <td className="text-center"><span className="font-bold text-primary-ink">{rate}%</span></td>
+                  <td className="text-center">
+                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-destructive/10 text-destructive rounded-lg font-bold text-sm">{s.lost ?? 0}</span>
+                  </td>
                 </tr>
               );
             })}
             {visibleSellers.length === 0 && (
               <tr>
-                <td colSpan={8} className="text-center text-muted-foreground py-8 text-sm">
+                <td colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
                   Nenhum vendedor encontrado para "{query}".
                 </td>
               </tr>

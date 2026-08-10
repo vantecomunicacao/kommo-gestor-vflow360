@@ -26,6 +26,8 @@ export interface Seller {
   propostaEnviada: number;
   fechamento: number;
   vendaGanha: number;
+  /** Leads perdidos atribuídos a este vendedor no período — coluna à parte, não soma nas etapas acima. */
+  lost?: number;
   wonRevenue?: number;
   avgResponseMinutes?: number | null;
   responseCount?: number;
