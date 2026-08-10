@@ -18,12 +18,22 @@ abaixo — leia com atenção:
 | Coolify (`kommo-gestor-vflow360-prod`) | ✅ builda apontando pra cá | — |
 | Pode escrever? | Sim, é o produto vivo | **Só leitura**, exceto o que a Regra #1 abaixo permitir |
 
-**Pendência conhecida:** o projeto antigo ainda guarda os dados originais do
-Kommo (leads/contacts/workspaces pré-migração) e 3 crons `kommo-*` que foram só
-**pausados** (não apagados) em 2026-08-02, aguardando o usuário migrar
-manualmente o restante dos workspaces pro projeto novo. Só desligar
-(`cron.unschedule`) ou remover algo do lado Kommo desse projeto antigo com
-autorização explícita — mesmo sendo "nosso", é código morto pendente, não órfão.
+**Migração de workspaces legados: DESCONTINUADA (decisão de 2026-08-10).** O
+projeto antigo guarda os dados originais do Kommo (leads/contacts/workspaces
+pré-migração), mas o usuário decidiu que ele **não tem mais relação com o
+projeto novo** — não vai migrar o restante dos workspaces manualmente. Isso foi
+confirmado tecnicamente na mesma data: nenhuma function do projeto novo
+(`fjncmmqvmocwykpshgsh`) referencia a URL do projeto antigo. Os 3 crons
+`kommo-*` que ficaram **pausados** (não apagados) em 2026-08-02
+(`kommo-report-snapshot-daily`, `kommo-sync-full-daily`, `kommo-sync-tick`)
+estão pendentes de remoção definitiva (`cron.unschedule` + eventual `DROP`),
+aguardando o usuário rodar uma consulta de leitura no SQL Editor do projeto
+antigo (as credenciais desse projeto foram removidas do `.env` de propósito —
+Regra #1) pra confirmar o conteúdo exato antes de gerar o SQL de remoção.
+Enquanto pausados, risco real é zero (não afetam nada, o projeto novo é
+independente); não desligar/remover algo do lado Kommo desse projeto antigo
+sem autorização explícita — mesmo sendo "nosso", é código morto pendente, não
+órfão.
 
 **Achado 2026-08-05, RESOLVIDO 2026-08-08 — o schema `public` (GHL v2) foi
 removido deste projeto.** O achado original: o schema `public` desse projeto
@@ -167,14 +177,24 @@ havia motivo pra terminar a funcionalidade. Removida a coluna (migration
 `supabase db query --linked`) e o `source: null` morto no `kommo-sync`
 (redeployado). `types.ts` regenerado.
 
-**`supabase db push` está QUEBRADO no projeto novo** (confirmado 2026-08-05): a
-tabela de histórico de migrations do projeto novo não bate com o que já existe
-no banco (herança da replicação em bloco de 2026-08-02), então `db push` tenta
-reaplicar migrations antigas do zero — inclusive coisas do schema `public`/GHL
-que nem deveriam estar aqui — e quebra em `relation already exists`. **Não usar
-`db push` neste projeto.** Para aplicar uma migration nova, rodar o SQL direto
-via `supabase db query --linked "<SQL>"` (mesmo padrão já usado em várias
-migrations do changelog abaixo).
+**`supabase db push` estava QUEBRADO no projeto novo — CONSERTADO em
+2026-08-10.** Causa raiz confirmada: a tabela de histórico de migrations
+(`supabase_migrations.schema_migrations`) parou de ser atualizada em
+2026-06-15 (herança da replicação em bloco de 2026-08-02), mas as 31
+migrations `kommo_*` seguintes (17/jun a 08/ago) continuaram sendo aplicadas
+manualmente via `supabase db query --linked` sem nunca registrar isso na
+tabela de histórico — então `db push` achava que precisava reaplicar tudo do
+zero e quebrava em `relation already exists`. Auditoria em 2026-08-10 verificou
+o conteúdo real (não só a existência) de todas as 31 migrations não
+registradas — tabelas, colunas, funções, índices e triggers de cada uma foram
+checados um a um contra o banco de produção, todos batendo — antes de rodar
+`supabase migration repair --status applied --linked <31 versões>` (comando
+que só corrige a tabela de histórico; não executa SQL nenhum). Validado com
+`supabase migration list --linked` (todo `local`/`remote` batendo) e
+`supabase db push --linked --dry-run` (`"Remote database is up to date"`).
+**`db push` volta a funcionar normalmente pra migrations novas** — não é mais
+necessário aplicar na mão via `db query --linked`, embora esse caminho continue
+válido como alternativa se preferir.
 
 ## Regras invioláveis
 
@@ -293,9 +313,9 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   `trigger_report_snapshot_all()` trocando `'months', 12` por `'months', 24`.
   Motivo: a comparação "Comparar com: mesmo mês, ano passado" (YoY) no
   Relatório precisa que exista o mês 12 meses antes de cada mês exibido —
-  com janela de 12 meses isso nunca tinha base. **NÃO aplicada em produção
-  ainda** (pendente de `supabase db query --linked` + confirmação do
-  usuário, mesmo padrão das migrations anteriores desse cron).
+  com janela de 12 meses isso nunca tinha base. **APLICADA em produção**
+  (confirmado por auditoria direta em 2026-08-10: `trigger_report_snapshot_all()`
+  já roda com `'months', 24`; a doc estava desatualizada dizendo o contrário).
 - `20260805130000_kommo_cron_url_drift_fix.sql` — recria as 3 funções de cron
   (`trigger_sync_all`, `trigger_sync_all_full`, `trigger_report_snapshot_all`)
   só pra recapturar a URL/anon key do projeto novo (`fjncmmqvmocwykpshgsh`).
@@ -389,10 +409,10 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
   `lead_stage_events` passou de teto por CONTAGEM (1.500, imprevisível) pra teto
   por DATA (24 meses, alinhado com `REPORT_SNAPSHOT_MONTHS`), com aviso em
   `sync_status.last_sync_warning` quando mesmo essa janela não couber numa
-  passada (antes não avisava nada). Aditiva; sem mudança de RLS. **NÃO aplicada
-  em produção ainda** — rollout precisa ser em ordem (fix do sync → deixar rodar
-  1 ciclo → só então aplicar esta migration), pra não travar dado que ainda ia
-  melhorar no dia seguinte; pendente de confirmação do usuário em cada etapa.
+  passada (antes não avisava nada). Aditiva; sem mudança de RLS. **APLICADA em
+  produção** (confirmado por auditoria direta em 2026-08-10: colunas `locked`/
+  `locked_at` já existem em `kommo.report_snapshots`; a doc estava desatualizada
+  dizendo o contrário — o rollout faseado descrito abaixo já foi concluído).
 - 2026-08-05 (`20260805130000_kommo_cron_url_drift_fix.sql`): sem mudança
   estrutural — corrige divergência repo-vs-banco nas 3 funções de cron (ver
   entrada na seção de migrations acima). Achada durante a auditoria/plano de
