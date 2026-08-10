@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Snowflake, GitBranch, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -8,9 +9,11 @@ import { useCoolingLeads } from "@/hooks/useCoolingLeads";
 import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { MultiFilterSelect } from "@/components/filters/MultiFilterSelect";
+import { supabase } from "@/integrations/supabase/client";
 
 export default function CoolingLeads() {
   const { activeWorkspace } = useWorkspace();
+  const wsId = activeWorkspace?.id;
   // Filtros de sessão (não persistidos) — só valem pra esta tela.
   const [pipelineIds, setPipelineIds] = useState<string[]>([]);
   const [sellerIds, setSellerIds] = useState<string[]>([]);
@@ -19,6 +22,30 @@ export default function CoolingLeads() {
     pipelineIds,
     sellerIds,
   );
+
+  // "Funis do Dashboard" (Configurações) restringe quais funis aparecem pra
+  // escolher aqui — nenhum marcado lá = mostra todos, igual sempre.
+  const { data: defaultPipelineIds = [] } = useQuery({
+    queryKey: ["cooling-default-pipelines", wsId],
+    enabled: !!wsId,
+    queryFn: async () => {
+      const { data: settings } = await supabase.from("dashboard_settings").select("default_pipeline_ids")
+        .eq("workspace_id", wsId!).maybeSingle();
+      return (settings?.default_pipeline_ids || []) as string[];
+    },
+  });
+  const visiblePipelines = useMemo(() => {
+    const all = data?.pipelines ?? [];
+    return defaultPipelineIds.length ? all.filter((p) => defaultPipelineIds.includes(p.id)) : all;
+  }, [data?.pipelines, defaultPipelineIds]);
+  // Reconcilia seleção que aponte pra um funil que deixou de ser "comercial".
+  useEffect(() => {
+    if (!defaultPipelineIds.length) return;
+    setPipelineIds((prev) => {
+      const filtered = prev.filter((id) => defaultPipelineIds.includes(id));
+      return filtered.length === prev.length ? prev : filtered;
+    });
+  }, [defaultPipelineIds]);
 
   if (!activeWorkspace) {
     return <ErrorState error="Selecione uma conta para visualizar os leads esfriando." onRetry={() => window.location.reload()} />;
@@ -37,7 +64,7 @@ export default function CoolingLeads() {
               placeholder="Funil"
               pluralLabel="funis"
               icon={GitBranch}
-              options={data?.pipelines ?? []}
+              options={visiblePipelines}
             />
           </div>
 

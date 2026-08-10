@@ -13,7 +13,12 @@ export interface CustomMetricResult {
   numeratorCount?: number;
   denominatorCount?: number | null;
 }
-export interface FunnelStage { id: string; name: string; count: number; currentCount?: number; leads?: StageLead[]; }
+export interface FunnelStage {
+  id: string; name: string; count: number; currentCount?: number; leads?: StageLead[];
+  /** Quantos leads que passaram por esta etapa depois foram marcados como perdidos (via histórico). */
+  lostHere?: number;
+  lostHereLeads?: StageLead[];
+}
 export interface Seller {
   id?: string;
   name: string;

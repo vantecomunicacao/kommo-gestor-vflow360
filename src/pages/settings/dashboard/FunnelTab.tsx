@@ -34,8 +34,10 @@ export default function FunnelTab({
           <CardDescription>
             Marque os funis comerciais que devem entrar nas métricas. Funis administrativos
             (base de contatos, fornecedores, roteamento interno) devem ficar desmarcados.
-            Nenhum marcado = todos entram. Com um único funil marcado, ele já vem
-            selecionado no filtro do Dashboard.
+            Nenhum marcado = todos entram e todos aparecem pra escolher. Com algum marcado,
+            só esses aparecem no seletor de funil do Dashboard, Relatórios e Leads Esfriando —
+            os demais somem da lista (continuam disponíveis aqui e nas Métricas Personalizadas
+            pra reconfigurar). Com um único funil marcado, ele já vem selecionado por padrão.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -100,16 +102,25 @@ export default function FunnelTab({
           <CardTitle>Mapeamento do funil</CardTitle>
           <CardDescription>
             Associe cada etapa do CRM a uma das 4 fases do funil analítico. Etapas sem mapeamento são ignoradas.
+            "Venda perdida" não aparece aqui: é uma etapa de saída (não uma fase progressiva) e já é tratada
+            automaticamente pelo Dashboard.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          {pipelines.map((p) => (
+          {pipelines.map((p) => {
+            // Etapa de sistema "Venda perdida" (id 143, igual em todo funil) fica fora do
+            // seletor: mapeá-la pra uma fase produz um comportamento inconsistente (o
+            // Dashboard força todo lead perdido pra "Contato Inicial" sem olhar esse
+            // mapeamento, mas outros cálculos que também usam stageBucket — tempo por
+            // etapa, contagem por vendedor, Métricas Personalizadas — obedeceriam).
+            const mappableStages = p.stages.filter((s) => s.id !== "143");
+            return (
             <div key={p.id} className="space-y-2">
               <h4 className="text-sm font-semibold text-foreground border-b pb-1">
                 {p.name}
-                <span className="ml-2 text-xs font-normal text-muted-foreground">({p.stages.length} etapas)</span>
+                <span className="ml-2 text-xs font-normal text-muted-foreground">({mappableStages.length} etapas)</span>
               </h4>
-              {p.stages.map((s) => (
+              {mappableStages.map((s) => (
                 <div key={s.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center pl-1">
                   <div className="text-sm">{s.name}</div>
                   <Select
@@ -138,7 +149,8 @@ export default function FunnelTab({
                 </div>
               ))}
             </div>
-          ))}
+            );
+          })}
           {pipelines.length === 0 && <p className="text-sm text-muted-foreground">Sincronize pipelines primeiro.</p>}
         </CardContent>
       </Card>

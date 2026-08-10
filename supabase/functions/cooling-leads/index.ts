@@ -64,7 +64,8 @@ serve(async (req) => {
     // Stages "ganhas" para excluir do "aberto" (por nome + status_id 142 do Kommo).
     const [{ data: pipelinesRows }, { data: usersRows }] = await Promise.all([
       // Arquivado entra (lead antigo ainda referencia a etapa); apagado no Kommo, não.
-      db.from("pipelines").select("kommo_id,name,statuses").eq("workspace_id", workspaceId).eq("is_deleted", false),
+      db.from("pipelines").select("kommo_id,name,statuses").eq("workspace_id", workspaceId).eq("is_deleted", false)
+        .order("sort", { nullsFirst: false }),
       db.from("users").select("kommo_id,name").eq("workspace_id", workspaceId),
     ]);
 

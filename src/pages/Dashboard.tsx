@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { subDays, startOfDay, endOfDay, differenceInDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Link, useSearchParams } from "react-router-dom";
@@ -61,6 +61,7 @@ export default function Dashboard() {
     selectedCustomFilters, setSelectedCustomFilters,
     dateBasis, setDateBasis,
     stageLabels,
+    defaultPipelineIds,
   } = useDashboardFilterHydration(activeWorkspace?.id, searchParams);
 
   // Persistir filtros no localStorage por workspace (e espelhar na URL) — ver
@@ -111,6 +112,27 @@ export default function Dashboard() {
     ),
     [data?.leadsOriginDistribution, data?.wonOriginDistribution],
   );
+
+  // "Funis do Dashboard" (Configurações) restringe quais funis aparecem pra escolher
+  // aqui — nenhum marcado lá = mostra todos, igual sempre. Vazio quando `data` ainda
+  // não carregou, então só filtra de fato depois que os pipelines chegam.
+  const visiblePipelines = useMemo(() => {
+    const all = data?.pipelines || [];
+    return defaultPipelineIds.length ? all.filter((p) => defaultPipelineIds.includes(p.id)) : all;
+  }, [data?.pipelines, defaultPipelineIds]);
+
+  // Reconcilia seleção persistida (URL/localStorage) que aponte pra um funil que
+  // deixou de ser "comercial" nas Configurações — sem isso o filtro fica com um
+  // chip selecionado sem opção correspondente no dropdown.
+  useEffect(() => {
+    if (!hydrated || !data || !defaultPipelineIds.length) return;
+    const visibleIds = new Set(visiblePipelines.map((p) => p.id));
+    const filtered = selectedPipelineIds.filter((id) => visibleIds.has(id));
+    if (filtered.length !== selectedPipelineIds.length) {
+      setSelectedPipelineIds(filtered);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, data, defaultPipelineIds, visiblePipelines]);
 
   if (!activeWorkspace) {
     return <ErrorState error="Selecione uma conta para visualizar o dashboard." onRetry={() => window.location.reload()} />;
@@ -169,7 +191,7 @@ export default function Dashboard() {
         onDateRangeChange={setDateRange}
         onRefresh={refetch}
         isLoading={isLoading}
-        pipelines={data.pipelines}
+        pipelines={visiblePipelines}
         users={data.users}
         selectedPipelineIds={selectedPipelineIds}
         selectedStageIds={selectedStageIds}
@@ -219,7 +241,7 @@ export default function Dashboard() {
           {permissions.viewSettings && (
             <DashboardAiAnalysis
               workspaceId={activeWorkspace.id}
-              pipelines={data.pipelines}
+              pipelines={visiblePipelines}
               initialDateBasis={dateBasis}
             />
           )}

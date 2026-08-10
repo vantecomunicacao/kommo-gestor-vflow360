@@ -22,6 +22,9 @@ const stageAccents = [
   { bg: "bg-funnel-3", border: "border-funnel-3/40", icon: "text-funnel-3-ink" },
   { bg: "bg-funnel-4", border: "border-funnel-4/40", icon: "text-funnel-4-ink" },
 ];
+// Venda Ganha se destaca em verde (independente da posição na cascata) — as demais
+// etapas seguem a escala azul de stageAccents.
+const wonAccent = { bg: "bg-success", border: "border-success/40", icon: "text-success-foreground" };
 
 export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, lostLeadsDetail = [], belowLostCard }: FunnelVisualizationProps) {
   const [selectedStage, setSelectedStage] = useState<{ title: string; leads: StageLead[] } | null>(null);
@@ -48,7 +51,7 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
         <h2 className="section-title mb-0">
           <TrendingUp className="w-5 h-5 text-primary-ink" />
           Visão Geral - Funil de Passagem
-          <SectionTooltip text="Funil de passagem: cada etapa mostra o total de leads que JÁ PASSARAM por ela (ou seja, soma os que estão nela com os que avançaram para etapas posteriores). O número menor entre parênteses indica quantos leads estão atualmente nessa etapa. As taxas de conversão refletem o quanto seguiu para a próxima etapa. Clique em uma etapa para ver os leads que estão nela hoje." />
+          <SectionTooltip text="Funil de passagem: cada etapa mostra o total de leads que JÁ PASSARAM por ela (ou seja, soma os que estão nela com os que avançaram para etapas posteriores). O número menor entre parênteses indica quantos leads estão atualmente nessa etapa. As taxas de conversão refletem o quanto seguiu para a próxima etapa. Clique em uma etapa para ver os leads que estão nela hoje. A bolinha vermelha, quando aparece, mostra quantos leads chegaram até ali e depois foram marcados como perdidos — é uma contagem à parte, não soma no número principal da etapa." />
         </h2>
         <div className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Conversão geral:</span>
@@ -61,12 +64,25 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
         <div className="lg:col-span-3 flex flex-col items-center">
           {funnelStages.map((stage, index) => {
             const isLast = index === funnelStages.length - 1;
-            const accent = stageAccents[index] || stageAccents[stageAccents.length - 1];
+            const accent = stage.id === "venda_ganha" ? wonAccent : (stageAccents[index] || stageAccents[stageAccents.length - 1]);
             const widthClass = stageWidths[index] || stageWidths[stageWidths.length - 1];
             const stageNumber = String(index + 1).padStart(2, "0");
 
             return (
-              <div key={stage.id} className={`${widthClass} flex flex-col items-center`}>
+              <div key={stage.id} className={`${widthClass} flex flex-col items-center relative`}>
+                {!!stage.lostHere && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSelectedStage({ title: `Perdidos em "${stage.name}"`, leads: stage.lostHereLeads || [] });
+                    }}
+                    title={`${stage.lostHere} lead(s) chegaram a "${stage.name}" e depois foram marcados como perdido. Clique para ver a lista.`}
+                    className="absolute -top-3 right-6 z-10 min-w-[28px] h-7 px-1.5 flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-sm font-bold shadow-md ring-2 ring-card hover:brightness-110 transition-all"
+                  >
+                    {stage.lostHere}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setSelectedStage({ title: stage.name, leads: stage.leads || [] })}

@@ -128,7 +128,8 @@ serve(async (req) => {
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
       // Só funis vivos: arquivado/apagado no Kommo não entra no seletor nem no cálculo.
       db.from("pipelines").select("kommo_id,name,statuses,is_main,sort")
-        .eq("workspace_id", workspaceId).eq("is_archive", false).eq("is_deleted", false),
+        .eq("workspace_id", workspaceId).eq("is_archive", false).eq("is_deleted", false)
+        .order("sort", { nullsFirst: false }),
       db.from("users").select("kommo_id,name,is_active").eq("workspace_id", workspaceId),
       db.from("loss_reasons").select("kommo_id,name").eq("workspace_id", workspaceId),
       db.from("dashboard_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
@@ -376,11 +377,56 @@ serve(async (req) => {
     const lostOpps = leads.filter((l) => l.status === "lost");
     const lostLeads = lostOpps.length;
 
-    // ===== Funnel (4 buckets, exclui perdidos) =====
+    // ===== Funnel (4 buckets) =====
+    // Perdido não é uma etapa mapeável (não dá pra saber, só pelo status atual, em qual
+    // das 4 etapas o lead parou antes de ser perdido) — mas ainda assim é contado em
+    // "Contato Inicial", porque praticamente todo lead passa por ali. Isso faz o total do
+    // funil bater com o total de leads (decisão de 2026-08-10: sem essa soma, "Contato
+    // Inicial" ficava sublistando o total real e a taxa de conversão saía inflada por
+    // excluir os perdidos do denominador).
     const counts = { contato_inicial: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
     const leadsByBucket: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
+    // "Perdidos aqui": anotação à parte (não soma no `count`/`passage` acima) indicando
+    // de qual etapa real cada lead perdido veio, via o histórico de eventos (o `before`
+    // do evento que levou o lead pro status de sistema "perdido", 143). Lead sem esse
+    // evento no histórico (sync antigo, de antes do rastreamento de eventos) não entra
+    // aqui — mas continua contado normalmente em Contato Inicial acima.
+    const lostAtCounts: Record<Bucket, number> = { contato_inicial: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
+    const lostAtLeads: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
     for (const l of leads) {
-      if (l.status === "lost") continue;
+      if (l.status === "lost") {
+        counts.contato_inicial++;
+        if (leadsByBucket.contato_inicial.length < 200) {
+          leadsByBucket.contato_inicial.push({
+            id: leadsByBucket.contato_inicial.length + 1,
+            name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`,
+            contactName: l.contact_name || null,
+          });
+        }
+        // Pega a transição pra "perdido" mais recente por horário (não a última do
+        // array — a ordem de inserção não é garantidamente cronológica, e um lead
+        // reaberto e perdido de novo teria mais de um evento com after === "143").
+        let beforeLostStatus: string | null = null;
+        let latestLostT = -Infinity;
+        for (const e of (eventsByLead.get(String(l.kommo_id)) || [])) {
+          if (e.after === "143" && e.t > latestLostT) {
+            latestLostT = e.t;
+            beforeLostStatus = e.before;
+          }
+        }
+        const lostBucket = beforeLostStatus ? stageBucket(l.pipeline_id, beforeLostStatus) : null;
+        if (lostBucket) {
+          lostAtCounts[lostBucket]++;
+          if (lostAtLeads[lostBucket].length < 200) {
+            lostAtLeads[lostBucket].push({
+              id: lostAtLeads[lostBucket].length + 1,
+              name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`,
+              contactName: l.contact_name || null,
+            });
+          }
+        }
+        continue;
+      }
       const b = stageBucket(l.pipeline_id, l.status_id);
       if (b) {
         counts[b]++;
@@ -400,10 +446,10 @@ serve(async (req) => {
       venda_ganha: counts.venda_ganha,
     };
     const funnelStages = [
-      { id: "contato_inicial", name: "Contato Inicial", count: passage.contato_inicial, currentCount: counts.contato_inicial, leads: leadsByBucket.contato_inicial },
-      { id: "proposta_enviada", name: "Proposta Enviada", count: passage.proposta_enviada, currentCount: counts.proposta_enviada, leads: leadsByBucket.proposta_enviada },
-      { id: "fechamento", name: "Fechamento", count: passage.fechamento, currentCount: counts.fechamento, leads: leadsByBucket.fechamento },
-      { id: "venda_ganha", name: "Venda Ganha", count: passage.venda_ganha, currentCount: counts.venda_ganha, leads: leadsByBucket.venda_ganha },
+      { id: "contato_inicial", name: "Contato Inicial", count: passage.contato_inicial, currentCount: counts.contato_inicial, leads: leadsByBucket.contato_inicial, lostHere: lostAtCounts.contato_inicial, lostHereLeads: lostAtLeads.contato_inicial },
+      { id: "proposta_enviada", name: "Proposta Enviada", count: passage.proposta_enviada, currentCount: counts.proposta_enviada, leads: leadsByBucket.proposta_enviada, lostHere: lostAtCounts.proposta_enviada, lostHereLeads: lostAtLeads.proposta_enviada },
+      { id: "fechamento", name: "Fechamento", count: passage.fechamento, currentCount: counts.fechamento, leads: leadsByBucket.fechamento, lostHere: lostAtCounts.fechamento, lostHereLeads: lostAtLeads.fechamento },
+      { id: "venda_ganha", name: "Venda Ganha", count: passage.venda_ganha, currentCount: counts.venda_ganha, leads: leadsByBucket.venda_ganha, lostHere: lostAtCounts.venda_ganha, lostHereLeads: lostAtLeads.venda_ganha },
     ];
     const conversionRates = {
       contatoToProsposta: safeRate(passage.proposta_enviada, passage.contato_inicial),

@@ -86,7 +86,8 @@ export default function DashboardSettings() {
       const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }] = await Promise.all([
         // Só funis vivos: arquivado/apagado no Kommo não deve aparecer p/ configurar.
         supabase.from("pipelines").select("*")
-          .eq("workspace_id", activeWorkspace.id).eq("is_archive", false).eq("is_deleted", false),
+          .eq("workspace_id", activeWorkspace.id).eq("is_archive", false).eq("is_deleted", false)
+          .order("sort", { nullsFirst: false }),
         supabase.from("custom_fields").select("id,kommo_id,name,code,field_type,entity_type").eq("workspace_id", activeWorkspace.id),
         supabase.from("dashboard_settings").select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
         supabase.from("sync_status").select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),

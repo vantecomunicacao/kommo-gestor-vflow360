@@ -127,10 +127,33 @@ export default function Reports() {
     queryFn: async () => {
       // Só funis vivos no seletor (arquivado/apagado no Kommo fica de fora).
       const { data } = await supabase.from("pipelines").select("kommo_id,name")
-        .eq("workspace_id", wsId!).eq("is_archive", false).eq("is_deleted", false);
+        .eq("workspace_id", wsId!).eq("is_archive", false).eq("is_deleted", false)
+        .order("sort", { nullsFirst: false });
       return (data || []) as { kommo_id: string; name: string }[];
     },
   });
+  // "Funis do Dashboard" (Configurações) restringe quais funis aparecem pra
+  // escolher aqui — nenhum marcado lá = mostra todos, igual sempre.
+  const { data: defaultPipelineIds = [] } = useQuery({
+    queryKey: ["report-default-pipelines", wsId],
+    enabled: !!wsId,
+    queryFn: async () => {
+      const { data } = await supabase.from("dashboard_settings").select("default_pipeline_ids")
+        .eq("workspace_id", wsId!).maybeSingle();
+      return (data?.default_pipeline_ids || []) as string[];
+    },
+  });
+  const visiblePipelines = useMemo(
+    () => (defaultPipelineIds.length ? pipelines.filter((p) => defaultPipelineIds.includes(p.kommo_id)) : pipelines),
+    [pipelines, defaultPipelineIds],
+  );
+  // Reconcilia seleção persistida que aponte pra um funil que deixou de ser
+  // "comercial" nas Configurações.
+  useEffect(() => {
+    if (defaultPipelineIds.length && pipelineId && !defaultPipelineIds.includes(pipelineId)) {
+      setPipelineId(null);
+    }
+  }, [defaultPipelineIds, pipelineId]);
   const { data: users = [] } = useQuery({
     queryKey: ["report-users", wsId],
     enabled: !!wsId,
@@ -506,7 +529,7 @@ export default function Reports() {
               onChange={setPipelineId}
               placeholder="Funil"
               icon={GitBranch}
-              options={pipelines.map((p) => ({ id: p.kommo_id, name: p.name }))}
+              options={visiblePipelines.map((p) => ({ id: p.kommo_id, name: p.name }))}
             />
           </div>
 

@@ -28,6 +28,7 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
   const [selectedCustomFilters, setSelectedCustomFilters] = useState<Record<string, string[]>>({});
   const [dateBasis, setDateBasis] = useState<DateBasis>("criacao");
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({});
+  const [defaultPipelineIds, setDefaultPipelineIds] = useState<string[]>([]);
 
   // Hidratar filtros salvos por workspace (ou aplicar pipeline padrão)
   useEffect(() => {
@@ -44,6 +45,7 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
         .maybeSingle();
       if (cancelled) return;
       setStageLabels((settings?.funnel_stage_labels as Record<string, string>) || {});
+      setDefaultPipelineIds((settings?.default_pipeline_ids as string[]) || []);
 
       // Deep link: se a URL já tem algum filtro, ela vence — inclusive sobre o funil
       // padrão do workspace, porque um link compartilhado é uma intenção explícita de
@@ -155,5 +157,6 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
     selectedCustomFilters, setSelectedCustomFilters,
     dateBasis, setDateBasis,
     stageLabels,
+    defaultPipelineIds,
   };
 }
