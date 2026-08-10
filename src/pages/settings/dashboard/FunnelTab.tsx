@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FUNNEL_BUCKETS, funnelStageKey, readStageBucket } from "@/lib/dashboard-funnel";
+import { FUNNEL_BUCKETS, funnelStageKey, readStageBucket, resolveFunnelLabel } from "@/lib/dashboard-funnel";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
@@ -68,7 +68,7 @@ export default function FunnelTab({
         <CardHeader>
           <CardTitle>Nomes das etapas do funil</CardTitle>
           <CardDescription>
-            Personalize como cada uma das 4 fases aparece no card "Visão Geral - Funil de Passagem"
+            Personalize como cada uma das 5 fases aparece no card "Visão Geral - Funil de Passagem"
             do Dashboard. Deixe em branco para usar o nome padrão.
           </CardDescription>
         </CardHeader>
@@ -101,7 +101,7 @@ export default function FunnelTab({
         <CardHeader>
           <CardTitle>Mapeamento do funil</CardTitle>
           <CardDescription>
-            Associe cada etapa do CRM a uma das 4 fases do funil analítico. Etapas sem mapeamento são ignoradas.
+            Associe cada etapa do CRM a uma das 5 fases do funil analítico. Etapas sem mapeamento são ignoradas.
             "Venda perdida" não aparece aqui: é uma etapa de saída (não uma fase progressiva) e já é tratada
             automaticamente pelo Dashboard.
           </CardDescription>
@@ -142,7 +142,7 @@ export default function FunnelTab({
                     <SelectContent>
                       <SelectItem value="__none__">Ignorar</SelectItem>
                       {FUNNEL_BUCKETS.map((b) => (
-                        <SelectItem key={b.key} value={b.key}>{b.label}</SelectItem>
+                        <SelectItem key={b.key} value={b.key}>{resolveFunnelLabel(b.key, stageLabels)}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -172,7 +172,7 @@ export default function FunnelTab({
                   )
                 }
               />
-              <span>{b.label}</span>
+              <span>{resolveFunnelLabel(b.key, stageLabels)}</span>
             </label>
           ))}
         </CardContent>

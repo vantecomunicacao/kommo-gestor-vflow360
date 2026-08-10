@@ -5,7 +5,7 @@ import type { FunnelBucketKey } from "@/lib/dashboard-funnel";
  *
  * Um template é apenas um "pacote de padrões" aplicado como SEMENTE sobre as
  * Configurações do Dashboard (kommo.dashboard_settings). Ao aplicar, ele preenche:
- *  - funnel_stage_labels   → rótulos das 4 fases fixas (ex.: "Consulta Agendada")
+ *  - funnel_stage_labels   → rótulos das 5 fases fixas (ex.: "Consulta Agendada")
  *  - report_goals          → metas médias do segmento, chave "<eixo>:<metricId>"
  *
  * NÃO semeia funnel_stage_mapping nem Métricas Personalizadas de verdade: ambos
@@ -132,9 +132,10 @@ export const SEGMENT_TEMPLATES: SegmentTemplate[] = [
     id: "generico",
     label: "Genérico (padrão)",
     description:
-      "Funil comercial padrão de 4 fases, sem termos de nicho. Bom ponto de partida para qualquer negócio.",
+      "Funil comercial padrão de 5 fases, sem termos de nicho. Bom ponto de partida para qualquer negócio.",
     stageLabels: {
       contato_inicial: "Contato Inicial",
+      qualificando: "Qualificando",
       proposta_enviada: "Proposta Enviada",
       fechamento: "Fechamento",
       venda_ganha: "Venda Ganha",

@@ -1,4 +1,4 @@
-// Mapeamento etapa do CRM → fase do funil analítico (as 4 fases do VFlow360).
+// Mapeamento etapa do CRM → fase do funil analítico (as 5 fases do VFlow360).
 //
 // O `funnel_stage_mapping` nasceu indexado só pelo status_id. Só que no Kommo os
 // status de sistema `142` (Venda ganha) e `143` (Venda perdida) são os MESMOS ids
@@ -10,8 +10,8 @@
 // continua sendo lido como regra que vale para qualquer funil, para não quebrar
 // workspaces ainda não migrados.
 
-export type FunnelBucket = "contato_inicial" | "proposta_enviada" | "fechamento" | "venda_ganha";
-export const FUNNEL_BUCKETS: FunnelBucket[] = ["contato_inicial", "proposta_enviada", "fechamento", "venda_ganha"];
+export type FunnelBucket = "contato_inicial" | "qualificando" | "proposta_enviada" | "fechamento" | "venda_ganha";
+export const FUNNEL_BUCKETS: FunnelBucket[] = ["contato_inicial", "qualificando", "proposta_enviada", "fechamento", "venda_ganha"];
 
 export const FUNNEL_KEY_SEP = ":";
 export function funnelKey(pipelineId: string | number, statusId: string | number): string {

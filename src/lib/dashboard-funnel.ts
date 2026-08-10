@@ -1,5 +1,6 @@
 export const FUNNEL_BUCKETS = [
   { key: "contato_inicial", label: "Contato Inicial" },
+  { key: "qualificando", label: "Qualificando" },
   { key: "proposta_enviada", label: "Proposta Enviada" },
   { key: "fechamento", label: "Fechamento" },
   { key: "venda_ganha", label: "Venda Ganha" },

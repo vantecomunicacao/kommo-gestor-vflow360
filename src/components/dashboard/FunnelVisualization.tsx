@@ -30,7 +30,8 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
   const [selectedStage, setSelectedStage] = useState<{ title: string; leads: StageLead[] } | null>(null);
 
   const conversionLabels = [
-    conversionRates.contatoToProsposta,
+    conversionRates.contatoToQualificando,
+    conversionRates.qualificandoToProposta,
     conversionRates.propostaToFechamento,
     conversionRates.fechamentoToVenda,
   ];
@@ -45,7 +46,10 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
   const lostPercentage = topPassage > 0 ? (lostLeads / topPassage) * 100 : 0;
 
   // Tapering widths to keep the funnel feel without trapezoidal shapes
-  const stageWidths = ["w-full", "w-[92%]", "w-[80%]", "w-[66%]"];
+  const stageWidths = ["w-full", "w-[92%]", "w-[84%]", "w-[74%]", "w-[62%]"];
+  // Com 5 etapas, encolhe padding/fonte/conector pra caber num espaço vertical
+  // parecido com o de 4, em vez de deixar o card mais alto.
+  const compact = funnelStages.length > 4;
 
   return (
     <div className="dashboard-section animate-slide-up">
@@ -90,21 +94,21 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
                   onClick={() => setSelectedStage({ title: stage.name, leads: stage.leads || [] })}
                   className={`relative w-full text-left rounded-xl border transition-all overflow-hidden cursor-pointer shadow-sm hover:shadow-md hover:brightness-105 ${accent.border} ${accent.bg}`}
                 >
-                  <div className="relative p-4 flex justify-between items-center">
+                  <div className={`relative flex justify-between items-center ${compact ? "p-3" : "p-4"}`}>
                     <div className="flex flex-col">
                       <span className="text-[10px] font-semibold uppercase tracking-wider text-white/80">
                         {isLast ? "Final" : `Etapa ${stageNumber}`}
                       </span>
-                      <h3 className="text-base font-bold text-white">
+                      <h3 className={`font-bold text-white ${compact ? "text-sm" : "text-base"}`}>
                         {stage.name}
                       </h3>
                     </div>
                     <div className="text-right">
-                      <div className="text-2xl font-extrabold leading-none text-white">
+                      <div className={`font-extrabold leading-none text-white ${compact ? "text-xl" : "text-2xl"}`}>
                         {stage.count}
                       </div>
                       {typeof stage.currentCount === "number" && (
-                        <div className="text-[11px] font-medium mt-1 text-white/80">
+                        <div className={`font-medium text-white/80 ${compact ? "text-[10px] mt-1" : "text-[11px] mt-1"}`}>
                           <span className="opacity-70">atual:</span> {stage.currentCount}
                         </div>
                       )}
@@ -113,9 +117,9 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
                 </button>
 
                 {!isLast && (
-                  <div className="h-9 flex flex-col items-center justify-center relative w-full">
+                  <div className={`flex flex-col items-center justify-center relative w-full ${compact ? "h-7" : "h-9"}`}>
                     <div className="w-px h-full bg-border"></div>
-                    <div className="absolute bg-card border border-border px-2.5 py-1 rounded-full shadow-sm">
+                    <div className={`absolute bg-card border border-border rounded-full shadow-sm ${compact ? "px-2 py-0.5" : "px-2.5 py-1"}`}>
                       <span className="text-[10px] font-bold text-muted-foreground flex items-center gap-1">
                         <ArrowDown className={`w-3 h-3 ${accent.icon}`} />
                         {formatPercentage(conversionLabels[index])}

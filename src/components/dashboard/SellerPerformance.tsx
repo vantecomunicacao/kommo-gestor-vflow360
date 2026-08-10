@@ -4,15 +4,18 @@ import { Users, Trophy, Medal, Search } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { resolveFunnelLabel } from "@/lib/dashboard-funnel";
 
 interface SellerPerformanceProps {
   sellers: Seller[];
   selectedSellerIds?: string[];
   onSellerToggle?: (id: string) => void;
   onClearSellers?: () => void;
+  /** Rótulos customizados por etapa (Configurações → Funil → "Nomes das etapas do funil"). */
+  stageLabels?: Record<string, string>;
 }
 
-export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerToggle, onClearSellers }: SellerPerformanceProps) {
+export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerToggle, onClearSellers, stageLabels }: SellerPerformanceProps) {
   const [query, setQuery] = useState("");
   const sortedSellers = useMemo(
     () => [...sellers].sort((a, b) => b.vendaGanha - a.vendaGanha),
@@ -92,10 +95,11 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
               <th>#</th>
               <th>Vendedor</th>
               <th className="text-center">Total de Leads</th>
-              <th className="text-center">Contato Inicial</th>
-              <th className="text-center">Proposta Enviada</th>
-              <th className="text-center">Fechamento</th>
-              <th className="text-center">Venda Ganha</th>
+              <th className="text-center">{resolveFunnelLabel("contato_inicial", stageLabels)}</th>
+              <th className="text-center">{resolveFunnelLabel("qualificando", stageLabels)}</th>
+              <th className="text-center">{resolveFunnelLabel("proposta_enviada", stageLabels)}</th>
+              <th className="text-center">{resolveFunnelLabel("fechamento", stageLabels)}</th>
+              <th className="text-center">{resolveFunnelLabel("venda_ganha", stageLabels)}</th>
               <th className="text-center">Taxa Conversão</th>
               <th className="text-center">Perdidos</th>
             </tr>
@@ -104,7 +108,7 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
             {visibleSellers.map((s) => {
               const realIndex = sortedSellers.indexOf(s);
               const rate = s.contatoInicial > 0 ? ((s.vendaGanha / s.contatoInicial) * 100).toFixed(1) : "0.0";
-              const totalLeads = s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha;
+              const totalLeads = s.contatoInicial + s.qualificando + s.propostaEnviada + s.fechamento + s.vendaGanha;
               const isSelected = !!s.id && selectedSellerIds.includes(s.id);
               const canClick = interactive && !!s.id;
               return (
@@ -138,13 +142,16 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
                     <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-1/10 text-funnel-1-ink rounded-lg font-bold text-sm">{s.contatoInicial}</span>
                   </td>
                   <td className="text-center">
-                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-2/10 text-funnel-2-ink rounded-lg font-bold text-sm">{s.propostaEnviada}</span>
+                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-2/10 text-funnel-2-ink rounded-lg font-bold text-sm">{s.qualificando}</span>
                   </td>
                   <td className="text-center">
-                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-3/10 text-funnel-3-ink rounded-lg font-bold text-sm">{s.fechamento}</span>
+                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-3/10 text-funnel-3-ink rounded-lg font-bold text-sm">{s.propostaEnviada}</span>
                   </td>
                   <td className="text-center">
-                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-4/10 text-funnel-4-ink rounded-lg font-bold text-sm">{s.vendaGanha}</span>
+                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-funnel-4/10 text-funnel-4-ink rounded-lg font-bold text-sm">{s.fechamento}</span>
+                  </td>
+                  <td className="text-center">
+                    <span className="inline-flex items-center justify-center min-w-10 h-7 px-2 bg-success/10 text-success rounded-lg font-bold text-sm">{s.vendaGanha}</span>
                   </td>
                   <td className="text-center"><span className="font-bold text-primary-ink">{rate}%</span></td>
                   <td className="text-center">
@@ -155,7 +162,7 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
             })}
             {visibleSellers.length === 0 && (
               <tr>
-                <td colSpan={9} className="text-center text-muted-foreground py-8 text-sm">
+                <td colSpan={10} className="text-center text-muted-foreground py-8 text-sm">
                   Nenhum vendedor encontrado para "{query}".
                 </td>
               </tr>

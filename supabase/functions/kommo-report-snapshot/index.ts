@@ -83,7 +83,7 @@ serve(async (req) => {
     // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
     await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
 
-    // ===== Settings: mapeamento das 4 fases (ganho/perda) + Métricas Personalizadas =====
+    // ===== Settings: mapeamento das fases do funil (ganho/perda) + Métricas Personalizadas =====
     const { data: settingsRow } = await db.from("dashboard_settings")
       .select("funnel_stage_mapping, custom_metrics").eq("workspace_id", workspaceId).maybeSingle();
     const settings = (settingsRow || {}) as Record<string, unknown>;

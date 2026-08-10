@@ -64,6 +64,7 @@ interface SellerAgg {
   id: string;
   name: string;
   contatoInicial: number;
+  qualificando: number;
   propostaEnviada: number;
   fechamento: number;
   vendaGanha: number;
@@ -90,7 +91,7 @@ const BRT_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
 function brtDate(d: Date): string {
   return BRT_DATE_FMT.format(d);
 }
-const VALID_BUCKETS: Bucket[] = ["contato_inicial", "proposta_enviada", "fechamento", "venda_ganha"];
+const VALID_BUCKETS: Bucket[] = ["contato_inicial", "qualificando", "proposta_enviada", "fechamento", "venda_ganha"];
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -378,22 +379,22 @@ serve(async (req) => {
     const lostOpps = leads.filter((l) => l.status === "lost");
     const lostLeads = lostOpps.length;
 
-    // ===== Funnel (4 buckets) =====
+    // ===== Funnel (5 buckets) =====
     // Perdido não é uma etapa mapeável (não dá pra saber, só pelo status atual, em qual
-    // das 4 etapas o lead parou antes de ser perdido) — mas ainda assim é contado em
+    // das 5 etapas o lead parou antes de ser perdido) — mas ainda assim é contado em
     // "Contato Inicial", porque praticamente todo lead passa por ali. Isso faz o total do
     // funil bater com o total de leads (decisão de 2026-08-10: sem essa soma, "Contato
     // Inicial" ficava sublistando o total real e a taxa de conversão saía inflada por
     // excluir os perdidos do denominador).
-    const counts = { contato_inicial: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
-    const leadsByBucket: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
+    const counts = { contato_inicial: 0, qualificando: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
+    const leadsByBucket: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], qualificando: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
     // "Perdidos aqui": anotação à parte (não soma no `count`/`passage` acima) indicando
     // de qual etapa real cada lead perdido veio, via o histórico de eventos (o `before`
     // do evento que levou o lead pro status de sistema "perdido", 143). Lead sem esse
     // evento no histórico (sync antigo, de antes do rastreamento de eventos) não entra
     // aqui — mas continua contado normalmente em Contato Inicial acima.
-    const lostAtCounts: Record<Bucket, number> = { contato_inicial: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
-    const lostAtLeads: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
+    const lostAtCounts: Record<Bucket, number> = { contato_inicial: 0, qualificando: 0, proposta_enviada: 0, fechamento: 0, venda_ganha: 0 };
+    const lostAtLeads: Record<Bucket, Array<{ id: number; name: string; contactName: string | null }>> = { contato_inicial: [], qualificando: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
     for (const l of leads) {
       if (l.status === "lost") {
         counts.contato_inicial++;
@@ -447,19 +448,22 @@ serve(async (req) => {
       }
     }
     const passage = {
-      contato_inicial: counts.contato_inicial + counts.proposta_enviada + counts.fechamento + counts.venda_ganha,
+      contato_inicial: counts.contato_inicial + counts.qualificando + counts.proposta_enviada + counts.fechamento + counts.venda_ganha,
+      qualificando: counts.qualificando + counts.proposta_enviada + counts.fechamento + counts.venda_ganha,
       proposta_enviada: counts.proposta_enviada + counts.fechamento + counts.venda_ganha,
       fechamento: counts.fechamento + counts.venda_ganha,
       venda_ganha: counts.venda_ganha,
     };
     const funnelStages = [
       { id: "contato_inicial", name: "Contato Inicial", count: passage.contato_inicial, currentCount: counts.contato_inicial, leads: leadsByBucket.contato_inicial, lostHere: lostAtCounts.contato_inicial, lostHereLeads: lostAtLeads.contato_inicial },
+      { id: "qualificando", name: "Qualificando", count: passage.qualificando, currentCount: counts.qualificando, leads: leadsByBucket.qualificando, lostHere: lostAtCounts.qualificando, lostHereLeads: lostAtLeads.qualificando },
       { id: "proposta_enviada", name: "Proposta Enviada", count: passage.proposta_enviada, currentCount: counts.proposta_enviada, leads: leadsByBucket.proposta_enviada, lostHere: lostAtCounts.proposta_enviada, lostHereLeads: lostAtLeads.proposta_enviada },
       { id: "fechamento", name: "Fechamento", count: passage.fechamento, currentCount: counts.fechamento, leads: leadsByBucket.fechamento, lostHere: lostAtCounts.fechamento, lostHereLeads: lostAtLeads.fechamento },
       { id: "venda_ganha", name: "Venda Ganha", count: passage.venda_ganha, currentCount: counts.venda_ganha, leads: leadsByBucket.venda_ganha, lostHere: lostAtCounts.venda_ganha, lostHereLeads: lostAtLeads.venda_ganha },
     ];
     const conversionRates = {
-      contatoToProsposta: safeRate(passage.proposta_enviada, passage.contato_inicial),
+      contatoToQualificando: safeRate(passage.qualificando, passage.contato_inicial),
+      qualificandoToProposta: safeRate(passage.proposta_enviada, passage.qualificando),
       propostaToFechamento: safeRate(passage.fechamento, passage.proposta_enviada),
       fechamentoToVenda: safeRate(passage.venda_ganha, passage.fechamento),
       overallConversion: safeRate(passage.venda_ganha, passage.contato_inicial || totalLeads),
@@ -467,14 +471,15 @@ serve(async (req) => {
 
     // ===== Sellers =====
     const sellersMap = new Map<string, SellerAgg>();
-    for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
+    for (const u of activeUsers) sellersMap.set(u.kommo_id, { id: u.kommo_id, name: u.name, contatoInicial: 0, qualificando: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 });
     for (const l of leads) {
       const b = stageBucket(l.pipeline_id, l.status_id);
       if (!b) continue;
       const key = l.responsible_user_id || "__unassigned__";
       let s = sellersMap.get(key);
-      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
+      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, qualificando: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
       if (b === "contato_inicial") s.contatoInicial++;
+      else if (b === "qualificando") s.qualificando++;
       else if (b === "proposta_enviada") s.propostaEnviada++;
       else if (b === "fechamento") s.fechamento++;
       else if (b === "venda_ganha") s.vendaGanha++;
@@ -491,10 +496,10 @@ serve(async (req) => {
     for (const l of lostOpps) {
       const key = l.responsible_user_id || "__unassigned__";
       let s = sellersMap.get(key);
-      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
+      if (!s) { s = { id: key, name: key === "__unassigned__" ? "Não atribuído" : (sellerNameMap.get(key) || `Usuário ${String(key).slice(0, 6)}`), contatoInicial: 0, qualificando: 0, propostaEnviada: 0, fechamento: 0, vendaGanha: 0, lost: 0, wonRevenue: 0, avgResponseMinutes: null, responseCount: 0 }; sellersMap.set(key, s); }
       s.lost++;
     }
-    const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.propostaEnviada + s.fechamento + s.vendaGanha + s.lost > 0);
+    const sellers = Array.from(sellersMap.values()).filter((s) => s.contatoInicial + s.qualificando + s.propostaEnviada + s.fechamento + s.vendaGanha + s.lost > 0);
 
     // ===== Origem / UTM =====
     const origem = buildDist(getOrigin, leads);

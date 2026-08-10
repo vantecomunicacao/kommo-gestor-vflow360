@@ -45,6 +45,7 @@ interface DashboardResponse {
   sellers?: Array<{
     name: string;
     contatoInicial?: number;
+    qualificando?: number;
     propostaEnviada?: number;
     fechamento?: number;
     vendaGanha?: number;
@@ -162,7 +163,7 @@ function summarizeMetrics(d: DashboardResponse) {
     cycleToLostDays: d?.cycleToLostDays ?? null,
     lossReasons: (d?.lossReasons || []).slice(0, 10),
     sellers: (d?.sellers || []).slice(0, 15).map((s) => ({
-      name: s.name, contatoInicial: s.contatoInicial, propostaEnviada: s.propostaEnviada,
+      name: s.name, contatoInicial: s.contatoInicial, qualificando: s.qualificando, propostaEnviada: s.propostaEnviada,
       fechamento: s.fechamento, vendaGanha: s.vendaGanha, wonRevenue: s.wonRevenue,
     })),
     // Tarefas/follow-up: totais + atrasadas por vendedor (responde "quem tem mais tarefas atrasadas").

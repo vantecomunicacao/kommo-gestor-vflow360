@@ -47,6 +47,13 @@ Deno.test("inferFunnelMapping - achado: 'proposta enviada' no nome bate no regex
   assertEquals(out.proposta_enviada, []);
 });
 
+Deno.test("inferFunnelMapping - classifica etapa de qualificação/triagem em 'qualificando'", () => {
+  const stages: KommoStatus[] = [{ id: "5", name: "Qualificação do lead" }, { id: "6", name: "Triagem" }];
+  const out = inferFunnelMapping(stages);
+  assertEquals(out.qualificando, ["5", "6"]);
+  assertEquals(out.contato_inicial, []);
+});
+
 Deno.test("inferFunnelMapping - '142' não duplica se já presente na lista de stages", () => {
   const stages: KommoStatus[] = [{ id: "142", name: "Venda ganha" }];
   const out = inferFunnelMapping(stages);
@@ -192,7 +199,7 @@ Deno.test("computeTimePerStage - soma o tempo dos trechos FECHADOS (o trecho abe
     ["1", [{ before: "10", after: "20", t: t1 }, { before: "20", after: "142", t: t2 }]],
   ]);
   const result = computeTimePerStage(leads, eventsByLead, testBucketOf);
-  assertEquals(result, { contatoInicial: 10, propostaEnviada: 5, fechamento: 0 });
+  assertEquals(result, { contatoInicial: 10, qualificando: 0, propostaEnviada: 5, fechamento: 0 });
 });
 
 Deno.test("countCurrentlyIn - conta só quem está ATUALMENTE no par funil+etapa", () => {

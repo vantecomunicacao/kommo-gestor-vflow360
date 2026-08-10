@@ -23,6 +23,7 @@ export interface Seller {
   id?: string;
   name: string;
   contatoInicial: number;
+  qualificando: number;
   propostaEnviada: number;
   fechamento: number;
   vendaGanha: number;
@@ -41,13 +42,15 @@ export interface CustomField {
   filledCount: number;
 }
 export interface ConversionRates {
-  contatoToProsposta: number;
+  contatoToQualificando: number;
+  qualificandoToProposta: number;
   propostaToFechamento: number;
   fechamentoToVenda: number;
   overallConversion: number;
 }
 export interface AverageTimePerStage {
   contatoInicial: number;
+  qualificando: number;
   propostaEnviada: number;
   fechamento: number;
 }

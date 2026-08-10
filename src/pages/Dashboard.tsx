@@ -432,6 +432,7 @@ export default function Dashboard() {
             selectedSellerIds={selectedSellerIds}
             onSellerToggle={(id) => setSelectedSellerIds((prev) => prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id])}
             onClearSellers={() => setSelectedSellerIds([])}
+            stageLabels={stageLabels}
           />
         </AnimatedSection>
       )}
@@ -462,7 +463,7 @@ export default function Dashboard() {
 
       {!isFinance && (
         <AnimatedSection delay={0.05}>
-          <TimePerStage averageTimePerStage={data.averageTimePerStage} />
+          <TimePerStage averageTimePerStage={data.averageTimePerStage} stageLabels={stageLabels} />
         </AnimatedSection>
       )}
       </div>

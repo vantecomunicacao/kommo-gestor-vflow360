@@ -4,7 +4,7 @@
 // mecânica — mesmo código, sem mudança de lógica (Fase 4 do plano de
 // remediação, 2026-08). Testadas em pure.test.ts.
 
-export type Bucket = "contato_inicial" | "proposta_enviada" | "fechamento" | "venda_ganha";
+export type Bucket = "contato_inicial" | "qualificando" | "proposta_enviada" | "fechamento" | "venda_ganha";
 
 export interface KommoStatus { id: string; name: string; sort?: number; type?: number; }
 
@@ -14,7 +14,7 @@ export interface KommoStatus { id: string; name: string; sort?: number; type?: n
  * `bucketOf`/`fallbackByStage` no handler (index.ts).
  */
 export function inferFunnelMapping(stages: KommoStatus[]): Record<Bucket, string[]> {
-  const out: Record<Bucket, string[]> = { contato_inicial: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
+  const out: Record<Bucket, string[]> = { contato_inicial: [], qualificando: [], proposta_enviada: [], fechamento: [], venda_ganha: [] };
   for (const s of stages) {
     const id = String(s.id);
     if (id === "142") { out.venda_ganha.push(id); continue; }
@@ -23,6 +23,7 @@ export function inferFunnelMapping(stages: KommoStatus[]): Record<Bucket, string
     if (/(ganho|ganha|won|venda)/.test(n)) out.venda_ganha.push(id);
     else if (/(fechamento|closing|negocia|proposta enviada)/.test(n)) out.fechamento.push(id);
     else if (/(proposta|proposal|enviar|oferta|reuni)/.test(n)) out.proposta_enviada.push(id);
+    else if (/(qualific|triagem)/.test(n)) out.qualificando.push(id);
     else out.contato_inicial.push(id);
   }
   if (!out.venda_ganha.includes("142")) out.venda_ganha.push("142");
@@ -170,9 +171,9 @@ export function computeTimePerStage(
   leads: DashboardLead[],
   eventsByLead: Map<string, StageEvent[]>,
   bucketOf: BucketResolver,
-): { contatoInicial: number; propostaEnviada: number; fechamento: number } {
+): { contatoInicial: number; qualificando: number; propostaEnviada: number; fechamento: number } {
   const acc: Record<Exclude<Bucket, "venda_ganha">, { sum: number; n: number }> = {
-    contato_inicial: { sum: 0, n: 0 }, proposta_enviada: { sum: 0, n: 0 }, fechamento: { sum: 0, n: 0 },
+    contato_inicial: { sum: 0, n: 0 }, qualificando: { sum: 0, n: 0 }, proposta_enviada: { sum: 0, n: 0 }, fechamento: { sum: 0, n: 0 },
   };
   const now = Date.now();
   for (const l of leads) {
@@ -197,6 +198,7 @@ export function computeTimePerStage(
   const toHours = (o: { sum: number; n: number }) => (o.n ? Math.round(o.sum / o.n / 3_600_000) : 0);
   return {
     contatoInicial: toHours(acc.contato_inicial),
+    qualificando: toHours(acc.qualificando),
     propostaEnviada: toHours(acc.proposta_enviada),
     fechamento: toHours(acc.fechamento),
   };

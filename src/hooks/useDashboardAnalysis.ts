@@ -54,7 +54,7 @@ export interface PeriodMetrics {
   cycleToWonDays: number | null;
   cycleToLostDays: number | null;
   lossReasons: { name: string; count: number }[];
-  sellers: { name: string; contatoInicial: number; propostaEnviada: number; fechamento: number; vendaGanha: number; wonRevenue: number }[];
+  sellers: { name: string; contatoInicial: number; qualificando: number; propostaEnviada: number; fechamento: number; vendaGanha: number; wonRevenue: number }[];
 }
 export interface AnalysisMetrics {
   principal: PeriodMetrics | null;

@@ -1,8 +1,13 @@
 import { AverageTimePerStage } from "@/hooks/useKommoData";
 import { Clock, Timer } from "lucide-react";
 import { SectionTooltip } from "./SectionTooltip";
+import { resolveFunnelLabel } from "@/lib/dashboard-funnel";
 
-interface TimePerStageProps { averageTimePerStage: AverageTimePerStage; }
+interface TimePerStageProps {
+  averageTimePerStage: AverageTimePerStage;
+  /** Rótulos customizados por etapa (Configurações → Funil → "Nomes das etapas do funil"). */
+  stageLabels?: Record<string, string>;
+}
 
 const formatHoursToTime = (hours: number): string => {
   if (hours < 24) return `${hours}h`;
@@ -12,12 +17,13 @@ const formatHoursToTime = (hours: number): string => {
   return `${days}d ${remaining}h`;
 };
 
-export function TimePerStage({ averageTimePerStage }: TimePerStageProps) {
+export function TimePerStage({ averageTimePerStage, stageLabels }: TimePerStageProps) {
   const stages = [
-    { name: "Contato Inicial", hours: averageTimePerStage.contatoInicial, color: "funnel-1" },
-    { name: "Proposta Enviada", hours: averageTimePerStage.propostaEnviada, color: "funnel-2" },
-    { name: "Fechamento", hours: averageTimePerStage.fechamento, color: "funnel-3" },
-  ];
+    { key: "contato_inicial", hours: averageTimePerStage.contatoInicial, color: "funnel-1" },
+    { key: "qualificando", hours: averageTimePerStage.qualificando, color: "funnel-2" },
+    { key: "proposta_enviada", hours: averageTimePerStage.propostaEnviada, color: "funnel-3" },
+    { key: "fechamento", hours: averageTimePerStage.fechamento, color: "funnel-4" },
+  ].map((s) => ({ ...s, name: resolveFunnelLabel(s.key, stageLabels) }));
   const maxHours = Math.max(...stages.map((s) => s.hours), 1);
 
   return (
@@ -32,7 +38,7 @@ export function TimePerStage({ averageTimePerStage }: TimePerStageProps) {
         {stages.map((stage) => {
           const widthPercentage = (stage.hours / maxHours) * 100;
           return (
-            <div key={stage.name} className="space-y-2.5">
+            <div key={stage.key} className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-foreground">{stage.name}</span>
                 <div className="flex items-center gap-2">
