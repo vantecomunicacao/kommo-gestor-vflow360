@@ -248,6 +248,40 @@ O Coolify (`http://72.60.248.166:8000`) é **compartilhado** com a produção do
   para um UUID/slug que **não** seja do `Kommo-Gestor-Vflow360`: **parar e avisar**, nunca
   "tentar o que parece certo".
 
+## Métricas Personalizadas — semântica do numerador "passou por" (decisão de 2026-08-10)
+
+Discussão com o usuário sobre a conta "Dr. Eduardo Townsend" (métrica "Não
+compareceu (Agendamento)"): o numerador de uma Métrica Personalizada usa
+`countPassedThrough` (`supabase/functions/kommo-dashboard/pure.ts`) — conta
+lead que está **atualmente** na etapa OU que teve, em qualquer momento do
+histórico (`kommo.lead_stage_events`), um evento de entrada nela. Isso é
+diferente de "está agora em" (`countCurrentlyIn`, usado só no denominador) e
+foi a causa de uma métrica mostrar 35,3% no Dashboard enquanto a contagem
+manual de "quem está lá agora" dava 23,5% — não é bug, é o numerador contando
+leads que já passaram pela etapa e desde então avançaram/foram remarcados
+(confirmado investigando um lead específico: 2 dos 6 que compunham o
+numerador não estavam mais fisicamente na etapa).
+
+**Decisão: manter o comportamento atual, sem mudança de código.** Avaliadas e
+descartadas duas mitigações:
+- **Tag no Kommo em vez de (ou além d)a etapa de funil** — permitiria corrigir
+  manualmente um erro de movimentação (tag é removível; evento de etapa não
+  é). Descartada porque exigiria 3 peças de infra que não existem hoje
+  (automação de tag no Kommo, sync de tags pro nosso banco — `kommo-sync` não
+  traz tags — e extensão do schema de Métricas Personalizadas pra aceitar tag
+  como referência, hoje só aceita par funil+etapa). Só compensaria se erro de
+  movimentação fosse frequente; usuário confirmou que não é (só move pra
+  "Não compareceu" quem realmente faltou).
+- **Filtro por duração mínima na etapa** (evitar contar passagens de
+  1-2 segundos, como vimos num lead de teste/demo que flapou entre 6 etapas
+  em minutos) — mesma conclusão: não compensa sem um problema real
+  observado no fluxo de produção do usuário.
+
+Se essa conversa for revisitada (ex.: usuário reportar métrica de etapa
+"passageira" tipo "Não compareceu"/"No Show" com número maior que o esperado),
+comece explicando essa diferença numerador-histórico vs denominador-atual
+antes de assumir bug.
+
 ## Onde ficam as tabelas (schemas do Supabase)
 
 Desde a separação de infra (2026-08-02), o schema `kommo` vive no **projeto
