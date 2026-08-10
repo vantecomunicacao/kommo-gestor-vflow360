@@ -1,15 +1,19 @@
-import { useMemo } from "react";
+import { useState } from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Plus, X } from "lucide-react";
+import { Sparkles, Plus, X, ChevronsUpDown, AlertTriangle, Calculator, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 import {
   CustomMetric, MAX_CUSTOM_METRICS, MAX_STAGE_REFS_PER_SIDE, StageRef,
   stageRefKey, CUSTOM_METRIC_ICONS, DEFAULT_CUSTOM_METRIC_ICON, getCustomMetricIcon,
+  formatCustomMetricValue,
 } from "@/lib/custom-metrics";
 
 interface Stage { id: string; name: string; }
@@ -25,25 +29,119 @@ interface MetricsReportTabProps {
   setVisibleFields: React.Dispatch<React.SetStateAction<string[]>>;
   chartFields: string[];
   setChartFields: React.Dispatch<React.SetStateAction<string[]>>;
+  workspaceId: string;
+}
+
+// Seletor de etapa com busca (funil/etapa) — substitui o <Select> em árvore, que
+// exigia abrir + rolar por grupo pra achar uma etapa quando há vários funis.
+function StageCombobox({
+  pipelines, disabledKeys, onSelect,
+}: {
+  pipelines: Pipeline[];
+  disabledKeys: Set<string>;
+  onSelect: (ref: StageRef) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button" variant="outline" size="sm"
+          className="h-8 w-full justify-between text-xs font-normal text-muted-foreground"
+        >
+          + Adicionar etapa
+          <ChevronsUpDown className="ml-2 h-3 w-3 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Buscar funil ou etapa..." className="text-sm" />
+          <CommandList>
+            <CommandEmpty>Nenhuma etapa encontrada.</CommandEmpty>
+            {pipelines.map((p) => (
+              <CommandGroup key={p.id} heading={p.name}>
+                {p.stages.map((s) => {
+                  const key = `${p.kommo_id}:${s.id}`;
+                  const isDisabled = disabledKeys.has(key);
+                  return (
+                    <CommandItem
+                      key={key}
+                      value={`${p.name} ${s.name}`}
+                      disabled={isDisabled}
+                      onSelect={() => {
+                        onSelect({ pipelineId: p.kommo_id, statusId: s.id });
+                        setOpen(false);
+                      }}
+                    >
+                      {s.name}
+                      {isDisabled && <span className="ml-auto text-[10px] text-muted-foreground">já adicionada</span>}
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function MetricsReportTab({
   pipelines, customFields, customMetrics, setCustomMetrics,
-  visibleFields, setVisibleFields, chartFields, setChartFields,
+  visibleFields, setVisibleFields, chartFields, setChartFields, workspaceId,
 }: MetricsReportTabProps) {
-  // Lista achatada de etapas ("Funil › Etapa") pra montar os seletores das Métricas
-  // Personalizadas — cada opção carrega o par {pipelineId, statusId} que a métrica guarda.
-  const stageOptions = useMemo(
-    () => pipelines.flatMap((p) => p.stages.map((s) => ({
-      key: `${p.kommo_id}:${s.id}`,
-      label: `${p.name} › ${s.name}`,
-      ref: { pipelineId: p.kommo_id, statusId: s.id } as StageRef,
-    }))),
-    [pipelines],
-  );
-  const stageLabel = (ref: StageRef) =>
-    stageOptions.find((o) => o.ref.pipelineId === ref.pipelineId && o.ref.statusId === ref.statusId)?.label
-    || `${ref.pipelineId}:${ref.statusId}`;
+  const pipelineName = (pipelineId: string) =>
+    pipelines.find((p) => p.kommo_id === pipelineId)?.name || pipelineId;
+  const stageOnly = (ref: StageRef) =>
+    pipelines.find((p) => p.kommo_id === ref.pipelineId)?.stages.find((s) => s.id === ref.statusId)?.name
+    || ref.statusId;
+
+  // Agrupa as badges de um lado (numerador/denominador) por funil, pra ficar
+  // legível quando a métrica mistura etapas de funis diferentes.
+  const groupByPipeline = (refs: StageRef[]) => {
+    const groups = new Map<string, StageRef[]>();
+    for (const r of refs) {
+      const list = groups.get(r.pipelineId) ?? [];
+      list.push(r);
+      groups.set(r.pipelineId, list);
+    }
+    return Array.from(groups.entries());
+  };
+
+  const [previews, setPreviews] = useState<Record<string, { value: number | null; loading: boolean }>>({});
+
+  // Prévia aproximada: conta leads pelo status ATUAL (não pelo histórico de
+  // quem já passou pela etapa, como o Dashboard/Relatório fazem) — serve pra
+  // conferir rapidamente se as etapas escolhidas têm leads e se o resultado
+  // é plausível, não pra bater 1:1 com o valor final.
+  const runPreview = async (m: CustomMetric) => {
+    setPreviews((prev) => ({ ...prev, [m.id]: { value: prev[m.id]?.value ?? null, loading: true } }));
+    try {
+      const countRefs = async (refs: StageRef[]) => {
+        const counts = await Promise.all(refs.map(async (r) => {
+          const { count } = await supabase
+            .from("leads")
+            .select("kommo_id", { count: "exact", head: true })
+            .eq("workspace_id", workspaceId).eq("is_deleted", false)
+            .eq("pipeline_id", r.pipelineId).eq("status_id", r.statusId);
+          return count ?? 0;
+        }));
+        return counts.reduce((a, b) => a + b, 0);
+      };
+      const passed = await countRefs(m.numerator);
+      let value: number | null;
+      if (m.format === "number") {
+        value = passed;
+      } else {
+        const base = await countRefs(m.denominator);
+        value = base > 0 ? (passed / base) * 100 : null;
+      }
+      setPreviews((prev) => ({ ...prev, [m.id]: { value, loading: false } }));
+    } catch {
+      setPreviews((prev) => ({ ...prev, [m.id]: { value: null, loading: false } }));
+    }
+  };
 
   const addCustomMetric = () => {
     if (customMetrics.length >= MAX_CUSTOM_METRICS) return;
@@ -56,6 +154,10 @@ export default function MetricsReportTab({
   const patchCustomMetric = (id: string, patch: Partial<CustomMetric>) =>
     setCustomMetrics((prev) => prev.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   const addStageRef = (metricId: string, side: "numerator" | "denominator", ref: StageRef) => {
+    setPreviews((prev) => {
+      const { [metricId]: _drop, ...rest } = prev;
+      return rest;
+    });
     setCustomMetrics((prev) => prev.map((m) => {
       if (m.id !== metricId) return m;
       const list = m[side];
@@ -65,10 +167,18 @@ export default function MetricsReportTab({
     }));
   };
   const removeStageRef = (metricId: string, side: "numerator" | "denominator", ref: StageRef) => {
+    setPreviews((prev) => {
+      const { [metricId]: _drop, ...rest } = prev;
+      return rest;
+    });
     setCustomMetrics((prev) => prev.map((m) => (
       m.id === metricId ? { ...m, [side]: m[side].filter((r) => stageRefKey(r) !== stageRefKey(ref)) } : m
     )));
   };
+  // Mesma etapa nos dois lados vira "sempre 100%" quando é a única em cada lado
+  // (numerador == denominador) — sinal quase certo de configuração errada.
+  const hasDuplicateStage = (m: CustomMetric) =>
+    m.format === "percent" && m.numerator.some((n) => m.denominator.some((d) => stageRefKey(n) === stageRefKey(d)));
 
   const toggleField = (kommo_id: string) => {
     setVisibleFields((prev) => {
@@ -175,35 +285,27 @@ export default function MetricsReportTab({
                 <Label className="text-xs">
                   {m.format === "percent" ? "Passaram por (numerador)" : "Passaram por"}
                 </Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {m.numerator.map((r) => (
-                    <Badge key={stageRefKey(r)} variant="secondary" className="gap-1 pr-1">
-                      {stageLabel(r)}
-                      <button type="button" onClick={() => removeStageRef(m.id, "numerator", r)} aria-label="Remover etapa">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </Badge>
+                <div className="space-y-1">
+                  {groupByPipeline(m.numerator).map(([pid, refs]) => (
+                    <div key={pid} className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[10px] text-muted-foreground shrink-0">{pipelineName(pid)}:</span>
+                      {refs.map((r) => (
+                        <Badge key={stageRefKey(r)} variant="secondary" className="gap-1 pr-1">
+                          {stageOnly(r)}
+                          <button type="button" onClick={() => removeStageRef(m.id, "numerator", r)} aria-label="Remover etapa">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
                   ))}
                 </div>
                 {m.numerator.length < MAX_STAGE_REFS_PER_SIDE && (
-                  <Select value="" onValueChange={(v) => {
-                    const opt = stageOptions.find((o) => o.key === v);
-                    if (opt) addStageRef(m.id, "numerator", opt.ref);
-                  }}>
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="+ Adicionar etapa" /></SelectTrigger>
-                    <SelectContent>
-                      {pipelines.map((p) => (
-                        <SelectGroup key={p.id}>
-                          <SelectLabel>{p.name}</SelectLabel>
-                          {p.stages.map((s) => (
-                            <SelectItem key={`${p.kommo_id}:${s.id}`} value={`${p.kommo_id}:${s.id}`}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <StageCombobox
+                    pipelines={pipelines}
+                    disabledKeys={new Set(m.numerator.map(stageRefKey))}
+                    onSelect={(ref) => addStageRef(m.id, "numerator", ref)}
+                  />
                 )}
               </div>
 
@@ -211,37 +313,60 @@ export default function MetricsReportTab({
               {m.format === "percent" && (
                 <div className="space-y-1.5">
                   <Label className="text-xs">Estão em (denominador)</Label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {m.denominator.map((r) => (
-                      <Badge key={stageRefKey(r)} variant="secondary" className="gap-1 pr-1">
-                        {stageLabel(r)}
-                        <button type="button" onClick={() => removeStageRef(m.id, "denominator", r)} aria-label="Remover etapa">
-                          <X className="w-3 h-3" />
-                        </button>
-                      </Badge>
+                  <div className="space-y-1">
+                    {groupByPipeline(m.denominator).map(([pid, refs]) => (
+                      <div key={pid} className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] text-muted-foreground shrink-0">{pipelineName(pid)}:</span>
+                        {refs.map((r) => (
+                          <Badge key={stageRefKey(r)} variant="secondary" className="gap-1 pr-1">
+                            {stageOnly(r)}
+                            <button type="button" onClick={() => removeStageRef(m.id, "denominator", r)} aria-label="Remover etapa">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
                     ))}
                   </div>
                   {m.denominator.length < MAX_STAGE_REFS_PER_SIDE && (
-                    <Select value="" onValueChange={(v) => {
-                      const opt = stageOptions.find((o) => o.key === v);
-                      if (opt) addStageRef(m.id, "denominator", opt.ref);
-                    }}>
-                      <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="+ Adicionar etapa" /></SelectTrigger>
-                      <SelectContent>
-                        {pipelines.map((p) => (
-                          <SelectGroup key={p.id}>
-                            <SelectLabel>{p.name}</SelectLabel>
-                            {p.stages.map((s) => (
-                              <SelectItem key={`${p.kommo_id}:${s.id}`} value={`${p.kommo_id}:${s.id}`}>
-                                {s.name}
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <StageCombobox
+                      pipelines={pipelines}
+                      disabledKeys={new Set(m.denominator.map(stageRefKey))}
+                      onSelect={(ref) => addStageRef(m.id, "denominator", ref)}
+                    />
                   )}
                 </div>
+              )}
+
+              {hasDuplicateStage(m) && (
+                <p className="flex items-center gap-1.5 text-xs text-warning-ink">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  A mesma etapa está no numerador e no denominador — se forem as únicas de cada lado, o resultado é sempre 100%.
+                </p>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <Button
+                  type="button" variant="outline" size="sm"
+                  disabled={m.numerator.length === 0 || previews[m.id]?.loading}
+                  onClick={() => runPreview(m)}
+                >
+                  {previews[m.id]?.loading
+                    ? <Loader2 className="w-3.5 h-3.5 mr-2 animate-spin" />
+                    : <Calculator className="w-3.5 h-3.5 mr-2" />}
+                  Calcular prévia
+                </Button>
+                {previews[m.id] && !previews[m.id].loading && (
+                  <span className="text-sm">
+                    Prévia: <strong>{formatCustomMetricValue(previews[m.id].value, m.format)}</strong>
+                  </span>
+                )}
+              </div>
+              {previews[m.id] && !previews[m.id].loading && (
+                <p className="text-[11px] text-muted-foreground">
+                  Aproximada — conta pelo status atual dos leads. O valor real no Dashboard/Relatório soma quem
+                  já passou pela etapa em algum momento, então pode ser maior.
+                </p>
               )}
             </div>
           ))}
