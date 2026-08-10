@@ -414,7 +414,13 @@ serve(async (req) => {
             beforeLostStatus = e.before;
           }
         }
-        const lostBucket = beforeLostStatus ? stageBucket(l.pipeline_id, beforeLostStatus) : null;
+        // "Venda Ganha" fica de fora do selo: um lead que chegou lá e depois foi
+        // marcado como perdido é uma reversão manual no Kommo (venda desfeita), não
+        // um sinal de funil — misturado com as outras etapas, só confunde (etapa
+        // "de sucesso" com selo vermelho). O lead segue contado normalmente em
+        // Oportunidades Perdidas e no total, só não ganha o selo por etapa aqui.
+        const lostBucketRaw = beforeLostStatus ? stageBucket(l.pipeline_id, beforeLostStatus) : null;
+        const lostBucket = lostBucketRaw === "venda_ganha" ? null : lostBucketRaw;
         if (lostBucket) {
           lostAtCounts[lostBucket]++;
           if (lostAtLeads[lostBucket].length < 200) {

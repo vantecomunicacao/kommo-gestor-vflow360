@@ -78,7 +78,7 @@ export function FunnelVisualization({ funnelStages, conversionRates, lostLeads, 
                       setSelectedStage({ title: `Perdidos em "${stage.name}"`, leads: stage.lostHereLeads || [] });
                     }}
                     title={`${stage.lostHere} lead(s) chegaram a "${stage.name}" e depois foram marcados como perdido. Clique para ver a lista.`}
-                    className="absolute -top-3 right-6 z-10 min-w-[28px] h-7 px-1.5 flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-sm font-bold shadow-md ring-2 ring-card hover:brightness-110 transition-all"
+                    className="absolute -top-3 right-[10%] z-10 min-w-[28px] h-7 px-1.5 flex items-center justify-center rounded-full bg-destructive text-destructive-foreground text-sm font-bold shadow-md ring-2 ring-card hover:brightness-110 transition-all"
                   >
                     {stage.lostHere}
                   </button>
