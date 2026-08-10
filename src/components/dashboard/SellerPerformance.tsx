@@ -107,8 +107,8 @@ export function SellerPerformance({ sellers, selectedSellerIds = [], onSellerTog
           <tbody>
             {visibleSellers.map((s) => {
               const realIndex = sortedSellers.indexOf(s);
-              const rate = s.contatoInicial > 0 ? ((s.vendaGanha / s.contatoInicial) * 100).toFixed(1) : "0.0";
               const totalLeads = s.contatoInicial + s.qualificando + s.propostaEnviada + s.fechamento + s.vendaGanha;
+              const rate = totalLeads > 0 ? ((s.vendaGanha / totalLeads) * 100).toFixed(1) : "0.0";
               const isSelected = !!s.id && selectedSellerIds.includes(s.id);
               const canClick = interactive && !!s.id;
               return (
