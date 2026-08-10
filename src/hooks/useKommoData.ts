@@ -10,6 +10,8 @@ export interface CustomMetricResult {
   color?: "accent" | "success" | "warning" | "destructive";
   numeratorRefs?: StageRefLabel[];
   denominatorRefs?: StageRefLabel[];
+  numeratorCount?: number;
+  denominatorCount?: number | null;
 }
 export interface FunnelStage { id: string; name: string; count: number; currentCount?: number; leads?: StageLead[]; }
 export interface Seller {

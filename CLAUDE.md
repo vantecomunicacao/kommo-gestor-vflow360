@@ -282,6 +282,20 @@ Se essa conversa for revisitada (ex.: usuário reportar métrica de etapa
 comece explicando essa diferença numerador-histórico vs denominador-atual
 antes de assumir bug.
 
+**Limite de 3 Métricas Personalizadas (`MAX_CUSTOM_METRICS`, decisão de
+2026-08-10):** hoje é conservador de propósito, não um teto pensado a partir
+do espaço visual — o Dashboard já corta em 8
+(`data.customMetrics?.slice(0, 8)` em `src/pages/Dashboard.tsx`), o dobro do
+permitido. O motivo de manter em 3 é custo computacional: cada métrica entra
+no backfill do `kommo-report-snapshot` (recalculado por mês × por vendedor),
+então subir o limite multiplica esse custo por workspace. **Pode ser
+aumentado quando alguém esbarrar de verdade no limite** (ex.: tentar
+configurar uma 4ª métrica) — é uma mudança pequena e reversível
+(`MAX_CUSTOM_METRICS` em `src/lib/custom-metrics.ts` +
+`CustomMetricsListSchema`/`.max(3)` em `supabase/functions/_shared/schemas.ts`),
+mas antes de subir vale reavaliar o custo real do backfill no Relatório com o
+número novo, não só trocar a constante.
+
 ## Onde ficam as tabelas (schemas do Supabase)
 
 Desde a separação de infra (2026-08-02), o schema `kommo` vive no **projeto

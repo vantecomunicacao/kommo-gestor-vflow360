@@ -415,7 +415,6 @@ export default function DashboardSettings() {
             setVisibleFields={setVisibleFields}
             chartFields={chartFields}
             setChartFields={setChartFields}
-            workspaceId={activeWorkspace.id}
           />
         </TabsContent>
 

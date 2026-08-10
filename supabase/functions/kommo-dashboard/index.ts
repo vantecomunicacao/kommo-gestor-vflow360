@@ -592,10 +592,16 @@ serve(async (req) => {
       // mistura etapas de funis diferentes, algo permitido pelo schema).
       const numeratorRefs = describeStageRefs(allPipelines, m.numerator);
       const denominatorRefs = describeStageRefs(allPipelines, m.denominator);
-      const common = { id: m.id, name: m.name, format: m.format, icon: m.icon, color: m.color, numeratorRefs, denominatorRefs };
-      if (m.format === "number") return { ...common, value: passed };
+      // Contagem exata por trás de cada lado (não a aproximação por status atual
+      // que a tela de Configurações usava como prévia) — o card mostra isso no
+      // tooltip pra tirar qualquer dúvida sobre o número final.
+      const common = {
+        id: m.id, name: m.name, format: m.format, icon: m.icon, color: m.color,
+        numeratorRefs, denominatorRefs, numeratorCount: passed,
+      };
+      if (m.format === "number") return { ...common, denominatorCount: null, value: passed };
       const base = countCurrentlyInPure(leads, m.denominator);
-      return { ...common, value: base > 0 ? (passed / base) * 100 : null };
+      return { ...common, denominatorCount: base, value: base > 0 ? (passed / base) * 100 : null };
     });
 
     return new Response(JSON.stringify({

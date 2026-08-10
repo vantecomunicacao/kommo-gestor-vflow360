@@ -95,14 +95,20 @@ export const customMetricPipelineSummary = (
   return names.join(" + ");
 };
 
-// Tooltip detalhado: mostra exatamente quais etapas compõem cada lado, pra
-// esclarecer o cálculo (e ajudar a flagrar configuração errada, ex.: etapa do
-// funil errado escolhida por engano).
+// Tooltip detalhado: mostra exatamente quais etapas compõem cada lado E o
+// número exato de leads por trás (não a prévia aproximada da tela de
+// Configurações, que conta pelo status atual e pode divergir do valor real
+// no Dashboard/Relatório) — esclarece o cálculo e ajuda a flagrar
+// configuração errada (ex.: etapa do funil errado escolhida por engano).
 export const customMetricTooltip = (m: {
-  format: "percent" | "number"; numeratorRefs?: StageRefLabel[]; denominatorRefs?: StageRefLabel[];
+  format: "percent" | "number";
+  numeratorRefs?: StageRefLabel[]; denominatorRefs?: StageRefLabel[];
+  numeratorCount?: number; denominatorCount?: number | null;
 }): string => {
-  const side = (refs: StageRefLabel[] | undefined) =>
-    (refs ?? []).map((r) => `${r.stageName} (${r.pipelineName})`).join(" + ") || "—";
-  if (m.format === "number") return `Contagem: ${side(m.numeratorRefs)}`;
-  return `${side(m.numeratorRefs)} ÷ ${side(m.denominatorRefs)}`;
+  const side = (refs: StageRefLabel[] | undefined, count: number | null | undefined) => {
+    const label = (refs ?? []).map((r) => `${r.stageName} (${r.pipelineName})`).join(" + ") || "—";
+    return count == null ? label : `${label} (${count})`;
+  };
+  if (m.format === "number") return `Contagem: ${side(m.numeratorRefs, m.numeratorCount)}`;
+  return `${side(m.numeratorRefs, m.numeratorCount)} ÷ ${side(m.denominatorRefs, m.denominatorCount)}`;
 };
