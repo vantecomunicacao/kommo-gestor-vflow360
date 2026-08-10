@@ -277,10 +277,58 @@ descartadas duas mitigações:
   em minutos) — mesma conclusão: não compensa sem um problema real
   observado no fluxo de produção do usuário.
 
-Se essa conversa for revisitada (ex.: usuário reportar métrica de etapa
-"passageira" tipo "Não compareceu"/"No Show" com número maior que o esperado),
-comece explicando essa diferença numerador-histórico vs denominador-atual
-antes de assumir bug.
+**CORRIGIDO em 2026-08-10** (revisão da decisão acima, mesmo dia): ao
+reexaminar o caso concreto ("Dr. Eduardo Townsend", métrica "Não compareceu
+(Agendamento)": numerador 3/histórico, denominador 9/atual → 33,3%, destoando
+da contagem manual "quem está lá agora" que dava 23,5%), o usuário concluiu
+que misturar as duas réguas na mesma divisão é inconsistente por definição
+(não só "confuso") — se o numerador conta em modo funil de passagem
+(histórico), o denominador tem que contar do mesmo jeito, senão a % divide
+duas fotos tiradas em critérios diferentes. Corrigido em
+`supabase/functions/kommo-dashboard/index.ts` (função `customMetrics`): o
+denominador do formato `percent` trocou de `countCurrentlyInPure` pra
+`countPassedThroughPure` (mesma função já usada no numerador), alinhando com
+o que `kommo-report-snapshot` (`leadReachedAnyOf`, usado nos dois lados de
+`customPassed`/`customBase`) já fazia certo. `countCurrentlyIn` (`pure.ts`)
+ficou sem uso em produção depois disso — mantida como função pura testada
+(`pure.test.ts`), não removida. Fica pendente/decidido separadamente: se
+"passou por" deveria exigir um tempo mínimo parado na etapa antes de contar
+(evita inflar com movimentações rápidas/erros corrigidos na hora) — avaliado
+de novo nesta mesma conversa e **mantido sem filtro de tempo** (qualquer
+entrada já conta), mesma conclusão da avaliação anterior de 2026-08-10 por
+falta de problema real recorrente. `deno check`/`deno test` (33 testes,
+`pure.test.ts`) rodados e verdes depois da mudança.
+
+Se essa conversa for revisitada de novo (ex.: usuário reportar % de Métrica
+Personalizada que ainda parece destoar de uma contagem manual), comece
+verificando se numerador e denominador estão usando a MESMA função de
+contagem (`countPassedThroughPure` nos dois lados) antes de assumir bug —
+essa já foi a causa raiz duas vezes.
+
+## Filtro de funil do Dashboard — prioridade padrão-vs-seleção manual (decisão de 2026-08-10)
+
+Achado por UX: selecionar um funil manualmente no Dashboard, ir em
+"Personalizar" (Configurações) e voltar fazia o filtro reverter pro(s)
+funil(is) padrão do workspace (`dashboard_settings.default_pipeline_ids`,
+"Funis do Dashboard" em Configurações), perdendo a seleção manual. Não era
+bug de estado se perdendo — era a regra "o(s) funil(is) padrão vencem na
+abertura" (`src/hooks/useDashboardFilterHydration.ts`, comentário original
+"sempre tem prioridade na abertura") disparando de novo, porque `/dashboard`
+e `/settings/dashboard` são rotas lazy separadas (`src/App.tsx`) que
+desmontam/remontam o componente — cada remount era tratado como "abertura".
+
+**Decisão:** o padrão só deve vencer na 1ª abertura de cada ABA do navegador
+(sessão), não em todo remount por navegação interna. Implementado via
+`sessionStorage` (não `localStorage`, de propósito — deve voltar a valer se
+a pessoa fechar a aba e abrir de novo depois): `defaultPipelineAppliedKey`
+em `src/lib/dashboard-filters-storage.ts`, checado/gravado em
+`useDashboardFilterHydration.ts` (guarda `defaultPipelineIds = []` se a flag
+`dashboard:defaultPipelineApplied:{workspaceId}` já estiver `"1"` nesta aba).
+Alternativa descartada: "seleção manual sempre vence, nem em refresh de
+página" — usuário preferiu a regra baseada em sessão, mantendo o padrão útil
+pra quem nunca mexeu no filtro. Deep link via URL (`?pipelines=...`) não é
+afetado — já ignorava o padrão antes desta mudança. `tsc --noEmit` e
+`eslint` rodados nos dois arquivos, limpos.
 
 **Limite de 3 Métricas Personalizadas (`MAX_CUSTOM_METRICS`, decisão de
 2026-08-10):** hoje é conservador de propósito, não um teto pensado a partir

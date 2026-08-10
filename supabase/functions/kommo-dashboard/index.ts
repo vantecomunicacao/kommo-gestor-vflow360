@@ -20,7 +20,6 @@ import {
   stageBucket as stageBucketPure,
   isWonLead as isWonLeadPure,
   computeTimePerStage as computeTimePerStagePure,
-  countCurrentlyIn as countCurrentlyInPure,
   countPassedThrough as countPassedThroughPure,
   describeStageRefs,
 } from "./pure.ts";
@@ -667,7 +666,7 @@ serve(async (req) => {
         numeratorRefs, denominatorRefs, numeratorCount: passed,
       };
       if (m.format === "number") return { ...common, denominatorCount: null, value: passed };
-      const base = countCurrentlyInPure(leads, m.denominator);
+      const base = countPassedThroughPure(leads, eventsByLead, m.denominator);
       return { ...common, denominatorCount: base, value: base > 0 ? (passed / base) * 100 : null };
     });
 

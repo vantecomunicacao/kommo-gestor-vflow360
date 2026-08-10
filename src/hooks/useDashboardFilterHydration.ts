@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { subDays } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { DateBasis } from "@/lib/report-axis";
-import { type SavedFilters, filtersStorageKey, parseCsvParam, parseCustomFiltersParam, parseLocalDateParam } from "@/lib/dashboard-filters-storage";
+import { type SavedFilters, filtersStorageKey, defaultPipelineAppliedKey, parseCsvParam, parseCustomFiltersParam, parseLocalDateParam } from "@/lib/dashboard-filters-storage";
 import { supabase } from "@/integrations/supabase/client";
 
 const defaultDateRange = (): DateRange => ({
@@ -83,8 +83,12 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
       }
 
       // Funil(is) padrão do workspace — pré-selecionados na abertura (o filtro do
-      // Dashboard aceita múltiplos funis, igual esse campo de Configurações).
-      const defaultPipelineIds: string[] = settings?.default_pipeline_ids || [];
+      // Dashboard aceita múltiplos funis, igual esse campo de Configurações). Só
+      // vale na 1ª abertura da ABA (sessionStorage): remontar o Dashboard ao voltar
+      // de Configurações não deve sobrescrever uma seleção manual já feita nesta sessão.
+      const appliedKey = defaultPipelineAppliedKey(workspaceId);
+      const alreadyAppliedThisSession = sessionStorage.getItem(appliedKey) === "1";
+      const defaultPipelineIds: string[] = alreadyAppliedThisSession ? [] : (settings?.default_pipeline_ids || []);
 
       // 1) Restaurar filtros salvos (período, vendedores, UTM…)
       let restoredPipelineIds: string[] = [];
@@ -131,6 +135,7 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
         const sameSelection = restoredPipelineIds.length === defaultPipelineIds.length
           && restoredPipelineIds.every((id) => defaultPipelineIds.includes(id));
         if (restored && !sameSelection) setSelectedStageIds([]);
+        sessionStorage.setItem(appliedKey, "1");
       } else {
         setSelectedPipelineIds(restored ? restoredPipelineIds : []);
       }

@@ -25,6 +25,12 @@ export type SavedFilters = {
 
 export const filtersStorageKey = (workspaceId: string) => `dashboard:filters:${workspaceId}`;
 
+// sessionStorage (não localStorage): marca que o funil padrão do workspace já
+// venceu uma vez nesta aba. Navegar pra Configurações e voltar remonta o
+// Dashboard, mas não deve contar como "abertura" de novo — só uma aba nova/
+// refresh deve. sessionStorage soma isso de graça (limpa ao fechar a aba).
+export const defaultPipelineAppliedKey = (workspaceId: string) => `dashboard:defaultPipelineApplied:${workspaceId}`;
+
 // Filtros aceitos como query param (deep link) — arrays viram string separada por
 // vírgula. Ver docs/plano-filtros-dashboard.md § "Fase 5" pro design completo.
 export const parseCsvParam = (v: string | null): string[] => (v ? v.split(",").filter(Boolean) : []);
