@@ -14,35 +14,110 @@ export type Database = {
   }
   kommo: {
     Tables: {
+      ai_call_log: {
+        Row: {
+          created_at: string
+          id: string
+          mode: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          mode: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          mode?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_call_log_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ai_provider_config: {
         Row: {
-          api_key: string | null
+          api_key_secret_id: string | null
           created_at: string
           id: string
           model: string | null
           provider: string
           updated_at: string
-          user_id: string
+          user_id: string | null
+          workspace_id: string
         }
         Insert: {
-          api_key?: string | null
+          api_key_secret_id?: string | null
           created_at?: string
           id?: string
           model?: string | null
           provider?: string
           updated_at?: string
-          user_id: string
+          user_id?: string | null
+          workspace_id: string
         }
         Update: {
-          api_key?: string | null
+          api_key_secret_id?: string | null
           created_at?: string
           id?: string
           model?: string | null
           provider?: string
           updated_at?: string
-          user_id?: string
+          user_id?: string | null
+          workspace_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ai_provider_config_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_provider_config_audit: {
+        Row: {
+          action: string
+          created_at: string
+          id: string
+          model: string | null
+          user_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          id?: string
+          model?: string | null
+          user_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          id?: string
+          model?: string | null
+          user_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_provider_config_audit_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       contacts: {
         Row: {
@@ -1031,6 +1106,17 @@ export type Database = {
         Returns: boolean
       }
       create_workspace: { Args: { _name: string }; Returns: string }
+      delete_ai_provider_config: {
+        Args: { p_user_id: string; p_workspace_id: string }
+        Returns: undefined
+      }
+      get_ai_provider_config: {
+        Args: { p_workspace_id: string }
+        Returns: {
+          api_key: string
+          model: string
+        }[]
+      }
       get_integration_token: {
         Args: { p_integration_id: string }
         Returns: string
@@ -1068,6 +1154,15 @@ export type Database = {
       }
       remove_workspace_member: {
         Args: { _user_id: string; _workspace_id: string }
+        Returns: undefined
+      }
+      set_ai_provider_config: {
+        Args: {
+          p_api_key: string
+          p_model: string
+          p_user_id: string
+          p_workspace_id: string
+        }
         Returns: undefined
       }
       set_integration_token: {

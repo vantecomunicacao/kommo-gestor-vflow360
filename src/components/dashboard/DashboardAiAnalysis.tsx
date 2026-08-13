@@ -186,12 +186,23 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
       await streamAnalyze(workspaceId, q, p, {
         onMeta: (m) => setReport((r) => (r ? { ...r, prompt: m.prompt, params: m.params, metrics: m.metrics } : r)),
         onDelta: (t) => setReport((r) => (r ? { ...r, result: r.result + t } : r)),
-        onDone: (d) => { setReport((r) => (r ? { ...r, id: d.id } : r)); queryClient.invalidateQueries({ queryKey: ["dashboard-analyses", workspaceId] }); },
+        onDone: (d) => {
+          setReport((r) => (r ? { ...r, id: d.id } : r));
+          queryClient.invalidateQueries({ queryKey: ["dashboard-analyses", workspaceId] });
+          if (d.historySaveFailed) {
+            toast({ title: "Análise gerada, mas não salva", description: "Não foi possível gravar esta análise no histórico. O resultado está na tela, mas não ficará salvo.", variant: "destructive" });
+          }
+        },
       });
     } catch {
       // Fallback: caminho não-stream (JSON de uma vez).
       run.mutate({ prompt: q, params: p }, {
-        onSuccess: (r) => setReport({ id: r.id, prompt: r.prompt, result: r.result, metrics: r.metrics, params: r.params, messages: r.messages || [] }),
+        onSuccess: (r) => {
+          setReport({ id: r.id, prompt: r.prompt, result: r.result, metrics: r.metrics, params: r.params, messages: r.messages || [] });
+          if (r.historySaveFailed) {
+            toast({ title: "Análise gerada, mas não salva", description: "Não foi possível gravar esta análise no histórico. O resultado está na tela, mas não ficará salvo.", variant: "destructive" });
+          }
+        },
         onError: (e) => { setReport(null); toast({ title: "Falha na análise", description: e.message, variant: "destructive" }); },
       });
     } finally {

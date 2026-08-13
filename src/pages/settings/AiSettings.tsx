@@ -1,4 +1,4 @@
-import { Brain, Eye, EyeOff } from "lucide-react";
+import { Brain, Eye, EyeOff, ShieldCheck, History } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,10 @@ import { motion } from "framer-motion";
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useWorkspace } from "@/contexts/WorkspaceContext";
 import { toast } from "sonner";
+import { format, parseISO } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import {
   Select,
   SelectContent,
@@ -15,61 +18,114 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+interface ProviderStatus {
+  hasKey: boolean;
+  model: string | null;
+}
+
+interface AuditEntry {
+  action: "created" | "updated" | "deleted";
+  model: string | null;
+  createdAt: string;
+  userName: string | null;
+}
+
+const AUDIT_ACTION_LABEL: Record<AuditEntry["action"], string> = {
+  created: "Chave configurada",
+  updated: "Chave/modelo alterados",
+  deleted: "Chave removida",
+};
+
+// Invoca a edge kommo-ai-analyze nos modos provider_* (gestão da chave). A chave
+// em si vive cifrada no Vault — nunca volta pro browser depois de salva; a edge
+// só devolve { hasKey, model }.
+async function invokeProvider<T>(mode: string, workspaceId: string, extra?: Record<string, unknown>): Promise<T> {
+  const { data, error } = await supabase.functions.invoke("kommo-ai-analyze", {
+    body: { mode, workspace_id: workspaceId, ...extra },
+  });
+  if (error) {
+    try {
+      const body = await error.context?.clone().json();
+      if (body?.error) throw new Error(body.error as string);
+    } catch (e) { if (e instanceof Error && e.message && !/json/i.test(e.message)) throw e; }
+    throw new Error(error.message);
+  }
+  const err = (data as { error?: string } | null)?.error;
+  if (err) throw new Error(err);
+  return (data as { data: T }).data;
+}
+
 const AiSettings = () => {
   const { user } = useAuth();
+  const { activeWorkspace } = useWorkspace();
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [openaiModel, setOpenaiModel] = useState("gpt-4o");
   const [showApiKey, setShowApiKey] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
+  const [loadingStatus, setLoadingStatus] = useState(false);
+  const [hasKey, setHasKey] = useState(false);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+
+  const refreshAudit = (workspaceId: string) => {
+    invokeProvider<{ audit: AuditEntry[] }>("provider_audit", workspaceId)
+      .then((r) => setAudit(r.audit))
+      .catch(() => { /* histórico é informativo; falha aqui não deve travar a tela */ });
+  };
 
   useEffect(() => {
-    if (!user) return;
-    const fetchConfig = async () => {
-      const { data } = await supabase
-        .from("ai_provider_config")
-        .select("*")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      if (data) {
-        setOpenaiApiKey(data.api_key || "");
-        setOpenaiModel(data.model || "gpt-4o");
-      }
-    };
-    fetchConfig();
-  }, [user]);
+    if (!activeWorkspace) return;
+    let stale = false;
+    setOpenaiApiKey("");
+    setHasKey(false);
+    setAudit([]);
+    setLoadingStatus(true);
+    invokeProvider<ProviderStatus>("provider_status", activeWorkspace.id)
+      .then((status) => {
+        if (stale) return; // workspace trocou de novo antes desta resposta chegar
+        setHasKey(status.hasKey);
+        if (status.model) setOpenaiModel(status.model);
+      })
+      .catch(() => { if (!stale) toast.error("Não consegui verificar a chave de IA deste workspace."); })
+      .finally(() => { if (!stale) setLoadingStatus(false); });
+    refreshAudit(activeWorkspace.id);
+    return () => { stale = true; };
+  }, [activeWorkspace]);
 
   const saveAiProvider = async () => {
-    if (!user) return;
+    if (!user || !activeWorkspace) return;
+    if (!hasKey && !openaiApiKey.trim()) {
+      toast.error("Informe a chave da API da OpenAI");
+      return;
+    }
     setSavingAi(true);
     try {
-      if (!openaiApiKey.trim()) {
-        toast.error("Informe a chave da API da OpenAI");
-        setSavingAi(false);
-        return;
-      }
-
-      const payload = {
-        user_id: user.id,
-        provider: "openai",
-        api_key: openaiApiKey.trim(),
-        model: openaiModel,
-      };
-
-      const { data: existing } = await supabase
-        .from("ai_provider_config")
-        .select("id")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      const { error: writeError } = existing
-        ? await supabase.from("ai_provider_config").update(payload).eq("user_id", user.id)
-        : await supabase.from("ai_provider_config").insert(payload);
-      if (writeError) throw writeError;
-
+      await invokeProvider<ProviderStatus>("provider_save", activeWorkspace.id, {
+        apiKey: openaiApiKey.trim(), model: openaiModel,
+      });
+      setHasKey(true);
+      setOpenaiApiKey(""); // nunca fica exibida depois de salva
+      refreshAudit(activeWorkspace.id);
       toast.success("Configuração de IA salva com sucesso!");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(`Erro ao salvar configuração de IA: ${msg}`);
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
+  const removeAiProvider = async () => {
+    if (!activeWorkspace) return;
+    setSavingAi(true);
+    try {
+      await invokeProvider<ProviderStatus>("provider_delete", activeWorkspace.id);
+      setOpenaiApiKey("");
+      setHasKey(false);
+      refreshAudit(activeWorkspace.id);
+      toast.success("Chave removida. As análises de IA deste workspace ficam indisponíveis até uma nova chave ser configurada.");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Erro ao remover chave: ${msg}`);
     } finally {
       setSavingAi(false);
     }
@@ -88,18 +144,28 @@ const AiSettings = () => {
         </h3>
         <div className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            Cada conta usa sua própria chave da OpenAI, para que o custo de IA seja
-            atribuído individualmente. Configure abaixo a chave desta conta.
+            Cada workspace usa sua própria chave da OpenAI, compartilhada entre os
+            membros deste workspace — não existe uma chave central do app. Sem uma
+            chave configurada aqui, as Análises de IA do Dashboard ficam indisponíveis
+            para {activeWorkspace?.name || "este workspace"}.
           </p>
+
+          {hasKey && (
+            <p className="flex items-center gap-1.5 rounded-md border border-emerald-400/40 bg-emerald-50/50 px-2.5 py-1.5 text-xs text-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-200">
+              <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+              Uma chave já está configurada e cifrada para este workspace. Para trocar, informe uma nova chave abaixo.
+            </p>
+          )}
 
           <div className="space-y-2">
             <Label>Chave da API (OpenAI)</Label>
             <div className="relative">
               <Input
                 type={showApiKey ? "text" : "password"}
-                placeholder="sk-..."
+                placeholder={hasKey ? "sk-... (deixe em branco pra manter a atual)" : "sk-..."}
                 value={openaiApiKey}
                 onChange={(e) => setOpenaiApiKey(e.target.value)}
+                disabled={loadingStatus}
                 className="pr-10"
               />
               <button
@@ -120,7 +186,7 @@ const AiSettings = () => {
 
           <div className="space-y-2">
             <Label>Modelo</Label>
-            <Select value={openaiModel} onValueChange={setOpenaiModel}>
+            <Select value={openaiModel} onValueChange={setOpenaiModel} disabled={loadingStatus}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -133,9 +199,16 @@ const AiSettings = () => {
             </Select>
           </div>
 
-          <Button onClick={saveAiProvider} disabled={savingAi}>
-            {savingAi ? "Salvando..." : "Salvar configuração de IA"}
-          </Button>
+          <div className="flex gap-2">
+            <Button onClick={saveAiProvider} disabled={savingAi || loadingStatus}>
+              {savingAi ? "Salvando..." : "Salvar configuração de IA"}
+            </Button>
+            {hasKey && (
+              <Button type="button" variant="outline" onClick={removeAiProvider} disabled={savingAi || loadingStatus}>
+                Remover chave
+              </Button>
+            )}
+          </div>
         </div>
       </motion.div>
     </div>

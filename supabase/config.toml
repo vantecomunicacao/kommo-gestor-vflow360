@@ -31,3 +31,9 @@ verify_jwt = false
 
 [functions.log-event]
 verify_jwt = false
+
+# Só usuário (JWT válido + membership, checado internamente por _shared/authorize.ts).
+# Nunca cron/anon. Explícito aqui porque a ausência de bloco não bastou pra reverter
+# um deploy anterior que foi feito por engano com --no-verify-jwt (2026-08-13).
+[functions.kommo-ai-analyze]
+verify_jwt = true

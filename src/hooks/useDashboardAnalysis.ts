@@ -76,6 +76,7 @@ interface AnalyzeResponse {
   params: Record<string, unknown>;
   metrics: AnalysisMetrics;
   messages: ChatMessage[];
+  historySaveFailed?: boolean;
 }
 
 interface FollowupResponse {
@@ -175,12 +176,12 @@ export function usePinAnalysis(workspaceId: string | null | undefined) {
 export interface StreamCallbacks {
   onMeta: (m: { prompt: string; params: Record<string, unknown>; metrics: AnalysisMetrics }) => void;
   onDelta: (text: string) => void;
-  onDone: (d: { id: string | null; created_at: string | null }) => void;
+  onDone: (d: { id: string | null; created_at: string | null; historySaveFailed?: boolean }) => void;
 }
 type StreamEvent =
   | { type: "meta"; prompt: string; params: Record<string, unknown>; metrics: AnalysisMetrics }
   | { type: "delta"; text: string }
-  | { type: "done"; id: string | null; created_at: string | null }
+  | { type: "done"; id: string | null; created_at: string | null; historySaveFailed?: boolean }
   | { type: "error"; error?: string };
 export async function streamAnalyze(
   workspaceId: string, prompt: string, params: AnalysisParams, cb: StreamCallbacks,

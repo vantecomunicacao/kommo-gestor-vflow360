@@ -10,15 +10,15 @@
 //                      (1x período principal + 1x comparação, se pedida), gera a
 //                      análise em texto e GRAVA em kommo.dashboard_analyses (histórico).
 //
-// Provider/chave: lê ai_provider_config do owner do workspace (mesma chave OpenAI
-// que a tela Configurações › IA usa). Custo gravado na própria linha do histórico
-// (NÃO em public.ai_usage_log, que é do GHL).
+// Provider/chave: lê ai_provider_config POR WORKSPACE (uma chave por workspace,
+// cadastrada por qualquer membro em Configurações › IA — nunca por usuário
+// isolado, e sem fallback para chave central/global nenhuma). Custo gravado na
+// própria linha do histórico (NÃO em public.ai_usage_log, que é do GHL).
 //
 // Auth: JWT válido + membership (via _shared/authorize.ts). Não aceita cron/anon.
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import type { SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeWorkspace, type KommoClient } from "../_shared/authorize.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 
@@ -91,26 +91,39 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 interface ProviderCfg { apiKey: string; model: string }
 
-// Resolve a chave/modelo OpenAI da conta. A tela Configurações › IA grava em
-// ai_provider_config pelo cliente travado no schema kommo → lemos pelo mesmo
-// caminho. Fallback no schema public (leitura permitida) cobre instalações antigas.
-async function resolveProvider(
-  dbKommo: KommoClient, dbPublic: SupabaseClient, ownerId: string, callerId: string | null,
-): Promise<ProviderCfg> {
-  const ids = [ownerId, callerId].filter((v): v is string => !!v);
-  for (const client of [dbKommo, dbPublic]) {
-    for (const uid of ids) {
-      const { data } = await client
-        .from("ai_provider_config").select("provider, api_key, model")
-        .eq("user_id", uid).maybeSingle();
-      if (data?.provider === "openai" && data?.api_key) {
-        return { apiKey: data.api_key as string, model: (data.model as string) || DEFAULT_MODEL };
-      }
-    }
+// Resolve a chave/modelo OpenAI do WORKSPACE (uma chave por workspace, cadastrada
+// por qualquer membro em Configurações › IA — nunca por usuário isolado, e sem
+// fallback para nenhuma chave central/global do app). A chave em si vive cifrada
+// no Supabase Vault; só é decifrada aqui, dentro da edge (service_role).
+async function resolveProvider(dbKommo: KommoClient, workspaceId: string): Promise<ProviderCfg> {
+  const { data } = await dbKommo.rpc("get_ai_provider_config", { p_workspace_id: workspaceId }).maybeSingle();
+  const row = data as { api_key: string; model: string | null } | null;
+  if (row?.api_key) {
+    return { apiKey: row.api_key, model: row.model || DEFAULT_MODEL };
   }
   throw new Error(
-    "Nenhuma chave de IA configurada para esta conta. Configure sua chave de OpenAI em Configurações › IA.",
+    "Este workspace ainda não tem uma chave de IA própria configurada. Configure em Configurações › IA.",
   );
+}
+
+// Conservador de propósito (mesmo raciocínio do MAX_CUSTOM_METRICS): cobre uso normal
+// (uma análise = 1-2 chamadas: parse + analyze/followup) com folga, mas barra um loop
+// abusivo gastando a chave OpenAI do workspace. Pode subir se alguém esbarrar no limite
+// de verdade — é só trocar a constante.
+const AI_RATE_LIMIT_PER_HOUR = 30;
+
+// Barra a chamada se o workspace já bateu o teto na última hora. A cada checagem também
+// limpa as linhas fora da janela daquele workspace — a tabela não cresce sem controle,
+// sem precisar de cron de limpeza.
+async function enforceRateLimit(dbKommo: KommoClient, workspaceId: string, mode: string): Promise<void> {
+  const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  await dbKommo.from("ai_call_log").delete().eq("workspace_id", workspaceId).lt("created_at", cutoff);
+  const { count } = await dbKommo.from("ai_call_log")
+    .select("id", { count: "exact", head: true }).eq("workspace_id", workspaceId).gte("created_at", cutoff);
+  if ((count ?? 0) >= AI_RATE_LIMIT_PER_HOUR) {
+    throw new Error(`Limite de ${AI_RATE_LIMIT_PER_HOUR} chamadas de IA por hora atingido para este workspace. Tente novamente mais tarde.`);
+  }
+  await dbKommo.from("ai_call_log").insert({ workspace_id: workspaceId, mode });
 }
 
 // Chama a OpenAI (chat completions). Devolve { content, usage }.
@@ -186,19 +199,67 @@ serve(async (req) => {
     const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
     const dbKommo = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
-    const dbPublic = createClient(SUPABASE_URL, SERVICE_KEY);
 
     const payload = await req.json().catch(() => ({})) as Record<string, unknown>;
-    const VALID_MODES = ["analyze", "followup", "delete", "pin"];
+    const VALID_MODES = ["analyze", "followup", "delete", "pin", "provider_status", "provider_save", "provider_delete", "provider_audit"];
     const mode = VALID_MODES.includes(payload.mode as string) ? payload.mode as string : "parse";
+    const NO_PROMPT_MODES = new Set(["delete", "pin", "provider_status", "provider_save", "provider_delete", "provider_audit"]);
     const workspaceId = payload.workspace_id as string;
     const prompt = (payload.prompt as string | undefined)?.trim();
     if (!workspaceId) throw new Error("workspace_id é obrigatório");
-    // delete/pin não usam prompt; os demais modos exigem.
-    if (mode !== "delete" && mode !== "pin" && !prompt) throw new Error("prompt é obrigatório");
+    if (!NO_PROMPT_MODES.has(mode) && !prompt) throw new Error("prompt é obrigatório");
 
     // Auth: JWT válido + membership (usuário). Sem cron/anon.
     const auth = await authorizeWorkspace({ req, db: dbKommo, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
+
+    // ===================== MODOS DE GESTÃO DA CHAVE (provider_*) =====================
+    // A chave OpenAI vive cifrada no Vault (kommo.set/get/delete_ai_provider_config,
+    // service_role only) — o frontend não toca mais na tabela direto, só por aqui.
+    if (mode === "provider_status" || mode === "provider_save" || mode === "provider_delete" || mode === "provider_audit") {
+      if (mode === "provider_status") {
+        const { data } = await dbKommo.rpc("get_ai_provider_config", { p_workspace_id: workspaceId }).maybeSingle();
+        const row = data as { api_key: string; model: string | null } | null;
+        return new Response(JSON.stringify({ success: true, data: { hasKey: !!row?.api_key, model: row?.model ?? null } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (mode === "provider_audit") {
+        const { data } = await dbKommo
+          .from("ai_provider_config_audit").select("action, model, created_at, user_id")
+          .eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(10);
+        const rows = (data || []) as Array<{ action: string; model: string | null; created_at: string; user_id: string | null }>;
+        const userIds = [...new Set(rows.map((r) => r.user_id).filter((v): v is string => !!v))];
+        const { data: profs } = userIds.length
+          ? await dbKommo.from("profiles").select("user_id, full_name").in("user_id", userIds)
+          : { data: [] as Array<{ user_id: string; full_name: string | null }> };
+        const nameByUser = new Map((profs || []).map((p) => [p.user_id, p.full_name]));
+        const audit = rows.map((r) => ({ action: r.action, model: r.model, createdAt: r.created_at, userName: (r.user_id && nameByUser.get(r.user_id)) || null }));
+        return new Response(JSON.stringify({ success: true, data: { audit } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      if (mode === "provider_save") {
+        const apiKey = (payload.apiKey as string | undefined)?.trim();
+        const model = (payload.model as string | undefined)?.trim() || DEFAULT_MODEL;
+        if (apiKey) {
+          // Chave nova (ou primeira vez): cria/atualiza o secret no Vault.
+          const { error } = await dbKommo.rpc("set_ai_provider_config", { p_workspace_id: workspaceId, p_api_key: apiKey, p_model: model, p_user_id: auth.userId });
+          if (error) throw new Error(error.message);
+        } else {
+          // Sem chave no payload: a UI nunca reexibe a chave salva, então "em branco" aqui
+          // significa "só trocar o modelo, mantendo a chave atual" — exige que já exista uma.
+          const { data: existing } = await dbKommo.from("ai_provider_config").select("api_key_secret_id").eq("workspace_id", workspaceId).maybeSingle();
+          if (!existing?.api_key_secret_id) throw new Error("Informe a chave da API da OpenAI");
+          const { error } = await dbKommo.from("ai_provider_config").update({ model }).eq("workspace_id", workspaceId);
+          if (error) throw new Error(error.message);
+        }
+        return new Response(JSON.stringify({ success: true, data: { hasKey: true, model } }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+      // provider_delete
+      const { error } = await dbKommo.rpc("delete_ai_provider_config", { p_workspace_id: workspaceId, p_user_id: auth.userId });
+      if (error) throw new Error(error.message);
+      return new Response(JSON.stringify({ success: true, data: { hasKey: false } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
 
     // ===================== MODOS DE GESTÃO (delete / pin) =====================
     // Escrita via service role (RLS só tem "members select"); membership já validado acima.
@@ -217,10 +278,8 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
-    // Owner do workspace chaveia a chave de IA (custo atribuído à conta).
-    const { data: ws } = await dbKommo.from("workspaces").select("owner_id").eq("id", workspaceId).maybeSingle();
-    const ownerId = (ws?.owner_id as string) || auth.userId || "";
-    const cfg = await resolveProvider(dbKommo, dbPublic, ownerId, auth.userId);
+    const cfg = await resolveProvider(dbKommo, workspaceId);
+    await enforceRateLimit(dbKommo, workspaceId, mode);
 
     // Catálogo de funis (para a IA mapear nome → kommo_id e a UI montar o dropdown).
     const { data: pipeRows } = await dbKommo
@@ -413,7 +472,9 @@ PEDIDO LITERAL DO GESTOR: "${prompt}"`;
     const savedParams = { pipelineId, pipelineName, startDate, endDate, dateBasis, compare, compareStart: compare ? compareStartParam : null, compareEnd: compare ? compareEndParam : null, foco: (params.foco as string | undefined) ?? null, intent: params.intent === "pergunta" ? "pergunta" : "analise" };
     const fullMetrics = { principal: mainMetrics, comparacao: compareMetrics };
 
-    // Grava a análise concluída no histórico e devolve id/created_at.
+    // Grava a análise concluída no histórico e devolve id/created_at. Se o insert
+    // falhar, o resultado ainda é devolvido ao gestor (não perde o trabalho da IA),
+    // mas o chamador precisa saber que ficou fora do histórico — ver `historySaveFailed`.
     const persist = async (result: string, usage: OpenAIUsage) => {
       const costUsd = estimateCostUsd(cfg.model, Number(usage?.prompt_tokens || 0), Number(usage?.completion_tokens || 0));
       const { data: inserted, error: insErr } = await dbKommo.from("dashboard_analyses").insert({
@@ -421,7 +482,7 @@ PEDIDO LITERAL DO GESTOR: "${prompt}"`;
         metrics: fullMetrics, model: cfg.model, cost_usd: Number(costUsd.toFixed(6)),
       }).select("id, created_at").maybeSingle();
       if (insErr) console.error("Falha ao gravar histórico:", insErr.message);
-      return inserted;
+      return { inserted, historySaveFailed: !!insErr };
     };
 
     // ---- Streaming (opt-in por stream:true): NDJSON meta -> deltas -> done ----
@@ -461,8 +522,8 @@ PEDIDO LITERAL DO GESTOR: "${prompt}"`;
               }
             }
             const result = full || "Não consegui concluir a análise agora. Tente reformular o pedido.";
-            const inserted = await persist(result, usageObj);
-            send({ type: "done", id: inserted?.id ?? null, created_at: inserted?.created_at ?? null });
+            const { inserted, historySaveFailed } = await persist(result, usageObj);
+            send({ type: "done", id: inserted?.id ?? null, created_at: inserted?.created_at ?? null, historySaveFailed });
           } catch (e) {
             try { send({ type: "error", error: e instanceof Error ? e.message : String(e) }); } catch { /* ignore */ }
           } finally {
@@ -476,10 +537,10 @@ PEDIDO LITERAL DO GESTOR: "${prompt}"`;
     // ---- Não-streaming (fallback / padrão) ----
     const { content: answer, usage } = await callOpenAI(cfg, { messages: chatMessages, temperature: 0.3 });
     const result = answer || "Não consegui concluir a análise agora. Tente reformular o pedido.";
-    const inserted = await persist(result, usage);
+    const { inserted, historySaveFailed } = await persist(result, usage);
 
     return new Response(
-      JSON.stringify({ success: true, data: { id: inserted?.id ?? null, created_at: inserted?.created_at ?? null, prompt, result, params: savedParams, metrics: fullMetrics, messages: [] } }),
+      JSON.stringify({ success: true, data: { id: inserted?.id ?? null, created_at: inserted?.created_at ?? null, prompt, result, params: savedParams, metrics: fullMetrics, messages: [], historySaveFailed } }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   } catch (e) {
