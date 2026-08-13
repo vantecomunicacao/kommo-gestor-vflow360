@@ -9,8 +9,8 @@
 // porque kommo-manage e cooling-leads têm checagem manual válida mas
 // estruturalmente diferente. Decisão de uniformizar fica pra Fase 3(a).
 //
-// Funções GHL/legadas (Regra #1 do CLAUDE.md) são ignoradas — não é
-// responsabilidade do Kommo endurecer ou revisar esse código.
+// GHL/legado removido do repo em 2026-08-13 (código morto, nunca deployado
+// neste projeto) — supabase/functions/ só tem Kommo daqui pra frente.
 
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -20,17 +20,10 @@ const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const configPath = path.join(repoRoot, "supabase", "config.toml");
 const config = readFileSync(configPath, "utf8");
 
-const ghlAndLegacy = new Set([
-  "admin-bootstrap", "admin-users", "ai-analyze-v2", "ai-assistant",
-  "ai-insights-generate", "ghl-conversations-sync", "ghl-dashboard",
-  "ghl-enrich-attachments", "ghl-manage", "ghl-messages-sync", "ghl-sync",
-]);
-
 const authSignal = /authorizeWorkspace|resolveCallerIdentity|requireWorkspaceMember|is_workspace_member|x-internal-secret|getClaims|getUser|Public endpoint/i;
 
 const jwtDisabled = [...config.matchAll(/\[functions\.([\w-]+)\]\s*\n\s*verify_jwt\s*=\s*false/g)]
-  .map((m) => m[1])
-  .filter((name) => !ghlAndLegacy.has(name));
+  .map((m) => m[1]);
 
 const failures = [];
 

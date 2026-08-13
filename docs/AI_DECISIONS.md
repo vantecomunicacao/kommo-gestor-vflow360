@@ -5,7 +5,7 @@
 > esse ponto como ele é hoje — entradas, gates, prompt, contrato de saída,
 > guardrails e o fluxo de aprovação — e marca as decisões em aberto.
 >
-> Referência de código: [`ai-analyze-v2/index.ts`](../supabase/functions/ai-analyze-v2/index.ts)
+> Referência de código: `ai-analyze-v2/index.ts`
 > (2.0, GHL). O 1.0 (`ai-analyze`) tem a **mesma lógica de prompt/validação**, só
 > muda a camada de dados. Atualizado em 2026-06-03.
 
@@ -94,7 +94,7 @@ Antes de gravar, a saída passa por:
 ## 8. Fluxo de aprovação (o ponto humano)
 
 - Sugestão nasce `pending` → gestor aprova/edita/rejeita na página `Suggestions`.
-- Ao aprovar, a execução no GHL roda via [`ghl-manage`](../supabase/functions/ghl-manage/index.ts) e o resultado volta para `action_data` (`executed`, `execution_result`, `executed_at`).
+- Ao aprovar, a execução no GHL roda via `ghl-manage` e o resultado volta para `action_data` (`executed`, `execution_result`, `executed_at`).
 
 ### O `auto_approve`, esclarecido
 `ai_config` tem `auto_approve` por tipo de ação. Quando ligado:
@@ -126,7 +126,7 @@ Cada sugestão agora registra a versão do prompt que a gerou, espelhando o que 
 cérebro analítico já fazia (`ai_insights.prompt_version`):
 
 - Coluna `suggestions.prompt_version` (migration `20260607170000_suggestions_prompt_version.sql`).
-- Constante `PROMPT_VERSION` em [`ai-analyze-v2`](../supabase/functions/ai-analyze-v2/index.ts), gravada no insert.
+- Constante `PROMPT_VERSION` em `ai-analyze-v2`, gravada no insert.
 - **Convenção:** dar bump em `PROMPT_VERSION` SEMPRE que mudar o system prompt **ou**
   qualquer guardrail pós-LLM (normalização, dedup, contradição). Sugestões antigas
   ficam `null` (= geradas antes do versionamento).

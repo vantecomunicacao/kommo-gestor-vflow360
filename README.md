@@ -1,6 +1,6 @@
-# VFlow360 2.0
+# Kommo VFlow360 Gestor
 
-Dashboard e copiloto IA da Vante Comunicação para o CRM. Frontend Vite/React, backend em Supabase (project ref `xcrfbpyhyznyufijrdry`).
+Dashboard e Análise de IA da Vante Comunicação para o CRM Kommo. Frontend Vite/React, backend em Supabase (project ref `fjncmmqvmocwykpshgsh`, schema `kommo`).
 
 ## Estrutura
 

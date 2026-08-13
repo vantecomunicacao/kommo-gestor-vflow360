@@ -163,6 +163,38 @@ do repo, entrada tirada de `supabase/config.toml`, links mortos corrigidos em
 `docs/ARCHITECTURE.md`/`docs/CAPABILITIES.md`. Não muda a Regra #1 (a
 instância real que o GHL usa continua intacta no projeto antigo).
 
+**RESTANTE do GHL/legado REMOVIDO deste repo em 2026-08-13** (mesmo raciocínio
+do `pdf-extract` acima, aplicado ao que sobrou): auditoria confirmou que as 11
+edge functions `admin-bootstrap`/`admin-users`/`ai-analyze-v2`/`ai-assistant`/
+`ai-insights-generate`/`ghl-conversations-sync`/`ghl-dashboard`/
+`ghl-enrich-attachments`/`ghl-manage`/`ghl-messages-sync`/`ghl-sync` formavam
+um cluster isolado — só se importavam entre si, nenhuma `kommo-*` dependia
+delas (verificado por grep de import real, não só menção em comentário), e
+`supabase functions list` no projeto novo confirmou que nenhuma estava sequer
+deployada aqui. As páginas frontend que as chamavam (Sugestões, Conversas,
+Analista) já tinham sido removidas em 2026-08 anterior (ver `ARCHITECTURE.md`),
+deixando o backend órfão. Auditoria também achou 3 arquivos `_shared/*` que a
+leva de lint de 2026-08-06 não tinha pego por não terem gerado erro de lint
+(`error-reporter.ts`, usado só pelo cluster acima; `media-extractor.ts` e
+`webhook-hmac.ts`, sem NENHUM importador — resíduo de webhooks WhatsApp
+Stevo/Uazap já removidos antes). Removidos: as 11 pastas de function, 8
+arquivos `_shared/` (os 3 achados + `ai-provider.ts`/`ai-usage.ts`/
+`dashboard-metrics.ts`/`ghl-enrich.ts`/`ghl-sync.ts`, já mapeados no
+`ghlAndLegacyIgnores` do lint), `src/components/dashboard/AIUsageCard.tsx`
+(frontend órfão, zero import). Reboque: `ghlAndLegacyIgnores` tirado do
+`eslint.config.js` (voltou a lintar o repo inteiro sem exclusão — `npm run
+lint` continua 0 erros), exclusão redundante tirada do loop de `deno check` no
+CI, `ghlAndLegacy` Set tirado de `scripts/check-auth-guardrail.mjs`, links
+mortos corrigidos (sem `href`, texto mantido) em `docs/CAPABILITIES.md`/
+`docs/ARCHITECTURE.md`/`docs/AI_DECISIONS.md`, `README.md` corrigido (citava
+o project ref do projeto ANTIGO como se fosse o atual — bug de doc
+pré-existente, achado nesta auditoria). Nenhum recurso do Supabase foi tocado
+(nada estava deployado aqui pra remover) — não conflita com a Regra #1, que
+protege o projeto antigo, intacto. Validado antes e depois: `npm run
+typecheck/test/lint` verdes, `deno check` limpo nas 10 functions Kommo
+restantes, `deno test` (42 testes) verde, `node scripts/check-auth-guardrail.mjs`
+OK.
+
 **`kommo.leads.source` REMOVIDA em 2026-08-08** (achado original de 2026-08-06
 preservado pelo histórico): a coluna existia com o comentário "origem derivada
 de UTM/origem do lead", e o `kommo-dashboard` tinha um fallback morto pra ela

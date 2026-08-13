@@ -74,7 +74,7 @@ A IA nunca executa nada sozinha sem que a ação tenha sido autorizada.
 
 **Postgres → Edge Function (via `pg_net`), NUNCA Edge → Edge.**
 Chamada de uma edge function para outra falha silenciosamente neste Supabase. Por
-isso o trabalho compartilhado vive em [`supabase/functions/_shared/`](../supabase/functions/_shared/)
+isso o trabalho compartilhado vive em `supabase/functions/_shared/`
 e é **inlined** em cada function, não chamado por HTTP. Crons disparam functions
 via `net.http_post` com a anon key.
 
@@ -118,53 +118,53 @@ re-analisa.** O debounce (~5min, teto 15min) está em colunas de `ghl_conversati
 
 ## 5. Mapa das Edge Functions
 
-Localização: [`supabase/functions/`](../supabase/functions/). Todas usam
+Localização: `supabase/functions/`. Todas usam
 `_shared/error-reporter.ts`.
 
 ### Núcleo de IA
 | Function | Papel | Disparo |
 |---|---|---|
-| [`ai-analyze`](../supabase/functions/ai-analyze/index.ts) | Análise 1.0 (lê `conversations`/`messages`) | `analyze-scheduler` / webhook |
-| [`ai-analyze-v2`](../supabase/functions/ai-analyze-v2/index.ts) | Análise 2.0 (lê `ghl_messages`) — clone do 1.0 com camada de dados trocada | cron analyze-due / manual |
-| [`analyze-scheduler`](../supabase/functions/analyze-scheduler/index.ts) | Drena conversas 1.0 com `analyze_after` vencido | cron `* * * * *` |
+| `ai-analyze` | Análise 1.0 (lê `conversations`/`messages`) | `analyze-scheduler` / webhook |
+| `ai-analyze-v2` | Análise 2.0 (lê `ghl_messages`) — clone do 1.0 com camada de dados trocada | cron analyze-due / manual |
+| `analyze-scheduler` | Drena conversas 1.0 com `analyze_after` vencido | cron `* * * * *` |
 
 ### Cérebro analítico (analista do conjunto — distinto da análise por-conversa acima)
 | Function | Papel | Disparo |
 |---|---|---|
-| [`ai-insights-generate`](../supabase/functions/ai-insights-generate/index.ts) | **IA.** Analisa AO VIVO por período (semana atual vs. anterior, lê `ghl_opportunities` — **sem snapshot**), 1 rodada por funil marcado + 1 combinada, respeitando a config do Analista. Grava insights em `ai_insights`. Métricas em [`_shared/dashboard-metrics.ts`](../supabase/functions/_shared/dashboard-metrics.ts) (`computePeriodMetrics`) | cron semanal `ai-insights-tick` |
+| `ai-insights-generate` | **IA.** Analisa AO VIVO por período (semana atual vs. anterior, lê `ghl_opportunities` — **sem snapshot**), 1 rodada por funil marcado + 1 combinada, respeitando a config do Analista. Grava insights em `ai_insights`. Métricas em `_shared/dashboard-metrics.ts` (`computePeriodMetrics`) | cron semanal `ai-insights-tick` |
 
-Provider/custo de IA agora vivem em [`_shared/ai-provider.ts`](../supabase/functions/_shared/ai-provider.ts)
-e [`_shared/ai-usage.ts`](../supabase/functions/_shared/ai-usage.ts) (extraídos de `ai-analyze-v2`
+Provider/custo de IA agora vivem em `_shared/ai-provider.ts`
+e `_shared/ai-usage.ts` (extraídos de `ai-analyze-v2`
 para as novas functions reusarem sem clonar).
 
 ### GHL
 | Function | Papel | Disparo |
 |---|---|---|
-| [`ghl-sync`](../supabase/functions/ghl-sync/index.ts) | Snapshot de pipelines/users/custom fields/lost reasons/opportunities | cron / UI |
-| [`ghl-conversations-sync`](../supabase/functions/ghl-conversations-sync/index.ts) | Sync incremental da lista de conversas (+ heat + enrich inline) | cron 10min / UI |
-| [`ghl-messages-sync`](../supabase/functions/ghl-messages-sync/index.ts) | Sync de mensagens de **uma** conversa (lazy, ao abrir) | UI / pré-análise |
-| [`ghl-enrich-attachments`](../supabase/functions/ghl-enrich-attachments/index.ts) | Enriquece mídia (transcrição/OCR) p/ a IA — wrapper de `_shared/ghl-enrich` | UI / pré-análise |
-| [`ghl-dashboard`](../supabase/functions/ghl-dashboard/index.ts) | Agrega oportunidades → `DashboardData` (funil, filtros) | UI |
-| [`ghl-manage`](../supabase/functions/ghl-manage/index.ts) | **Executa ações no GHL** (mover funil, nota, campo, valor, ganho/perdido) | UI (ao aprovar sugestão) |
+| `ghl-sync` | Snapshot de pipelines/users/custom fields/lost reasons/opportunities | cron / UI |
+| `ghl-conversations-sync` | Sync incremental da lista de conversas (+ heat + enrich inline) | cron 10min / UI |
+| `ghl-messages-sync` | Sync de mensagens de **uma** conversa (lazy, ao abrir) | UI / pré-análise |
+| `ghl-enrich-attachments` | Enriquece mídia (transcrição/OCR) p/ a IA — wrapper de `_shared/ghl-enrich` | UI / pré-análise |
+| `ghl-dashboard` | Agrega oportunidades → `DashboardData` (funil, filtros) | UI |
+| `ghl-manage` | **Executa ações no GHL** (mover funil, nota, campo, valor, ganho/perdido) | UI (ao aprovar sugestão) |
 
 ### Canais de WhatsApp
 | Function | Papel | Estado |
 |---|---|---|
-| [`evolution-manage`](../supabase/functions/evolution-manage/index.ts) | Gerencia instâncias Evolution | ativo |
-| [`evolution-pairing-public`](../supabase/functions/evolution-pairing-public/index.ts) | Página pública `/conectar/:token` (QR sem expor credencial) | ativo |
-| [`evolution-webhook`](../supabase/functions/evolution-webhook/index.ts) | Recebe mensagens Evolution | ativo |
-| [`stevo-webhook`](../supabase/functions/stevo-webhook/index.ts) / [`stevo-oficial-webhook`](../supabase/functions/stevo-oficial-webhook/index.ts) | Recebe mensagens Stevo | ativo |
-| [`uazap-manage`](../supabase/functions/uazap-manage/index.ts) / [`uazap-webhook`](../supabase/functions/uazap-webhook/index.ts) | Canal Uazap | **desativado** (`UAZAP_ENABLED`) |
+| `evolution-manage` | Gerencia instâncias Evolution | ativo |
+| `evolution-pairing-public` | Página pública `/conectar/:token` (QR sem expor credencial) | ativo |
+| `evolution-webhook` | Recebe mensagens Evolution | ativo |
+| `stevo-webhook` / `stevo-oficial-webhook` | Recebe mensagens Stevo | ativo |
+| `uazap-manage` / `uazap-webhook` | Canal Uazap | **desativado** (`UAZAP_ENABLED`) |
 
 ### Admin & utilitárias
 | Function | Papel |
 |---|---|
-| [`admin-bootstrap`](../supabase/functions/admin-bootstrap/index.ts) | Primeiro usuário vira admin |
-| [`admin-users`](../supabase/functions/admin-users/index.ts) | Gestão de usuários |
-| [`log-event`](../supabase/functions/log-event/index.ts) | Front grava em `system_logs` (observabilidade) |
+| `admin-bootstrap` | Primeiro usuário vira admin |
+| `admin-users` | Gestão de usuários |
+| `log-event` | Front grava em `system_logs` (observabilidade) |
 | `pdf-extract` | Extrai texto de PDF (mídia → IA) — removida deste repo em 2026-08-08 (órfã aqui, sem chamador real; a instância que o GHL usa de verdade roda no projeto antigo) |
 
-### Código compartilhado — [`_shared/`](../supabase/functions/_shared/)
+### Código compartilhado — `_shared/`
 `error-reporter.ts` · `ghl-enrich.ts` · `ghl-sync.ts` · `media-extractor.ts` · `webhook-hmac.ts`
 
 ## 6. Crons (a camada que o diagrama esconde)

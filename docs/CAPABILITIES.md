@@ -50,18 +50,18 @@ do Kommo — ver `ROADMAP_FASE2_COPILOTO.md`. O schema `kommo` não tem conversa
 - **Input:** `{ workspace_id, full? }` · **Output:** upsert em `ghl_conversations`
 - **Efeitos:** "heat" por inbound novo (seta `analyze_after`), enrich de mídia inline, atualiza `ghl_sync_watermarks`. Mensagens NÃO entram aqui (lazy — ver A3).
 - **Custo:** GHL API (paginado por watermark) · **Tipo:** Determinística
-- **Function:** [`ghl-conversations-sync`](../supabase/functions/ghl-conversations-sync/index.ts)
+- **Function:** `ghl-conversations-sync`
 
 ### A3. Sincronizar mensagens de uma conversa (2.0)
 - **Trigger:** UI (abrir conversa) ou pré-análise
 - **Input:** `{ workspace_id, ghl_conversation_id, max_messages? }` · **Output:** upsert em `ghl_messages`
 - **Efeitos:** atualiza `messages_synced_until` · **Custo:** GHL API · **Tipo:** Determinística
-- **Function:** [`ghl-messages-sync`](../supabase/functions/ghl-messages-sync/index.ts)
+- **Function:** `ghl-messages-sync`
 
 ### A4. Snapshot do CRM (pipelines, oportunidades, campos)
 - **Trigger:** cron / UI · **Input:** `{ workspace_id }` (JWT ou service role)
 - **Output:** snapshot em `ghl_opportunities`, pipelines, custom_fields, lost_reasons, users
-- **Custo:** GHL API · **Tipo:** Determinística · **Function:** [`ghl-sync`](../supabase/functions/ghl-sync/index.ts)
+- **Custo:** GHL API · **Tipo:** Determinística · **Function:** `ghl-sync`
 
 ## B. Preparo para a IA
 
@@ -70,7 +70,7 @@ do Kommo — ver `ROADMAP_FASE2_COPILOTO.md`. O schema `kommo` não tem conversa
 - **Input:** anexo (áudio/imagem/PDF) · **Output:** `enriched_body` na mensagem
 - **Efeitos:** o conteúdo da mídia vira texto que a IA consegue ler
 - **Custo:** **LLM/transcrição** (chave de IA do workspace) · **Tipo:** IA (auxiliar)
-- **Código:** [`_shared/ghl-enrich.ts`](../supabase/functions/_shared/ghl-enrich.ts) · `pdf-extract` (removida deste repo 2026-08-08 — era órfã aqui; a instância real do GHL roda no projeto antigo)
+- **Código:** `_shared/ghl-enrich.ts` · `pdf-extract` (removida deste repo 2026-08-08 — era órfã aqui; a instância real do GHL roda no projeto antigo)
 
 ## C. Decisão da IA (o "Cérebro")
 
@@ -82,7 +82,7 @@ do Kommo — ver `ROADMAP_FASE2_COPILOTO.md`. O schema `kommo` não tem conversa
 - **Output:** 0..N linhas em `suggestions` (status `pending`)
 - **Efeitos:** seta `last_analyzed_at`; **inbound aciona, outbound não re-analisa**
 - **Custo:** **1 chamada LLM por conversa** · **Tipo:** IA
-- **Functions:** [`ai-analyze`](../supabase/functions/ai-analyze/index.ts) (1.0) · [`ai-analyze-v2`](../supabase/functions/ai-analyze-v2/index.ts) (2.0)
+- **Functions:** `ai-analyze` (1.0) · `ai-analyze-v2` (2.0)
 
 As sugestões que a IA pode gerar são **fechadas** a 6 tipos (o "menu de ações"):
 
@@ -115,7 +115,7 @@ Cada tipo tem toggle `enabled` e `auto_approve` por workspace em `ai_config`.
 - **Execução:** **1 rodada de IA por funil marcado** (cada um com seu foco, isolado: gargalo/taxa de ganho/envelhecimento) **+ 1 rodada combinada** (volume/valor dos marcados — **nunca conversão misturada**).
 - **Output:** 0..N linhas em `ai_insights` (`kind`, `severity`, `title`, `body`, `period_label`, `refs.pipeline_name`, `prompt_version`). Insights ativos anteriores viram `dismissed`.
 - **Gates:** `ai_insights_config.enabled` + ≥1 funil selecionado · **Custo:** ~(nº funis + 1) chamadas LLM por workspace/semana (modelo barato) · **Tipo:** IA
-- **Function:** [`ai-insights-generate`](../supabase/functions/ai-insights-generate/index.ts) · métricas em [`_shared/dashboard-metrics.ts`](../supabase/functions/_shared/dashboard-metrics.ts)
+- **Function:** `ai-insights-generate` · métricas em `_shared/dashboard-metrics.ts`
 
 ## D. Decisão do humano (aprovação)
 
@@ -136,17 +136,17 @@ Cada tipo tem toggle `enabled` e `auto_approve` por workspace em `ai_config`.
 - **Output:** mutação no GHL (mover funil / nota / campo / valor / ganho-perdido) + resultado gravado
 - **Efeitos:** pode criar contato/oportunidade se configurado (`allowCreateContact`/`allowCreateOpportunity`)
 - **Custo:** GHL API (escrita) · **Tipo:** Determinística (executa o que foi aprovado)
-- **Function:** [`ghl-manage`](../supabase/functions/ghl-manage/index.ts)
+- **Function:** `ghl-manage`
 
 ## F. Visualização & gestão
 
 ### F1. Dashboard de funil
 - **Trigger:** UI · **Output:** `DashboardData` agregado (funil, filtros por período/pipeline/vendedor/origem)
-- **Tipo:** Determinística · **Function:** [`ghl-dashboard`](../supabase/functions/ghl-dashboard/index.ts)
+- **Tipo:** Determinística · **Function:** `ghl-dashboard`
 
 ### F2. Conectar canal (pareamento de WhatsApp)
 - **Trigger:** UI / página pública `/conectar/:token` · **Output:** QR / status da instância
-- **Tipo:** Determinística · **Functions:** [`evolution-manage`](../supabase/functions/evolution-manage/index.ts) · [`evolution-pairing-public`](../supabase/functions/evolution-pairing-public/index.ts)
+- **Tipo:** Determinística · **Functions:** `evolution-manage` · `evolution-pairing-public`
 
 ## G. Observabilidade (fundação de aprendizado — fase 0)
 

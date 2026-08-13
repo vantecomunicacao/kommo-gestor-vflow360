@@ -20,9 +20,11 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
-      - name: Lint (Kommo-scoped only — GHL/legacy paths excluded, see eslint.config.js)
+      - name: Lint
         # Bloqueante desde 2026-08-06: Fase 2 do plano de remediação zerou os
-        # ~340 erros/warnings originais nos arquivos Kommo-owned.
+        # ~340 erros/warnings originais nos arquivos Kommo-owned. GHL/legacy
+        # (código morto, nunca deployado neste projeto) removido do repo em
+        # 2026-08-13 — não há mais paths a excluir.
         run: npm run lint
 
   edge-functions:
@@ -36,15 +38,14 @@ jobs:
           # versão exata do Supabase Edge Runtime a partir daqui — se o
           # comportamento divergir do hospedado, ajustar este pin.
           deno-version: "2.1.x"
-      - name: Type-check Kommo-owned functions (GHL/legacy excluídos pela Regra #1)
+      - name: Type-check edge functions
+        # GHL/legacy (código morto, nunca deployado neste projeto) removido do
+        # repo em 2026-08-13 — supabase/functions/ só tem Kommo daqui pra frente.
         run: |
           set -e
           for dir in supabase/functions/*/; do
             name=$(basename "$dir")
-            case "$name" in
-              _shared|admin-bootstrap|admin-users|ai-analyze-v2|ai-assistant|ai-insights-generate|ghl-*)
-                continue ;;
-            esac
+            [ "$name" = "_shared" ] && continue
             echo "deno check $dir index.ts"
             deno check "$dir/index.ts"
           done
