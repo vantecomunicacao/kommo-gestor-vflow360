@@ -60,21 +60,52 @@ export const PermissionsProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     setLoading(true);
-    supabase.rpc("get_my_permissions").then(({ data, error }) => {
-      if (!active) return;
-      if (error || !data || !data[0]) {
-        setPermissions(DEFAULT);
-      } else {
-        const r = data[0];
-        setPermissions({
-          viewSuggestions: !!r.view_suggestions,
-          viewIntegrations: !!r.view_integrations,
-          viewSettings: !!r.view_settings,
-          isAdmin: !!r.is_admin,
-        });
+
+    // get_my_permissions() pode falhar/retornar vazio se disparar antes do token
+    // de auth estar totalmente assentado no cliente (aba acordando de segundo
+    // plano, sessao restaurada precisando de refresh, rede lenta na abertura).
+    // Sem retry aqui, o resultado errado (DEFAULT) ficava definitivo - o menu
+    // perdia Configuracoes/Integracoes/Admin ate um F5 forcar tudo de novo, ja
+    // que nada mais reexecuta esse efeito. Ver CLAUDE.md (2026-08-14).
+    const MAX_ATTEMPTS = 3;
+    const RETRY_DELAY_MS = 500;
+
+    const fetchPermissions = async () => {
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        const { data, error } = await supabase.rpc("get_my_permissions");
+        if (!active) return;
+        if (!error && data && data[0]) {
+          const r = data[0];
+          setPermissions({
+            viewSuggestions: !!r.view_suggestions,
+            viewIntegrations: !!r.view_integrations,
+            viewSettings: !!r.view_settings,
+            isAdmin: !!r.is_admin,
+          });
+          setLoading(false);
+          return;
+        }
+        if (attempt < MAX_ATTEMPTS) {
+          console.warn(
+            `[PermissionsContext] get_my_permissions falhou (tentativa ${attempt}/${MAX_ATTEMPTS}), tentando de novo`,
+            error
+          );
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS * attempt));
+          if (!active) return;
+        } else {
+          console.error(
+            "[PermissionsContext] get_my_permissions falhou apos todas as tentativas, usando permissoes padrao",
+            error
+          );
+        }
       }
+      if (!active) return;
+      setPermissions(DEFAULT);
       setLoading(false);
-    });
+    };
+
+    fetchPermissions();
+
     return () => {
       active = false;
     };

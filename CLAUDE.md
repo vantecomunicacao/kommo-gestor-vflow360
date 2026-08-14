@@ -376,6 +376,47 @@ configurar uma 4ª métrica) — é uma mudança pequena e reversível
 mas antes de subir vale reavaliar o custo real do backfill no Relatório com o
 número novo, não só trocar a constante.
 
+## Menu lateral perdendo itens na abertura — CORRIGIDO em 2026-08-14
+
+Sintoma reportado: às vezes o app abre com o Dashboard carregado normalmente
+(dados reais, gráfico ok), mas o menu lateral só mostra Dashboard/Relatórios/
+Anotações — falta Configurações, Integrações, Admin e Leads esfriando. Um F5
+resolve. Causa raiz: `kommo.get_my_permissions()` (RPC chamada em
+`src/contexts/PermissionsContext.tsx`, que decide `viewSettings`/
+`viewIntegrations`/`isAdmin`/`viewSuggestions`) roda com `auth.uid()` — se essa
+chamada dispara antes do token de auth estar totalmente assentado no cliente
+Supabase (aba acordando de segundo plano, sessão restaurada do `localStorage`
+precisando de refresh, rede lenta bem na abertura), `auth.uid()` volta `NULL`
+ou a chamada erra; os dois casos caíam direto no fallback `DEFAULT` (tudo
+`false`), **sem retry**, e nada reexecutava o efeito depois (`AuthContext`
+ignora de propósito eventos de refresh de token, só reage a
+`SIGNED_IN`/`SIGNED_OUT`/`USER_UPDATED`) — por isso ficava definitivo até um
+reload forçar o handshake inteiro de novo. O Dashboard em si carrega normal
+nesse cenário porque `GestorGuard` só olha se o fetch de permissões terminou
+(`loading`), não se o resultado está certo — e como `DEFAULT` não bate com
+"só sugestões" (`isSuggestionsOnly`), ele libera o Dashboard mesmo assim; os
+dados do Dashboard vêm de uma chamada separada (edge function
+`kommo-dashboard`) que dispara um pouco depois, dando tempo do token se
+estabilizar sozinho.
+
+**Corrigido** em `src/contexts/PermissionsContext.tsx`: até 3 tentativas da
+RPC com backoff (500ms/1000ms) antes de aceitar `DEFAULT`, com
+`console.warn`/`console.error` a cada falha (antes era silencioso — se
+acontecer de novo mesmo com o retry, vai aparecer no console do navegador).
+Não mexeu em `AppSidebar.tsx`/`GestorGuard.tsx` — o problema nunca foi a UI
+não checar `loading`, era o resultado ficar errado de forma permanente.
+`tsc --noEmit` e `eslint` limpos no arquivo alterado.
+
+**Verificado com teste** (usuário não conseguiu reproduzir a race manualmente,
+o que é esperado — depende de timing real de rede/token): novo
+`src/contexts/PermissionsContext.test.tsx` mocka a RPC pra falhar 1-2x antes
+de suceder e confirma que o contexto se recupera (sem o retry, a 1ª falha já
+travava tudo em `DEFAULT` pra sempre — reproduzido e confirmado ANTES da
+correção, revertendo o retry temporariamente pra validar que o teste pegava o
+bug de verdade). Também cobre o caso de falha total (cai em `DEFAULT` sem
+travar `loading`) e o caminho feliz (sucesso de primeira, sem atraso). 81
+testes no total (`npm run test`), todos verdes.
+
 ## Onde ficam as tabelas (schemas do Supabase)
 
 Desde a separação de infra (2026-08-02), o schema `kommo` vive no **projeto
