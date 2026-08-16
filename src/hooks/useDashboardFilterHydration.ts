@@ -4,7 +4,7 @@
 // mudança de comportamento. Ver useDashboardFilterPersistence.ts para a
 // metade "gravar" desse mesmo par (hidratar/persistir).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { subDays } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { DateBasis } from "@/lib/report-axis";
@@ -30,11 +30,20 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
   const [stageLabels, setStageLabels] = useState<Record<string, string>>({});
   const [defaultPipelineIds, setDefaultPipelineIds] = useState<string[]>([]);
 
+  // Um deep link (URL com filtros) só deve valer na abertura real da aba. Sem
+  // isso, trocar de workspace pelo seletor (troca de estado em memória, não
+  // navegação — WorkspaceContext.tsx — não limpa a URL) faz os filtros do
+  // workspace ANTERIOR ainda presentes na URL serem lidos como se fossem um
+  // link compartilhado, e vazarem pro novo workspace (achado 2026-08-16).
+  const isFirstHydration = useRef(true);
+
   // Hidratar filtros salvos por workspace (ou aplicar pipeline padrão)
   useEffect(() => {
     setHydrated(false);
     if (!workspaceId) return;
     let cancelled = false;
+    const honorUrlFilters = isFirstHydration.current;
+    isFirstHydration.current = false;
 
     (async () => {
       // 0) Funil padrão do workspace — sempre tem prioridade na abertura do dashboard.
@@ -60,7 +69,7 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
       const urlAxis = searchParams.get("axis");
       const urlFrom = searchParams.get("from");
       const urlTo = searchParams.get("to");
-      const hasUrlFilters = !!(urlPipelines.length || urlStages.length || urlSellers.length
+      const hasUrlFilters = honorUrlFilters && !!(urlPipelines.length || urlStages.length || urlSellers.length
         || urlUtmMediums.length || urlUtmCampaigns.length || urlOrigins.length
         || Object.keys(urlCustomFilters).length || urlAxis || urlFrom || urlTo);
 

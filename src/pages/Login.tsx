@@ -74,7 +74,7 @@ const Login = () => {
             style={{ filter: "brightness(0) invert(1)" }}
           />
           <p className="text-white text-lg max-w-md leading-relaxed">
-            Seu assistente inteligente para vendas. Analise conversas, receba sugestões e atualize seu CRM automaticamente.
+            Acompanhe seus principais indicadores, identifique oportunidades e tome decisões mais assertivas com dados do seu CRM Kommo.
           </p>
         </motion.div>
       </div>
