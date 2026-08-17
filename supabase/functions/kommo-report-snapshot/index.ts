@@ -13,6 +13,11 @@ import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
 import { KommoReportSnapshotPayloadSchema, CustomMetricsListSchema } from "../_shared/schemas.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
+import {
+  buildStageOrder, buildLostBeforeMap, leadReachedCascata,
+  splitMetricRefs, matchesFieldRef,
+  type KommoStatusLite, type RawStageEvent,
+} from "../_shared/custom-metrics-count.ts";
 
 // Formato das linhas lidas de kommo.leads/lead_stage_events, só os campos usados aqui.
 interface LeadRow {
@@ -24,11 +29,14 @@ interface LeadRow {
   kommo_created_at: string | null;
   closed_at: string | null;
   pipeline_id: string | null;
+  custom_fields?: unknown;
 }
 interface StageEventRow {
   lead_id: string | null;
   pipeline_id: string | null;
+  before_status_id: string | null;
   after_status_id: string | null;
+  changed_at: string | null;
 }
 
 // Ano-mês (YYYY-MM) em horário de Brasília.
@@ -110,16 +118,26 @@ serve(async (req) => {
     const reportMetrics = (customMetricsParsed.success ? customMetricsParsed.data : [])
       .filter((m) => m.reportVisible !== false);
     const stageRefKey = (r: { pipelineId: string; statusId: string }) => `${r.pipelineId}:${r.statusId}`;
+    // numerator/denominator podem misturar etapa e campo personalizado — separa
+    // os dois pra cada lado (ver splitMetricRefs, _shared/custom-metrics-count.ts).
+    const metricNumStageRefs = new Map<string, ReturnType<typeof splitMetricRefs>["stageRefs"]>();
+    const metricDenStageRefs = new Map<string, ReturnType<typeof splitMetricRefs>["stageRefs"]>();
+    const metricNumFieldRefs = new Map<string, ReturnType<typeof splitMetricRefs>["fieldRefs"]>();
+    const metricDenFieldRefs = new Map<string, ReturnType<typeof splitMetricRefs>["fieldRefs"]>();
     const metricNumKeys = new Map<string, Set<string>>();
     const metricDenKeys = new Map<string, Set<string>>();
     for (const m of reportMetrics) {
-      metricNumKeys.set(m.id, new Set(m.numerator.map(stageRefKey)));
-      metricDenKeys.set(m.id, new Set(m.denominator.map(stageRefKey)));
+      const num = splitMetricRefs(m.numerator);
+      const den = splitMetricRefs(m.denominator);
+      metricNumStageRefs.set(m.id, num.stageRefs); metricNumFieldRefs.set(m.id, num.fieldRefs);
+      metricDenStageRefs.set(m.id, den.stageRefs); metricDenFieldRefs.set(m.id, den.fieldRefs);
+      metricNumKeys.set(m.id, new Set(num.stageRefs.map(stageRefKey)));
+      metricDenKeys.set(m.id, new Set(den.stageRefs.map(stageRefKey)));
     }
 
     // ===== Leads (TODOS os funis — o escopo por funil é resolvido na agregação) =====
     const leadsRows = await fetchAllRows((from, to) => db.from("leads")
-      .select("kommo_id,status,status_id,price,responsible_user_id,kommo_created_at,closed_at,pipeline_id")
+      .select("kommo_id,status,status_id,price,responsible_user_id,kommo_created_at,closed_at,pipeline_id,custom_fields")
       .eq("workspace_id", workspaceId).eq("is_deleted", false).order("kommo_id").range(from, to));
     const leads = leadsRows as LeadRow[];
 
@@ -164,17 +182,47 @@ serve(async (req) => {
     // pure.ts), mas comparando pelo pipeline do PRÓPRIO evento, não pelo pipeline
     // atual do lead (aqui trabalhamos com todos os funis de uma vez).
     const reachedKeysByLead = new Map<string, Set<string>>();
+    // ===== Insumos do modo "cascata" (ver _shared/custom-metrics-count.ts) =====
+    // stageOrder: ordem das etapas por funil, pra "alcançou etapa X ou além" sem
+    // depender do histórico de eventos (que o Kommo só retém por ~18-20 dias).
+    const usesCascata = reportMetrics.some((m) => m.countMode !== "historico");
+    let stageOrder: ReturnType<typeof buildStageOrder> = new Map();
+    let lostBeforeByLead = new Map<string, string>();
     if (reportMetrics.length) {
       const evRows = await fetchAllRows((from, to) => db.from("lead_stage_events")
-        .select("lead_id,pipeline_id,after_status_id").eq("workspace_id", workspaceId).order("id").range(from, to));
+        .select("lead_id,pipeline_id,before_status_id,after_status_id,changed_at")
+        .eq("workspace_id", workspaceId).order("id").range(from, to));
+      const rawStageEvents: RawStageEvent[] = [];
       for (const e of (evRows || []) as StageEventRow[]) {
-        if (!e.lead_id || !e.pipeline_id || !e.after_status_id) continue;
-        const k = String(e.lead_id);
-        let set = reachedKeysByLead.get(k); if (!set) { set = new Set(); reachedKeysByLead.set(k, set); }
-        set.add(`${e.pipeline_id}:${e.after_status_id}`);
+        if (e.lead_id && e.pipeline_id && e.after_status_id) {
+          const k = String(e.lead_id);
+          let set = reachedKeysByLead.get(k); if (!set) { set = new Set(); reachedKeysByLead.set(k, set); }
+          set.add(`${e.pipeline_id}:${e.after_status_id}`);
+        }
+        if (e.lead_id && e.changed_at) {
+          rawStageEvents.push({
+            leadId: String(e.lead_id), before: e.before_status_id ?? null, after: e.after_status_id ?? null,
+            changedAt: new Date(e.changed_at).getTime(),
+          });
+        }
+      }
+      if (usesCascata) {
+        // SEM filtro de arquivado/deletado: leads de um funil já arquivado
+        // continuam na base (kommo-dashboard não filtra `leads` por isso, só
+        // os seletores) — se `stageOrder` só tivesse funil vivo, esses leads
+        // cairiam fora de qualquer métrica cascata sem nenhum aviso.
+        const { data: pipelinesRows } = await db.from("pipelines").select("kommo_id,statuses")
+          .eq("workspace_id", workspaceId);
+        stageOrder = buildStageOrder(
+          (pipelinesRows || []) as Array<{ kommo_id: string; statuses: KommoStatusLite[] | null }>,
+        );
+        lostBeforeByLead = buildLostBeforeMap(rawStageEvents);
       }
     }
-    // "Alcançou algum dos pares em `keys`": status atual bate OU tem evento histórico.
+    // "Alcançou algum dos pares em `keys`" (modo histórico): status atual bate OU
+    // tem evento histórico — mesmo conceito de countPassedThrough do Dashboard,
+    // mas comparando pelo pipeline do PRÓPRIO evento (aqui trabalhamos com todos
+    // os funis de uma vez).
     const leadReachedAnyOf = (l: LeadRow, keys: Set<string> | undefined): boolean => {
       if (!keys || keys.size === 0) return false;
       const curKey = l.pipeline_id != null && l.status_id != null ? `${l.pipeline_id}:${l.status_id}` : null;
@@ -183,6 +231,20 @@ serve(async (req) => {
       if (!hist) return false;
       for (const k of keys) if (hist.has(k)) return true;
       return false;
+    };
+    // Dispatcher por métrica: lado de etapa usa "cascata" (padrão, posição atual
+    // + ordem das etapas) ou "historico" (log de eventos, leadReachedAnyOf
+    // acima); lado de campo personalizado é sempre pelo valor ATUAL do lead,
+    // independente do countMode — "OU" entre etapa e campo, mesma regra do
+    // Dashboard ao vivo (kommo-dashboard/index.ts countMetricSide).
+    const leadReachedMetricSide = (l: LeadRow, m: (typeof reportMetrics)[number], side: "numerator" | "denominator"): boolean => {
+      const stageRefs = side === "numerator" ? metricNumStageRefs.get(m.id)! : metricDenStageRefs.get(m.id)!;
+      const fieldRefs = side === "numerator" ? metricNumFieldRefs.get(m.id)! : metricDenFieldRefs.get(m.id)!;
+      const stageMatch = stageRefs.length > 0 && (m.countMode === "historico"
+        ? leadReachedAnyOf(l, side === "numerator" ? metricNumKeys.get(m.id) : metricDenKeys.get(m.id))
+        : leadReachedCascata(l, stageRefs, stageOrder, lostBeforeByLead));
+      const fieldMatch = fieldRefs.some((r) => matchesFieldRef(l.custom_fields, r));
+      return stageMatch || fieldMatch;
     };
 
     // ===== Janela de meses a gravar (últimos N + corrente), em BRT =====
@@ -225,8 +287,8 @@ serve(async (req) => {
       // amarração que as antigas Taxas de fase já tinham).
       if (axis === "criacao") {
         for (const m of reportMetrics) {
-          if (leadReachedAnyOf(l, metricNumKeys.get(m.id))) a.customPassed[m.id] = (a.customPassed[m.id] || 0) + 1;
-          if (m.format === "percent" && leadReachedAnyOf(l, metricDenKeys.get(m.id))) a.customBase[m.id] = (a.customBase[m.id] || 0) + 1;
+          if (leadReachedMetricSide(l, m, "numerator")) a.customPassed[m.id] = (a.customPassed[m.id] || 0) + 1;
+          if (m.format === "percent" && leadReachedMetricSide(l, m, "denominator")) a.customBase[m.id] = (a.customBase[m.id] || 0) + 1;
         }
       }
     };

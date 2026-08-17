@@ -12,7 +12,7 @@ import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { FUNNEL_BUCKETS } from "@/lib/dashboard-funnel";
 import { SEGMENT_TEMPLATES, applyTemplateToSettings } from "@/lib/segment-templates";
-import { CustomMetric, customMetricsListSchema, stageRefKey } from "@/lib/custom-metrics";
+import { CustomMetric, customMetricsListSchema, metricRefKey } from "@/lib/custom-metrics";
 import { CustomFilter, customFiltersListSchema } from "@/lib/custom-filters";
 import { REPORT_SNAPSHOT_MONTHS } from "@/lib/reports-metrics";
 import FunnelTab from "./dashboard/FunnelTab";
@@ -23,7 +23,11 @@ import CustomFiltersTab from "./dashboard/CustomFiltersTab";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
-interface CustomField { id: string; kommo_id: string; name: string; code: string | null; field_type?: string | null; entity_type?: string | null; }
+interface CustomFieldEnum { id: number; sort: number; value: string; }
+interface CustomField {
+  id: string; kommo_id: string; name: string; code: string | null;
+  field_type?: string | null; entity_type?: string | null; enums?: CustomFieldEnum[] | null;
+}
 
 export default function DashboardSettings() {
   const { activeWorkspace } = useWorkspace();
@@ -53,6 +57,9 @@ export default function DashboardSettings() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [customMetrics, setCustomMetrics] = useState<CustomMetric[]>([]);
   const [customFilters, setCustomFilters] = useState<CustomFilter[]>([]);
+  // Data do evento de etapa mais antigo sincronizado — janela de confiabilidade
+  // do modo "histórico" das Métricas Personalizadas (ver MetricsReportTab).
+  const [eventsHistorySince, setEventsHistorySince] = useState<string | null>(null);
 
   // Detecção de alterações não salvas (baseline capturado ao carregar / após salvar).
   const editable = useMemo(() => JSON.stringify({
@@ -83,16 +90,21 @@ export default function DashboardSettings() {
     setLoading(true);
     baselineRef.current = null; // recaptura o baseline após carregar (evita "sujo" ao trocar de conta)
     try {
-      const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }] = await Promise.all([
+      const [{ data: pipes }, { data: fields }, { data: settingsRow }, { data: status }, { data: oldestEvent }] = await Promise.all([
         // Só funis vivos: arquivado/apagado no Kommo não deve aparecer p/ configurar.
         supabase.from("pipelines").select("*")
           .eq("workspace_id", activeWorkspace.id).eq("is_archive", false).eq("is_deleted", false)
           .order("sort", { nullsFirst: false }),
-        supabase.from("custom_fields").select("id,kommo_id,name,code,field_type,entity_type").eq("workspace_id", activeWorkspace.id),
+        supabase.from("custom_fields").select("id,kommo_id,name,code,field_type,entity_type,enums").eq("workspace_id", activeWorkspace.id),
         supabase.from("dashboard_settings").select("*").eq("workspace_id", activeWorkspace.id).maybeSingle(),
         supabase.from("sync_status").select("last_sync_at,last_sync_status,leads_count").eq("workspace_id", activeWorkspace.id).maybeSingle(),
+        // Evento de etapa mais antigo sincronizado — vira o aviso de janela de
+        // confiabilidade do modo "histórico" em MetricsReportTab.
+        supabase.from("lead_stage_events").select("changed_at")
+          .eq("workspace_id", activeWorkspace.id).order("changed_at", { ascending: true }).limit(1),
       ]);
       setSyncStatus(status);
+      setEventsHistorySince(oldestEvent?.[0]?.changed_at ?? null);
       // Kommo: etapas vivem em `statuses` (jsonb) dentro de cada pipeline.
       const ps = (pipes || []).map((p) => ({
         id: p.id, kommo_id: p.kommo_id, name: p.name,
@@ -100,7 +112,9 @@ export default function DashboardSettings() {
           ({ id: String((s as { id: string | number }).id), name: (s as { name: string }).name })),
       }));
       setPipelines(ps);
-      setCustomFields(fields || []);
+      // `enums` vem tipado como Json genérico do Supabase — jsonb sem schema
+      // fixo (só guarda opções de select/multiselect; outros tipos vêm null).
+      setCustomFields((fields || []).map((f) => ({ ...f, enums: (Array.isArray(f.enums) ? f.enums : null) as CustomFieldEnum[] | null })));
       const settings = settingsRow;
       if (settings) {
         setDefaultPipelines(settings.default_pipeline_ids || []);
@@ -137,9 +151,10 @@ export default function DashboardSettings() {
   // métricas precisam de backfill cirúrgico no histórico já travado — ver save().
   const metricFingerprint = (m: CustomMetric) => JSON.stringify({
     format: m.format,
-    numerator: [...m.numerator].map(stageRefKey).sort(),
-    denominator: [...m.denominator].map(stageRefKey).sort(),
+    numerator: [...m.numerator].map(metricRefKey).sort(),
+    denominator: [...m.denominator].map(metricRefKey).sort(),
     reportVisible: m.reportVisible !== false,
+    countMode: m.countMode,
   });
 
   const save = async () => {
@@ -416,6 +431,7 @@ export default function DashboardSettings() {
             setVisibleFields={setVisibleFields}
             chartFields={chartFields}
             setChartFields={setChartFields}
+            eventsHistorySince={eventsHistorySince}
           />
         </TabsContent>
 

@@ -2,14 +2,17 @@ import { useCallback, useEffect, useMemo } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import type { StageRefLabel } from "@/lib/custom-metrics";
+import type { StageRefLabel, FieldRefLabel } from "@/lib/custom-metrics";
 
 export interface StageLead { id: number; name: string; contactName?: string | null; }
 export interface CustomMetricResult {
   id: string; name: string; format: "percent" | "number"; icon?: string; value: number | null;
   color?: "accent" | "success" | "warning" | "destructive";
+  countMode?: "cascata" | "historico";
   numeratorRefs?: StageRefLabel[];
   denominatorRefs?: StageRefLabel[];
+  numeratorFieldRefs?: FieldRefLabel[];
+  denominatorFieldRefs?: FieldRefLabel[];
   numeratorCount?: number;
   denominatorCount?: number | null;
 }
@@ -153,6 +156,8 @@ export interface DashboardData {
   cachedAt?: string;
   responseTime?: ResponseTime | null;
   customMetrics?: CustomMetricResult[];
+  /** Data do evento de etapa mais antigo sincronizado — janela de confiabilidade do modo "histórico". */
+  eventsHistorySince?: string | null;
 }
 
 export interface DashboardFilters {

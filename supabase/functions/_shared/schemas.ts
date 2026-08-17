@@ -59,6 +59,19 @@ const stageRef = z.object({
   pipelineId: z.string().min(1),
   statusId: z.string().min(1),
 });
+// Lado de CAMPO PERSONALIZADO: alternativa ao stageRef pra contas que marcam
+// um campo em vez de mover de etapa (ex.: checkbox "Não compareceu"). `value`
+// ausente/vazio = "campo preenchido"; presente = precisa bater exatamente
+// (ver matchesFieldRef em _shared/custom-metrics-count.ts). Mesma duplicação
+// deliberada de src/lib/custom-metrics.ts.
+const fieldRef = z.object({
+  fieldId: z.string().min(1),
+  value: z.string().optional(),
+});
+// union (não discriminado) funciona pq os shapes são estruturalmente
+// distintos — dado salvo antes desse campo existir (só stageRef) continua
+// validando igual.
+const metricRef = z.union([stageRef, fieldRef]);
 // Mesma lista de chaves de src/lib/custom-metrics.ts (CUSTOM_METRIC_ICON_KEYS) —
 // o backend só precisa validar/repassar a string, quem desenha o ícone é o front.
 const CUSTOM_METRIC_ICON_KEYS = [
@@ -75,11 +88,18 @@ export const CustomMetricSchema = z.object({
   format: z.enum(["percent", "number"]),
   icon: z.enum(CUSTOM_METRIC_ICON_KEYS).catch("sparkles"),
   color: z.enum(CUSTOM_METRIC_COLOR_KEYS).catch("accent").default("accent"),
-  numerator: z.array(stageRef).min(1).max(3),
-  denominator: z.array(stageRef).max(3),
+  numerator: z.array(metricRef).min(1).max(3),
+  denominator: z.array(metricRef).max(3),
   // Também aparece no Relatório (coorte mensal), não só no Dashboard ao vivo —
   // ver src/lib/custom-metrics.ts (mantido em sincronia).
   reportVisible: z.boolean().default(true),
+  // "cascata" (padrão): posição atual + ordem das etapas, mesma técnica do funil
+  // visual — robusto, mas não detecta reentrada (lead que volta pra etapa
+  // anterior). "historico": conta via kommo.lead_stage_events, detecta
+  // reentrada mas só enxerga ~18-20 dias (limite de retenção da API de eventos
+  // do Kommo, não é bug nosso). Métricas salvas sem esse campo (anteriores a
+  // essa mudança) caem no default "cascata" — corrige subcontagem sem migração.
+  countMode: z.enum(["cascata", "historico"]).catch("cascata").default("cascata"),
 });
 export type CustomMetric = z.infer<typeof CustomMetricSchema>;
 export const CustomMetricsListSchema = z.array(CustomMetricSchema).max(3);

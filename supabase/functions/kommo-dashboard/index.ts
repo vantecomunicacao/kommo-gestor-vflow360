@@ -14,14 +14,19 @@ import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel
 import { KommoDashboardPayloadSchema, CustomMetricsListSchema, CustomFiltersListSchema } from "../_shared/schemas.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 import {
+  buildStageOrder, buildLostBeforeMap, oldestEventDate, leadReachedCascata,
+  splitMetricRefs, matchesFieldRef,
+  type RawStageEvent, type MetricRef,
+} from "../_shared/custom-metrics-count.ts";
+import {
   type Bucket, type KommoStatus, type DashboardLead,
   inferFunnelMapping, extractCf, extractCfDate, extractCfValues,
   safeRate, buildDist, cycleDays,
   stageBucket as stageBucketPure,
   isWonLead as isWonLeadPure,
   computeTimePerStage as computeTimePerStagePure,
-  countPassedThrough as countPassedThroughPure,
-  describeStageRefs,
+  leadPassedThrough,
+  describeStageRefs, describeFieldRefs,
 } from "./pure.ts";
 
 interface DashboardSettingsRow {
@@ -126,7 +131,7 @@ serve(async (req) => {
     const filterCustomFilters = payload.customFilters;
 
     // ===== Catálogos =====
-    const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }] = await Promise.all([
+    const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }, { data: allPipelinesRows }] = await Promise.all([
       // Só funis vivos: arquivado/apagado no Kommo não entra no seletor nem no cálculo.
       db.from("pipelines").select("kommo_id,name,statuses,is_main,sort")
         .eq("workspace_id", workspaceId).eq("is_archive", false).eq("is_deleted", false)
@@ -135,6 +140,11 @@ serve(async (req) => {
       db.from("loss_reasons").select("kommo_id,name").eq("workspace_id", workspaceId),
       db.from("dashboard_settings").select("*").eq("workspace_id", workspaceId).maybeSingle(),
       db.from("custom_fields").select("kommo_id,name,code,entity_type,field_type,enums").eq("workspace_id", workspaceId),
+      // SEM filtro de arquivado/deletado, só pra stageOrder (modo cascata): `leads`
+      // inclui lead de funil já arquivado (ver comentário abaixo), então a ordem
+      // das etapas precisa cobrir esses funis também, senão esses leads ficam de
+      // fora de qualquer Métrica Personalizada em modo cascata sem aviso nenhum.
+      db.from("pipelines").select("kommo_id,statuses").eq("workspace_id", workspaceId),
     ]);
 
     const allPipelines = (pipelinesRows || []) as Array<{ kommo_id: string; name: string; statuses: KommoStatus[] | null; is_main: boolean; sort: number }>;
@@ -301,6 +311,23 @@ serve(async (req) => {
       arr.push({ before: e.before_status_id ?? null, after: e.after_status_id ?? null, t });
       eventsByLead.set(String(e.lead_id), arr);
     }
+    // ===== Insumos do modo "cascata" das Métricas Personalizadas =====
+    // stageOrder: ordem das etapas por funil (pra "alcançou etapa X ou além").
+    // lostBeforeByLead/oldestEventAt: mesmos `stageEvRows` acima, só reformatados
+    // pro shape do módulo compartilhado — ver _shared/custom-metrics-count.ts
+    // pro porquê da cascata existir (a API de eventos do Kommo só retém histórico
+    // por ~18-20 dias, então o modo "histórico" sozinho subconta etapas antigas).
+    const rawStageEvents: RawStageEvent[] = (stageEvRows || [])
+      .filter((e) => e.lead_id && e.changed_at)
+      .map((e) => ({
+        leadId: String(e.lead_id), before: e.before_status_id ?? null, after: e.after_status_id ?? null,
+        changedAt: new Date(e.changed_at as string).getTime(),
+      }));
+    const stageOrder = buildStageOrder(
+      (allPipelinesRows || []) as Array<{ kommo_id: string; statuses: KommoStatus[] | null }>,
+    );
+    const lostBeforeByLead = buildLostBeforeMap(rawStageEvents);
+    const eventsHistorySince = oldestEventDate(rawStageEvents);
     const averageTimePerStage = computeTimePerStagePure(leads, eventsByLead, bucketOf);
 
     // ===== Velocidade do funil (movimentação no período selecionado) =====
@@ -651,22 +678,45 @@ serve(async (req) => {
     // são descartadas em vez de derrubar a request inteira.
     const customMetricsParsed = CustomMetricsListSchema.safeParse(settings?.custom_metrics ?? []);
     const customMetricsConfig = customMetricsParsed.success ? customMetricsParsed.data : [];
+    // Conta um lado (numerador/denominador) que pode misturar etapa de funil e
+    // campo personalizado — "OU" entre tudo, mesma semântica que já existia
+    // entre múltiplas etapas. Campo personalizado nunca depende de cascata nem
+    // de histórico (é só o valor ATUAL do lead) — ver _shared/custom-metrics-count.ts.
+    const countMetricSide = (refs: MetricRef[], mode: "cascata" | "historico"): number => {
+      const { stageRefs, fieldRefs } = splitMetricRefs(refs);
+      let n = 0;
+      for (const l of leads) {
+        const stageMatch = stageRefs.length > 0 && (mode === "historico"
+          ? leadPassedThrough(l, eventsByLead, stageRefs)
+          : leadReachedCascata(l, stageRefs, stageOrder, lostBeforeByLead));
+        const fieldMatch = fieldRefs.some((r) => matchesFieldRef(l.custom_fields, r));
+        if (stageMatch || fieldMatch) n++;
+      }
+      return n;
+    };
     const customMetrics = customMetricsConfig.map((m) => {
-      const passed = countPassedThroughPure(leads, eventsByLead, m.numerator);
-      // Nomes de funil/etapa por trás do numerador/denominador — o card no
-      // Dashboard usa isso pra mostrar de onde a métrica vem (útil quando ela
-      // mistura etapas de funis diferentes, algo permitido pelo schema).
-      const numeratorRefs = describeStageRefs(allPipelines, m.numerator);
-      const denominatorRefs = describeStageRefs(allPipelines, m.denominator);
+      // "cascata" (padrão): posição atual + ordem das etapas — não depende do
+      // histórico de eventos, que o Kommo só retém por ~3 semanas. "historico":
+      // detecta reentrada na etapa, mas sujeito a essa mesma janela curta.
+      const passed = countMetricSide(m.numerator, m.countMode);
+      // Nomes de funil/etapa e de campo por trás do numerador/denominador — o
+      // card no Dashboard usa isso pra mostrar de onde a métrica vem.
+      const { stageRefs: numStageRefs, fieldRefs: numFieldRefs } = splitMetricRefs(m.numerator);
+      const { stageRefs: denStageRefs, fieldRefs: denFieldRefs } = splitMetricRefs(m.denominator);
+      const numeratorRefs = describeStageRefs(allPipelines, numStageRefs);
+      const denominatorRefs = describeStageRefs(allPipelines, denStageRefs);
+      const numeratorFieldRefs = describeFieldRefs(customFieldDefs, numFieldRefs);
+      const denominatorFieldRefs = describeFieldRefs(customFieldDefs, denFieldRefs);
       // Contagem exata por trás de cada lado (não a aproximação por status atual
       // que a tela de Configurações usava como prévia) — o card mostra isso no
       // tooltip pra tirar qualquer dúvida sobre o número final.
       const common = {
         id: m.id, name: m.name, format: m.format, icon: m.icon, color: m.color,
-        numeratorRefs, denominatorRefs, numeratorCount: passed,
+        countMode: m.countMode, numeratorRefs, denominatorRefs, numeratorFieldRefs, denominatorFieldRefs,
+        numeratorCount: passed,
       };
       if (m.format === "number") return { ...common, denominatorCount: null, value: passed };
-      const base = countPassedThroughPure(leads, eventsByLead, m.denominator);
+      const base = countMetricSide(m.denominator, m.countMode);
       return { ...common, denominatorCount: base, value: base > 0 ? (passed / base) * 100 : null };
     });
 
@@ -699,6 +749,9 @@ serve(async (req) => {
       // Fase 2 (dependem de conversas/mensagens):
       responseTime: { averageMinutes: 0, responseCount: 0, conversationsAnalyzed: 0, conversationsWithInbound: 0, businessHoursStart: settings?.business_hours_start || "09:00", businessHoursEnd: settings?.business_hours_end || "18:00", unanswered: [] },
       customMetrics,
+      // Data do evento mais antigo sincronizado pra esse workspace — usado pelo
+      // front pra montar o aviso de janela de confiabilidade do modo "histórico".
+      eventsHistorySince,
       cachedAt: new Date().toISOString(),
     }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {

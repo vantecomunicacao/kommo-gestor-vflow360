@@ -56,24 +56,66 @@ const stageRefSchema = z.object({
 });
 export type StageRef = { pipelineId: string; statusId: string };
 
+// Lado de CAMPO PERSONALIZADO: alternativa ao StageRef pra contas que marcam
+// um campo em vez de mover de etapa (ex.: checkbox "Não compareceu"). `value`
+// ausente/vazio = "campo preenchido" (qualquer valor conta); presente = tem
+// que bater exatamente com um dos valores do campo (funciona pra select E
+// multiselect — ver matchesFieldRef em _shared/custom-metrics-count.ts).
+const fieldRefSchema = z.object({
+  fieldId: z.string().min(1),
+  value: z.string().optional(),
+});
+export type FieldRef = { fieldId: string; value?: string };
+
+// Numerador/denominador aceitam os dois tipos misturados, "OU" entre tudo —
+// mesma semântica que já existia entre múltiplas etapas. z.union (não
+// discriminado) funciona porque os shapes são estruturalmente distintos
+// (pipelineId+statusId vs fieldId) — dado salvo antes desse campo existir
+// (só StageRef) continua validando igual.
+const metricRefSchema = z.union([stageRefSchema, fieldRefSchema]);
+export type MetricRef = StageRef | FieldRef;
+export const isFieldRef = (r: MetricRef): r is FieldRef => "fieldId" in r;
+export const isStageRef = (r: MetricRef): r is StageRef => "statusId" in r;
+
 export const customMetricSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1, "Dê um nome pra métrica").max(60),
   format: z.enum(["percent", "number"]),
   icon: z.enum(CUSTOM_METRIC_ICON_KEYS as [CustomMetricIconKey, ...CustomMetricIconKey[]]).catch(DEFAULT_CUSTOM_METRIC_ICON),
   color: z.enum(CUSTOM_METRIC_COLOR_KEYS as [CustomMetricColorKey, ...CustomMetricColorKey[]]).catch(DEFAULT_CUSTOM_METRIC_COLOR).default(DEFAULT_CUSTOM_METRIC_COLOR),
-  numerator: z.array(stageRefSchema).min(1, "Escolha ao menos 1 etapa").max(MAX_STAGE_REFS_PER_SIDE),
-  denominator: z.array(stageRefSchema).max(MAX_STAGE_REFS_PER_SIDE),
+  numerator: z.array(metricRefSchema).min(1, "Escolha ao menos 1 etapa ou campo").max(MAX_STAGE_REFS_PER_SIDE),
+  denominator: z.array(metricRefSchema).max(MAX_STAGE_REFS_PER_SIDE),
   // Também aparece no Relatório (coorte mensal: "alcançou/alcançou"), não só no
   // Dashboard ao vivo ("está atualmente em"). Default true — quem configura
   // provavelmente quer ver nos dois lugares; desliga por métrica se não quiser.
   reportVisible: z.boolean().default(true),
+  // "cascata" (padrão): conta por posição atual + ordem das etapas, mesma
+  // técnica do funil visual — robusto, mas não detecta reentrada (ex.: lead
+  // que sai de "Não Compareceu" e volta pra "Agendado"). "historico": conta
+  // via histórico de eventos do Kommo, detecta reentrada mas só enxerga
+  // ~18-20 dias pra trás — limite de retenção da API do Kommo, não é algo que
+  // dá pra sincronizar de volta. Métricas salvas antes desse campo existir
+  // caem no default "cascata" (corrige subcontagem sem precisar remigrar).
+  countMode: z.enum(["cascata", "historico"]).catch("cascata").default("cascata"),
 });
 export type CustomMetric = z.infer<typeof customMetricSchema>;
+
+export const COUNT_MODE_OPTIONS: Record<"cascata" | "historico", { label: string; description: string }> = {
+  cascata: {
+    label: "Cascata (recomendado)",
+    description: "Conta quem está nessa etapa ou já avançou além dela. Robusto, mas não detecta reentrada.",
+  },
+  historico: {
+    label: "Histórico de eventos",
+    description: "Detecta reentrada na etapa (ex.: \"Não Compareceu\" → \"Agendado\" → \"Não Compareceu\" de novo), mas só enxerga um histórico curto — o Kommo não guarda eventos antigos.",
+  },
+};
 
 export const customMetricsListSchema = z.array(customMetricSchema).max(MAX_CUSTOM_METRICS);
 
 export const stageRefKey = (r: StageRef) => `${r.pipelineId}:${r.statusId}`;
+export const fieldRefKey = (r: FieldRef) => `field:${r.fieldId}:${r.value ?? ""}`;
+export const metricRefKey = (r: MetricRef) => (isFieldRef(r) ? fieldRefKey(r) : stageRefKey(r));
 
 export const formatCustomMetricValue = (value: number | null, format: "percent" | "number"): string => {
   if (value === null) return "—";
@@ -84,15 +126,20 @@ export const formatCustomMetricValue = (value: number | null, format: "percent" 
 // Nome de funil/etapa por trás de um lado (numerador ou denominador) da
 // métrica — vem resolvido do backend (kommo-dashboard/pure.ts describeStageRefs).
 export type StageRefLabel = { pipelineName: string; stageName: string };
+// Idem, pro lado de campo personalizado (kommo-dashboard/pure.ts describeFieldRefs).
+export type FieldRefLabel = { fieldName: string; valueLabel: string | null };
 
 // Subtítulo curto do card: nomes de funil únicos envolvidos na métrica (dos
-// dois lados). Uma métrica de funil só mostra 1 nome; uma que mistura funis
-// (schema permite) mostra os dois, deixando isso visível de relance.
+// dois lados) + nomes de campo personalizado, se a métrica usar algum. Uma
+// métrica de funil só mostra 1 nome; uma que mistura funis (schema permite)
+// mostra os dois, deixando isso visível de relance.
 export const customMetricPipelineSummary = (
   numeratorRefs: StageRefLabel[] | undefined, denominatorRefs: StageRefLabel[] | undefined,
+  numeratorFieldRefs?: FieldRefLabel[], denominatorFieldRefs?: FieldRefLabel[],
 ): string => {
   const names = Array.from(new Set([...(numeratorRefs ?? []), ...(denominatorRefs ?? [])].map((r) => r.pipelineName)));
-  return names.join(" + ");
+  const fieldNames = Array.from(new Set([...(numeratorFieldRefs ?? []), ...(denominatorFieldRefs ?? [])].map((r) => `Campo: ${r.fieldName}`)));
+  return [...names, ...fieldNames].join(" + ");
 };
 
 // Tooltip detalhado: mostra exatamente quais etapas compõem cada lado E o
@@ -103,12 +150,23 @@ export const customMetricPipelineSummary = (
 export const customMetricTooltip = (m: {
   format: "percent" | "number";
   numeratorRefs?: StageRefLabel[]; denominatorRefs?: StageRefLabel[];
+  numeratorFieldRefs?: FieldRefLabel[]; denominatorFieldRefs?: FieldRefLabel[];
   numeratorCount?: number; denominatorCount?: number | null;
+  countMode?: "cascata" | "historico";
+  eventsHistorySince?: string | null;
 }): string => {
-  const side = (refs: StageRefLabel[] | undefined, count: number | null | undefined) => {
-    const label = (refs ?? []).map((r) => `${r.stageName} (${r.pipelineName})`).join(" + ") || "—";
+  const side = (
+    refs: StageRefLabel[] | undefined, fieldRefs: FieldRefLabel[] | undefined, count: number | null | undefined,
+  ) => {
+    const stageLabels = (refs ?? []).map((r) => `${r.stageName} (${r.pipelineName})`);
+    const fieldLabels = (fieldRefs ?? []).map((r) => `${r.fieldName}${r.valueLabel ? ` = ${r.valueLabel}` : " (preenchido)"}`);
+    const label = [...stageLabels, ...fieldLabels].join(" + ") || "—";
     return count == null ? label : `${label} (${count})`;
   };
-  if (m.format === "number") return `Contagem: ${side(m.numeratorRefs, m.numeratorCount)}`;
-  return `${side(m.numeratorRefs, m.numeratorCount)} ÷ ${side(m.denominatorRefs, m.denominatorCount)}`;
+  const base = m.format === "number"
+    ? `Contagem: ${side(m.numeratorRefs, m.numeratorFieldRefs, m.numeratorCount)}`
+    : `${side(m.numeratorRefs, m.numeratorFieldRefs, m.numeratorCount)} ÷ ${side(m.denominatorRefs, m.denominatorFieldRefs, m.denominatorCount)}`;
+  if (m.countMode !== "historico") return base;
+  const since = m.eventsHistorySince ? new Date(m.eventsHistorySince).toLocaleDateString("pt-BR") : null;
+  return `${base} — modo histórico: só enxerga reentradas${since ? ` a partir de ${since}` : ""}.`;
 };

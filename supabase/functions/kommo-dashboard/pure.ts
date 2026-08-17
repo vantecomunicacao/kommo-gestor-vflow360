@@ -30,55 +30,11 @@ export function inferFunnelMapping(stages: KommoStatus[]): Record<Bucket, string
   return out;
 }
 
-/** Item de `custom_fields` como gravado pelo kommo-sync (jsonb, sem schema fixo). */
-interface CustomFieldRow {
-  field_code?: string | number;
-  field_id?: string | number;
-  values?: Array<{ value?: unknown }>;
-}
-
-function asCustomFieldRows(cfv: unknown): CustomFieldRow[] {
-  return Array.isArray(cfv) ? (cfv as CustomFieldRow[]) : [];
-}
-
-/** Extrai valor de um custom field de lead (array custom_fields_values) por code/id. */
-export function extractCf(cfv: unknown, codeOrId: string | null): string | null {
-  if (!codeOrId) return null;
-  for (const f of asCustomFieldRows(cfv)) {
-    if (String(f?.field_code ?? "") === codeOrId || String(f?.field_id ?? "") === codeOrId) {
-      const vals = (f?.values ?? []).map((v) => v?.value).filter((v) => v != null && String(v).trim() !== "");
-      return vals.length ? vals.join(", ") : null;
-    }
-  }
-  return null;
-}
-
-/** Valor de um custom field do tipo DATA como Date (Kommo grava unix em segundos). */
-export function extractCfDate(cfv: unknown, codeOrId: string | null): Date | null {
-  const vals = extractCfValues(cfv, codeOrId);
-  if (!vals.length) return null;
-  const n = Number(vals[0]);
-  if (!Number.isFinite(n)) {
-    const d = new Date(vals[0]);
-    return isNaN(d.getTime()) ? null : d;
-  }
-  // unix em segundos (Kommo) → ms
-  return new Date(n * 1000);
-}
-
-/** Como extractCf, mas devolve cada valor individualmente (p/ multiselect e distribuição). */
-export function extractCfValues(cfv: unknown, codeOrId: string | null): string[] {
-  if (!codeOrId) return [];
-  for (const f of asCustomFieldRows(cfv)) {
-    if (String(f?.field_code ?? "") === codeOrId || String(f?.field_id ?? "") === codeOrId) {
-      return (f?.values ?? [])
-        .map((v) => v?.value)
-        .filter((v) => v != null && String(v).trim() !== "")
-        .map((v) => String(v));
-    }
-  }
-  return [];
-}
+// Extração de campo personalizado relocada pra _shared/custom-fields.ts (o
+// kommo-report-snapshot passou a precisar também, pra Métricas Personalizadas
+// com lado de campo) — reexportado aqui pra não quebrar os pontos de uso
+// existentes neste arquivo e em index.ts, que continuam importando de "./pure.ts".
+export { extractCf, extractCfDate, extractCfValues } from "../_shared/custom-fields.ts";
 
 // ============================================================================
 // Segunda leva de extração (Fase 4): funções que eram closures dentro do
@@ -215,11 +171,27 @@ export function countCurrentlyIn(leads: DashboardLead[], refs: { pipelineId: str
 }
 
 /**
- * "Passou por": lead que está atualmente na etapa OU tem, no histórico real
+ * "Passou por" (por lead): está atualmente na etapa OU tem, no histórico real
  * (eventsByLead), um evento de entrada nela. Resolve a etapa pelo pipeline
  * ATUAL do lead (não pelo pipeline gravado no evento) — evita colisão de
- * status_id repetido entre funis.
+ * status_id repetido entre funis. Extraído do corpo de countPassedThrough
+ * (abaixo) pra ser reaproveitado por leadReachedMetricRefs
+ * (_shared/custom-metrics-count.ts), que combina isso com refs de campo
+ * personalizado — mesmo comportamento, sem mudança de lógica.
  */
+export function leadPassedThrough(
+  l: DashboardLead,
+  eventsByLead: Map<string, StageEvent[]>,
+  refs: { pipelineId: string; statusId: string }[],
+): boolean {
+  if (refs.length === 0 || !l.pipeline_id) return false;
+  const targetStatusIds = new Set(refs.filter((r) => r.pipelineId === l.pipeline_id).map((r) => r.statusId));
+  if (targetStatusIds.size === 0) return false;
+  if (l.status_id && targetStatusIds.has(l.status_id)) return true;
+  const evs = eventsByLead.get(String(l.kommo_id)) || [];
+  return evs.some((e) => e.after && targetStatusIds.has(e.after));
+}
+
 export function countPassedThrough(
   leads: DashboardLead[],
   eventsByLead: Map<string, StageEvent[]>,
@@ -227,14 +199,7 @@ export function countPassedThrough(
 ): number {
   if (refs.length === 0) return 0;
   let n = 0;
-  for (const l of leads) {
-    if (!l.pipeline_id) continue;
-    const targetStatusIds = new Set(refs.filter((r) => r.pipelineId === l.pipeline_id).map((r) => r.statusId));
-    if (targetStatusIds.size === 0) continue;
-    if (l.status_id && targetStatusIds.has(l.status_id)) { n++; continue; }
-    const evs = eventsByLead.get(String(l.kommo_id)) || [];
-    if (evs.some((e) => e.after && targetStatusIds.has(e.after))) n++;
-  }
+  for (const l of leads) if (leadPassedThrough(l, eventsByLead, refs)) n++;
   return n;
 }
 
@@ -257,5 +222,27 @@ export function describeStageRefs(
       pipelineName: pipeline?.name ?? r.pipelineId,
       stageName: stage?.name ?? r.statusId,
     };
+  });
+}
+
+export interface FieldRefLabel { fieldName: string; valueLabel: string | null; }
+
+/**
+ * Resolve refs de campo personalizado (FieldRef, _shared/custom-metrics-count.ts)
+ * pra nome legível + rótulo do valor (quando setado, procurado em `enums` do
+ * campo — mesmo formato usado pelo dropdown de configuração). Paralela a
+ * describeStageRefs, mas pra métricas com lado de campo.
+ */
+export function describeFieldRefs(
+  customFieldDefs: Array<{ kommo_id: string; code: string | null; name: string; enums: unknown }>,
+  refs: { fieldId: string; value?: string }[],
+): FieldRefLabel[] {
+  const byFieldId = new Map(customFieldDefs.map((d) => [d.code || d.kommo_id, d]));
+  return refs.map((r) => {
+    const def = byFieldId.get(r.fieldId);
+    if (!r.value) return { fieldName: def?.name ?? r.fieldId, valueLabel: null };
+    const enums = Array.isArray(def?.enums) ? (def!.enums as Array<{ value?: unknown }>) : [];
+    const match = enums.find((e) => String(e?.value ?? "") === r.value);
+    return { fieldName: def?.name ?? r.fieldId, valueLabel: match ? String(match.value) : r.value };
   });
 }

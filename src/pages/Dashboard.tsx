@@ -346,10 +346,10 @@ export default function Dashboard() {
                 key={m.id}
                 title={m.name}
                 value={formatCustomMetricValue(m.value, m.format)}
-                subtitle={customMetricPipelineSummary(m.numeratorRefs, m.denominatorRefs)}
+                subtitle={customMetricPipelineSummary(m.numeratorRefs, m.denominatorRefs, m.numeratorFieldRefs, m.denominatorFieldRefs)}
                 icon={getCustomMetricIcon(m.icon)}
                 variant={m.color || "accent"}
-                tooltip={customMetricTooltip(m)}
+                tooltip={customMetricTooltip({ ...m, eventsHistorySince: data.eventsHistorySince })}
               />
             ))}
           </div>
@@ -383,10 +383,10 @@ export default function Dashboard() {
                   key={m.id}
                   title={m.name}
                   value={formatCustomMetricValue(m.value, m.format)}
-                  subtitle={customMetricPipelineSummary(m.numeratorRefs, m.denominatorRefs)}
+                  subtitle={customMetricPipelineSummary(m.numeratorRefs, m.denominatorRefs, m.numeratorFieldRefs, m.denominatorFieldRefs)}
                   icon={getCustomMetricIcon(m.icon)}
                   variant={m.color || "accent"}
-                  tooltip={customMetricTooltip(m)}
+                  tooltip={customMetricTooltip({ ...m, eventsHistorySince: data.eventsHistorySince })}
                 />
               ))}
             </div>
