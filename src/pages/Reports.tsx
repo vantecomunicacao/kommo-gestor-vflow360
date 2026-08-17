@@ -552,7 +552,7 @@ export default function Reports() {
         <div className="space-y-3">
           <div>
             <h1 className="text-2xl font-bold text-foreground">
-              Relatório {dateBasis === "criacao" ? "Comercial" : "Financeiro"}
+              Relatório {dateBasis === "criacao" ? "Comercial" : "Resultados"}
             </h1>
             <p className="text-muted-foreground">
               {activeWorkspace.name} · {dateBasis === "criacao"
@@ -644,7 +644,7 @@ export default function Reports() {
       {/* Cabeçalho (impressão): metadados do relatório — só aparece no PDF */}
       {hasData && (
         <div className="hidden print:block border-b border-border pb-3 mb-4">
-          <h1 className="text-xl font-bold text-foreground">Relatório {dateBasis === "criacao" ? "Comercial" : "Financeiro"}</h1>
+          <h1 className="text-xl font-bold text-foreground">Relatório {dateBasis === "criacao" ? "Comercial" : "Resultados"}</h1>
           <p className="text-sm text-muted-foreground mt-0.5">{activeWorkspace.name}</p>
           <div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-0.5 text-xs text-muted-foreground max-w-2xl">
             <span><strong className="text-foreground font-medium">Período:</strong> {shown.length > 0 ? `${monthLabel(shown[0].month)} – ${monthLabel(shown[shown.length - 1].month)} (${shown.length} ${shown.length === 1 ? "mês" : "meses"})` : "—"}</span>
@@ -763,7 +763,7 @@ export default function Reports() {
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm" onMouseLeave={() => setHoveredCol(null)}>
                 <caption className="sr-only">
-                  Comparativo mensal de métricas do relatório {dateBasis === "criacao" ? "comercial" : "financeiro"}, por métrica e mês.
+                  Comparativo mensal de métricas do relatório {dateBasis === "criacao" ? "comercial" : "resultados"}, por métrica e mês.
                 </caption>
                 <thead>
                   <tr className="border-b border-border bg-card">

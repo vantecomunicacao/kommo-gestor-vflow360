@@ -4,7 +4,7 @@ import { DateBasis } from "@/lib/report-axis";
 const triggerCls =
   "px-5 py-2 text-sm font-semibold data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md";
 
-/** Abas Comercial (criação) x Financeiro (fechamento) — usadas no Dashboard e no Relatório. */
+/** Abas Comercial (criação) x Resultados (fechamento) — usadas no Dashboard e no Relatório. */
 export function AxisTabs({ value, onChange }: { value: DateBasis; onChange: (v: DateBasis) => void }) {
   return (
     <Tabs value={value} onValueChange={(v) => onChange(v as DateBasis)}>
@@ -13,7 +13,7 @@ export function AxisTabs({ value, onChange }: { value: DateBasis; onChange: (v: 
           Comercial
         </TabsTrigger>
         <TabsTrigger value="fechamento" title="Período pela data de fechamento (ganho + perdido)" className={triggerCls}>
-          Financeiro
+          Resultados
         </TabsTrigger>
       </TabsList>
     </Tabs>
