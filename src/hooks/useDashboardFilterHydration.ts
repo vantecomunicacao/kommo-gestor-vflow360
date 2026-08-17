@@ -37,6 +37,32 @@ export function useDashboardFilterHydration(workspaceId: string | undefined, sea
   // link compartilhado, e vazarem pro novo workspace (achado 2026-08-16).
   const isFirstHydration = useRef(true);
 
+  // `activeWorkspace.id` (WorkspaceContext) muda na hora, mas a restauração dos
+  // filtros abaixo é assíncrona (espera uma consulta ao Supabase). Sem isto, há
+  // uma janela real — não só teórica, reproduzida em produção 2026-08-17 mesmo
+  // após corrigir o deep link acima — em que o Dashboard renderiza com o
+  // workspace NOVO e os filtros (pipeline/vendedor/origem/etc.) ainda do
+  // workspace ANTERIOR; como esses ids não existem no workspace novo, a busca
+  // que dispara nesse meio-tempo volta zerada. Ajustar estado durante a
+  // renderização (padrão oficial do React para "resetar estado quando uma prop
+  // muda", https://react.dev/learn/you-might-not-need-an-effect) garante que
+  // NENHUM render comita essa combinação inválida: o `hydrated=false` e os
+  // filtros limpos aparecem no mesmo passo em que `workspaceId` muda, antes de
+  // qualquer busca (gated em `hydrated`, ver Dashboard.tsx) poder disparar.
+  const [syncedWorkspaceId, setSyncedWorkspaceId] = useState(workspaceId);
+  if (workspaceId !== syncedWorkspaceId) {
+    setSyncedWorkspaceId(workspaceId);
+    setHydrated(false);
+    setSelectedPipelineIds([]);
+    setSelectedStageIds([]);
+    setSelectedSellerIds([]);
+    setSelectedUtmMediums([]);
+    setSelectedUtmCampaigns([]);
+    setSelectedOrigins([]);
+    setSelectedCustomFilters({});
+    setDefaultPipelineIds([]);
+  }
+
   // Hidratar filtros salvos por workspace (ou aplicar pipeline padrão)
   useEffect(() => {
     setHydrated(false);

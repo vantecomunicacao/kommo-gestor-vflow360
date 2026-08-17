@@ -96,11 +96,15 @@ export default function Dashboard() {
     endDate: endOfDay(subDays(startDate, 1)),
   }), [filters, startDate, periodDays]);
 
-  const { data, isLoading, isFetching, error, refetch, cachedAt } = useKommoData(filters);
-  const { data: prevData } = useKommoData(prevFilters, { enabled: !!data });
+  // `enabled: hydrated` evita buscar com uma combinação inválida (workspace novo
+  // + filtros ainda do workspace anterior) na janela entre trocar de workspace e
+  // a hidratação assíncrona terminar — ver comentário em
+  // useDashboardFilterHydration.ts sobre o achado de 2026-08-17.
+  const { data, isLoading, isFetching, error, refetch, cachedAt } = useKommoData(filters, { enabled: hydrated });
+  const { data: prevData } = useKommoData(prevFilters, { enabled: hydrated && !!data });
   // Receita esfriando: mesmos filtros de funil/vendedor da tela, mas sem corte de
   // período (é uma foto do estado atual, igual à tela dedicada /leads-esfriando).
-  const { data: coolingData } = useCoolingLeads(activeWorkspace?.id || null, selectedPipelineIds, selectedSellerIds, { enabled: dateBasis === "fechamento" });
+  const { data: coolingData } = useCoolingLeads(activeWorkspace?.id || null, selectedPipelineIds, selectedSellerIds, { enabled: hydrated && dateBasis === "fechamento" });
 
   // Mapa nome→cor compartilhado entre os cards de origem (leads e vendas), para
   // que a MESMA origem apareça na MESMA cor nos dois gráficos. Usa o mesmo
@@ -137,7 +141,12 @@ export default function Dashboard() {
   if (!activeWorkspace) {
     return <ErrorState error="Selecione uma conta para visualizar o dashboard." onRetry={() => window.location.reload()} />;
   }
-  if (isLoading && !data) return <DashboardSkeleton />;
+  // `!hydrated` conta como carregando (não só `isLoading`): enquanto os filtros
+  // do workspace ainda não terminaram de ser restaurados, a busca fica
+  // deliberadamente pausada (`enabled: hydrated`, ver useKommoData acima), e
+  // sem isto o usuário veria por um instante a tela de "sem dados" em vez do
+  // skeleton, ao trocar de workspace.
+  if ((isLoading || !hydrated) && !data) return <DashboardSkeleton />;
   if (error && !data) return <ErrorState error={error} onRetry={() => refetch(true)} />;
   if (!data) return <ErrorState error="Sem dados. Clique em Atualizar agora para sincronizar com o VFlow360." onRetry={() => refetch(true)} />;
 
