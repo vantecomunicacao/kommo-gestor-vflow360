@@ -35,7 +35,7 @@ test.describe("Autenticação e guards de papel", () => {
     await expect(page.getByRole("link", { name: "Admin" })).toHaveCount(0);
   });
 
-  test("vendedor é bloqueado em /dashboard (GestorGuard) e volta para /leads-esfriando", async ({ page }) => {
+  test("vendedor é bloqueado em /dashboard (PermissionGuard) e volta para /leads-esfriando", async ({ page }) => {
     await installSupabaseMocks(page, { role: "vendedor" });
     await loginAs(page, "vendedor");
 

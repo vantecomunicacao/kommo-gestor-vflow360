@@ -3,14 +3,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "./AuthContext";
 
 export interface Permissions {
-  viewSuggestions: boolean;
+  viewCooling: boolean;
+  viewDashboard: boolean;
   viewIntegrations: boolean;
   viewSettings: boolean;
   isAdmin: boolean;
 }
 
 const DEFAULT: Permissions = {
-  viewSuggestions: false,
+  viewCooling: false,
+  viewDashboard: false,
   viewIntegrations: false,
   viewSettings: false,
   isAdmin: false,
@@ -28,38 +30,49 @@ const PermissionsContext = createContext<PermissionsContextType>({
 
 export const usePermissions = () => useContext(PermissionsContext);
 
-// Usuario "so sugestoes" (vendedor): nao-admin, ve sugestoes e nada mais.
-export function isSuggestionsOnly(p: Permissions): boolean {
-  return !p.isAdmin && p.viewSuggestions && !p.viewIntegrations && !p.viewSettings;
+// Rota de destino conforme as permissoes: primeira area liberada, nessa ordem
+// de prioridade. Sem nenhuma flag marcada (nao-admin sem acesso a nada), cai
+// numa tela de "sem acesso" em vez de redirecionar pra uma rota bloqueada.
+export function landingPath(p: Permissions): string {
+  if (p.isAdmin || p.viewDashboard) return "/dashboard";
+  if (p.viewCooling) return "/leads-esfriando";
+  if (p.viewIntegrations) return "/integrations";
+  if (p.viewSettings) return "/settings";
+  return "/sem-acesso";
 }
 
-// Rota de destino conforme o perfil. Fase 1 (produto de analytics): Sugestoes saiu
-// do produto, entao o perfil "so sugestoes" cai em /leads-esfriando (unica pagina que
-// ele enxerga). Demais -> Dashboard. Ver docs/ROADMAP_FASE2_COPILOTO.md.
-export function landingPath(p: Permissions): string {
-  return isSuggestionsOnly(p) ? "/leads-esfriando" : "/dashboard";
-}
+// Sentinela pro "resolvido sem usuario" (user null), pra distinguir de
+// "ainda nao resolvido pra ninguem" (estado inicial). Nao pode ser null
+// porque null tambem eh o valor de user?.id quando nao ha usuario.
+const NO_USER = "__none__";
 
 export const PermissionsProvider = ({ children }: { children: ReactNode }) => {
   const { user, loading: authLoading } = useAuth();
   const [permissions, setPermissions] = useState<Permissions>(DEFAULT);
-  const [loading, setLoading] = useState(true);
+  // Id do usuario para o qual `permissions` reflete o valor real (ou NO_USER).
+  // Comparado contra `user?.id` a cada render (nao dentro do efeito) porque
+  // o efeito so roda DEPOIS do commit -- entre o momento em que `user` muda
+  // (ex.: login) e o efeito rodar, existe um render com `user` novo mas
+  // `loading` ainda no valor antigo (false, de antes do login). Nesse render,
+  // se algum consumidor (Login.tsx) decidisse uma rota com permissoes DEFAULT
+  // achando que "carregou", ele fixaria a rota errada (ex.: /sem-acesso) antes
+  // do fetch real terminar. Derivar `loading` por comparacao sincrona evita
+  // esse intervalo, sem precisar esperar o efeito.
+  const [resolvedFor, setResolvedFor] = useState<string>(NO_USER);
+  const loading = authLoading || resolvedFor !== (user?.id ?? NO_USER);
 
   useEffect(() => {
     let active = true;
-    // Enquanto a sessao ainda esta sendo restaurada (reload), mantemos loading=true
-    // para os guards nao avaliarem permissoes DEFAULT no intervalo user=null->presente
-    // (senao um F5 em rota protegida chutaria o usuario para /dashboard).
+    // Enquanto a sessao ainda esta sendo restaurada (reload), nao mexe em nada
+    // -- `loading` acima ja cobre esse caso via `authLoading`.
     if (authLoading) {
-      setLoading(true);
       return;
     }
     if (!user) {
       setPermissions(DEFAULT);
-      setLoading(false);
+      setResolvedFor(NO_USER);
       return;
     }
-    setLoading(true);
 
     // get_my_permissions() pode falhar/retornar vazio se disparar antes do token
     // de auth estar totalmente assentado no cliente (aba acordando de segundo
@@ -77,12 +90,13 @@ export const PermissionsProvider = ({ children }: { children: ReactNode }) => {
         if (!error && data && data[0]) {
           const r = data[0];
           setPermissions({
-            viewSuggestions: !!r.view_suggestions,
+            viewCooling: !!r.view_cooling,
+            viewDashboard: !!r.view_dashboard,
             viewIntegrations: !!r.view_integrations,
             viewSettings: !!r.view_settings,
             isAdmin: !!r.is_admin,
           });
-          setLoading(false);
+          setResolvedFor(user.id);
           return;
         }
         if (attempt < MAX_ATTEMPTS) {
@@ -101,7 +115,7 @@ export const PermissionsProvider = ({ children }: { children: ReactNode }) => {
       }
       if (!active) return;
       setPermissions(DEFAULT);
-      setLoading(false);
+      setResolvedFor(user.id);
     };
 
     fetchPermissions();

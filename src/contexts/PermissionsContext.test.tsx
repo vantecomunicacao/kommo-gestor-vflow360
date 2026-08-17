@@ -41,7 +41,7 @@ describe("PermissionsContext - retry do get_my_permissions", () => {
       .mockResolvedValueOnce({ data: null, error: { message: "auth.uid() nulo / token em transicao" } })
       .mockResolvedValueOnce({ data: null, error: { message: "auth.uid() nulo / token em transicao" } })
       .mockResolvedValueOnce({
-        data: [{ view_suggestions: false, view_integrations: true, view_settings: true, is_admin: true }],
+        data: [{ view_cooling: false, view_dashboard: true, view_integrations: true, view_settings: true, is_admin: true }],
         error: null,
       });
 
@@ -75,7 +75,7 @@ describe("PermissionsContext - retry do get_my_permissions", () => {
 
   it("resolve na primeira tentativa quando a RPC funciona de primeira (caminho feliz nao regrediu)", async () => {
     rpcMock.mockResolvedValueOnce({
-      data: [{ view_suggestions: false, view_integrations: false, view_settings: true, is_admin: false }],
+      data: [{ view_cooling: false, view_dashboard: false, view_integrations: false, view_settings: true, is_admin: false }],
       error: null,
     });
 

@@ -905,25 +905,28 @@ export type Database = {
           created_at: string
           updated_at: string
           user_id: string
+          view_cooling: boolean
+          view_dashboard: boolean
           view_integrations: boolean
           view_settings: boolean
-          view_suggestions: boolean
         }
         Insert: {
           created_at?: string
           updated_at?: string
           user_id: string
+          view_cooling?: boolean
+          view_dashboard?: boolean
           view_integrations?: boolean
           view_settings?: boolean
-          view_suggestions?: boolean
         }
         Update: {
           created_at?: string
           updated_at?: string
           user_id?: string
+          view_cooling?: boolean
+          view_dashboard?: boolean
           view_integrations?: boolean
           view_settings?: boolean
-          view_suggestions?: boolean
         }
         Relationships: []
       }
@@ -1125,9 +1128,10 @@ export type Database = {
         Args: never
         Returns: {
           is_admin: boolean
+          view_cooling: boolean
+          view_dashboard: boolean
           view_integrations: boolean
           view_settings: boolean
-          view_suggestions: boolean
         }[]
       }
       has_role: {

@@ -9,7 +9,6 @@ import { WorkspaceProvider } from "@/contexts/WorkspaceContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import PermissionGuard from "@/components/PermissionGuard";
-import GestorGuard from "@/components/GestorGuard";
 import AppLayout from "./components/AppLayout";
 import SettingsLayout from "./components/SettingsLayout";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -42,6 +41,7 @@ const DashboardSettings = lazy(() => import("./pages/settings/DashboardSettings"
 const Notes = lazy(() => import("./pages/Notes"));
 const Workspaces = lazy(() => import("./pages/Workspaces"));
 const Admin = lazy(() => import("./pages/Admin"));
+const NoAccess = lazy(() => import("./pages/NoAccess"));
 // Rotas do copiloto de IA (Sugestões, Conversas, Analista) e de observabilidade
 // (Logs, Sistema) foram removidas do produto na Fase 1: dependem de ingestão de
 // conversa/schema antigo ainda não migrados. Ver docs/ROADMAP_FASE2_COPILOTO.md.
@@ -72,12 +72,21 @@ const App = () => (
               <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
-                <Route path="/dashboard" element={<GestorGuard>{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</GestorGuard>} />
-                <Route path="/relatorios" element={<GestorGuard>{lazyRoute(<Reports />, <GenericPageSkeleton />)}</GestorGuard>} />
-                <Route path="/anotacoes" element={<GestorGuard>{lazyRoute(<Notes />, <GenericPageSkeleton />)}</GestorGuard>} />
+                <Route
+                  path="/dashboard"
+                  element={<PermissionGuard require="viewDashboard">{lazyRoute(<Dashboard />, <DashboardSkeleton />)}</PermissionGuard>}
+                />
+                <Route
+                  path="/relatorios"
+                  element={<PermissionGuard require="viewDashboard">{lazyRoute(<Reports />, <GenericPageSkeleton />)}</PermissionGuard>}
+                />
+                <Route
+                  path="/anotacoes"
+                  element={<PermissionGuard require="viewDashboard">{lazyRoute(<Notes />, <GenericPageSkeleton />)}</PermissionGuard>}
+                />
                 <Route
                   path="/leads-esfriando"
-                  element={<PermissionGuard require="viewSuggestions">{lazyRoute(<CoolingLeads />, <GenericPageSkeleton />)}</PermissionGuard>}
+                  element={<PermissionGuard require="viewCooling">{lazyRoute(<CoolingLeads />, <GenericPageSkeleton />)}</PermissionGuard>}
                 />
                 <Route
                   path="/integrations"
@@ -94,7 +103,8 @@ const App = () => (
                   <Route path="dashboard" element={lazyRoute(<DashboardSettings />, <GenericPageSkeleton />)} />
                 </Route>
                 <Route path="/workspaces" element={<Navigate to="/settings/workspace" replace />} />
-                <Route path="/admin" element={<GestorGuard>{lazyRoute(<Admin />, <GenericPageSkeleton />)}</GestorGuard>} />
+                <Route path="/admin" element={lazyRoute(<Admin />, <GenericPageSkeleton />)} />
+                <Route path="/sem-acesso" element={lazyRoute(<NoAccess />, <GenericPageSkeleton />)} />
               </Route>
               <Route path="*" element={<NotFound />} />
               </Routes>

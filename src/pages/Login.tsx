@@ -24,7 +24,7 @@ const Login = () => {
   useForceLightTheme();
 
   if (authLoading) return null;
-  // Logado: espera as permissoes e roteia conforme o perfil (vendedor -> Sugestoes).
+  // Logado: espera as permissoes e roteia pra primeira area liberada (ver landingPath).
   if (user) {
     if (permsLoading) return null;
     return <Navigate to={landingPath(permissions)} replace />;

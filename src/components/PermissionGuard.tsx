@@ -2,7 +2,7 @@ import { Navigate } from "react-router-dom";
 import { usePermissions, landingPath } from "@/contexts/PermissionsContext";
 import { Loader2 } from "lucide-react";
 
-type PermKey = "viewSuggestions" | "viewIntegrations" | "viewSettings";
+type PermKey = "viewCooling" | "viewDashboard" | "viewIntegrations" | "viewSettings";
 
 const PermissionGuard = ({
   require,

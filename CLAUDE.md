@@ -417,6 +417,198 @@ bug de verdade). Também cobre o caso de falha total (cai em `DEFAULT` sem
 travar `loading`) e o caminho feliz (sucesso de primeira, sem atraso). 81
 testes no total (`npm run test`), todos verdes.
 
+## Permissões de usuário — 4 flags simétricas e independentes (2026-08-17)
+
+Reorganização do sistema de permissões de `kommo.user_permissions`. Antes eram
+3 flags (`view_suggestions`/`view_integrations`/`view_settings`) com
+`view_suggestions` sobrecarregada: além de liberar `/leads-esfriando`, a
+combinação `view_suggestions=true` + as outras duas `false` (não-admin)
+disparava `isSuggestionsOnly()`, que bloqueava Dashboard/Relatórios/Anotações
+via `GestorGuard`. Isso causava um bug relatado pelo usuário: marcar só "Ver
+Leads esfriando" pra um usuário escondia Dashboard e Relatórios dele — não era
+bug, era a única forma de acionar esse perfil "vendedor", mas o admin não
+tinha como prever isso pela UI (o toggle não dizia que também bloqueava outras
+áreas).
+
+**Correção: 4 flags explícitas e independentes, cada uma controlando
+exatamente 1 área, sem lógica de combinação escondida:**
+- `view_cooling` (renomeada de `view_suggestions`) — `/leads-esfriando`
+- `view_dashboard` (**nova**) — `/dashboard`, `/relatorios`, `/anotacoes` (antes
+  essas 3 rotas não tinham flag própria; qualquer não-admin que não fosse
+  "só sugestões" acessava livremente)
+- `view_integrations` — mantida, sem mudança de nome
+- `view_settings` — mantida, sem mudança de nome
+
+Admin global (`kommo.has_role(uid,'admin')`) continua liberando as 4
+automaticamente via `get_my_permissions()`. `Admin.tsx` ganhou um 4º toggle
+("Ver Dashboard e Relatórios"); o texto fixo enganoso "Dashboard e Relatórios
+são liberados para todos" foi removido dos dois dialogs (criação/edição de
+usuário).
+
+**Migration** (`20260817120000_kommo_permissions_view_dashboard.sql`):
+`ALTER TABLE ... RENAME COLUMN view_suggestions TO view_cooling`, `ADD COLUMN
+view_dashboard boolean NOT NULL DEFAULT true`, seguido de `UPDATE ... SET
+view_dashboard = false WHERE view_cooling AND NOT view_integrations AND NOT
+view_settings` (só reverte o default `true` pra quem hoje é exatamente o
+perfil "só sugestões" antigo — preserva o acesso de todo o resto,
+comportamento idêntico ao pré-migração). Auditoria em produção antes de
+escrever a migration confirmou que só existe 1 usuário não-admin no banco
+(`view_suggestions=true, view_settings=true` → não era "só sugestões", ficou
+com `view_dashboard=true`), então não havia caso ambíguo de "3 flags falsas"
+pra decidir na prática. `get_my_permissions()` precisou de `DROP FUNCTION`
+antes do `CREATE` — Postgres não aceita `CREATE OR REPLACE FUNCTION` quando o
+shape do `RETURNS TABLE` muda (3→5 colunas), erro `SQLSTATE 42P13`; a
+tentativa inicial sem o `DROP` falhou e fez rollback completo da migration
+inteira (transacional — confirmado consultando o banco depois: nenhuma coluna
+tinha sido alterada), sem deixar estado parcial.
+
+**`GestorGuard` removido** (era só usado pelas 3 rotas acima, cuja checagem
+virou `PermissionGuard require="viewDashboard"`, igual às outras rotas). Rota
+`/admin` também parou de usar `GestorGuard` — nunca bloqueava por `isAdmin`
+mesmo (só bloqueava o perfil "só sugestões"), a checagem de admin real sempre
+foi só dentro do próprio `Admin.tsx` via `useIsAdmin()` (independente do
+`PermissionsContext`); remover o guard não muda comportamento de segurança.
+
+**Nova página `/sem-acesso`** (`src/pages/NoAccess.tsx`): antes, com só 3
+flags, um não-admin sem nenhuma marcada ainda caía em Dashboard (não era "só
+sugestões" pura, então `isSuggestionsOnly` era `false`). Com 4 flags
+simétricas esse caso vira real (usuário sem nenhuma área liberada) —
+`landingPath()` agora tem uma ordem de prioridade explícita
+(dashboard→cooling→integrations→settings) e cai em `/sem-acesso` só se
+nenhuma bater.
+
+**Bug extra achado pelo E2E (`tests/auth.spec.ts`) e corrigido no mesmo
+commit:** criar essa rota de fallback expôs uma corrida de estado que já
+existia mas era inofensiva antes. No login, existe um render entre `user`
+virar truthy (evento de auth) e o `useEffect` de `PermissionsContext` rodar
+de fato (efeitos só rodam DEPOIS do commit) — nesse render, `loading` ainda
+tinha o valor de ANTES do login (`false`, de quando não havia usuário) junto
+com `permissions` ainda em `DEFAULT`. Antes desta mudança isso era invisível
+porque `landingPath(DEFAULT)` caía em `/dashboard` (sem guard nenhum ali). Com
+`viewDashboard` guardando a rota de verdade, essa mesma corrida jogava o
+usuário pra `/sem-acesso` — que É uma rota real e fica, porque `Login.tsx` já
+desmontou (nada re-navega depois que as permissões reais chegam). Corrigido
+substituindo o `loading` (state que só atualiza via `setState` dentro do
+efeito, sempre um tick atrasado) por um valor DERIVADO no corpo do componente:
+`resolvedFor` guarda o `user.id` pro qual `permissions` reflete dado real
+(sentinela `NO_USER` quando não há sessão), e `loading = authLoading ||
+resolvedFor !== (user?.id ?? NO_USER)` — comparação síncrona a cada render,
+sem esperar o efeito. Isso fecha a janela de vez, não só disfarça pra essa
+rota específica. Verificado revertendo a correção temporariamente: os 14
+testes de `auth.spec.ts`/`navigation.spec.ts` falhavam consistentemente com
+gestor caindo em `/sem-acesso` em vez de `/dashboard`; com a correção, os 14
+passam.
+
+**Validação Zod adicionada** em `kommo-admin-users` (`PermissionsSchema`) pro
+payload de `create_user`/`set_permissions` — antes não existia nenhuma
+validação ali (só `!!campo`, silenciosamente `false` se o nome do campo
+viesse errado); aproveitado durante essa mudança porque é exatamente esse
+tipo de silent-fail que já causou bug neste projeto antes (ver retry do
+`get_my_permissions`, seção acima).
+
+Verificação: migration aplicada em produção via `supabase db push --linked`
+(confirmado por query direta pós-migração — o único usuário não-admin ficou
+com `view_cooling=true, view_dashboard=true, view_integrations=false,
+view_settings=true`, idêntico ao que ele acessava antes), `types.ts`
+regenerado (`supabase gen types --schema kommo`), edge function
+`kommo-admin-users` redeployada, `deno check`/`deno test --allow-env` (65
+testes) limpos nas 10 functions Kommo, `tsc --noEmit -p tsconfig.app.json`
+sem erros novos (só os 3 arquivos pré-existentes já documentados acima),
+`npm run lint` 0 problemas, `npm run test` (83 testes) verde. `tests/helpers/fixtures.ts`
+(`permissionsFor`) e `PermissionsContext.test.tsx` atualizados pros novos
+nomes de campo — vendedor de teste ficou com `view_cooling=true,
+view_dashboard=false` (equivalente exato ao "só sugestões" antigo). E2E real
+(`npx playwright test tests/auth.spec.ts tests/navigation.spec.ts`, 14 testes)
+rodado de verdade contra o dev server (não só lido) — pegou o bug de corrida
+descrito acima antes de ir pra produção.
+
+## Métricas Personalizadas — modo de contagem (cascata/histórico) e lado de campo personalizado (2026-08-17)
+
+Duas mudanças na mesma sessão, ambas em `kommo.dashboard_settings.custom_metrics`
+(jsonb, sem migration — schema validado só na camada de aplicação, mesmo padrão
+de `color`/`reportVisible`).
+
+**Causa raiz investigada:** a Taxa Simulação do workspace "ConsulttAgro Prime"
+mostrava 22 leads no numerador enquanto o relatório nativo do Kommo mostrava 87.
+Rastreado até a API de eventos do Kommo (`/events?filter[type]=lead_status_changed`,
+usada pelo `kommo-sync` pra alimentar `kommo.lead_stage_events`) só reter
+histórico por ~18-20 dias — confirmado por query direta: nenhum lead cuja
+última mudança foi antes de 30/07/2026 tinha qualquer evento salvo. Não é bug
+do sync, é teto da fonte, sem como recuperar depois.
+
+**1. `countMode: "cascata" | "historico"`** (novo campo por métrica, default
+`"cascata"` — corrige a subcontagem em métricas já salvas sem precisar
+remigrar). "Cascata" conta pela posição atual do lead + ordem das etapas do
+funil (mesma técnica de "Visão Geral - Funil de Passagem"), sem depender do
+histórico de eventos — robusto, mas não detecta reentrada (lead que sai de
+uma etapa e volta). "Histórico" detecta reentrada via `lead_stage_events`,
+mas sujeito à mesma janela de ~3 semanas. UI nova em Configurações → Métricas
+("Tipo de contagem") com aviso mostrando a data real do evento mais antigo
+sincronizado (`eventsHistorySince`, calculado por workspace, não um número
+chumbado). Lead perdido em modo cascata usa o `before_status_id` do evento de
+perda mais recente pra saber de qual etapa ele veio (mesma limitação de
+retenção, só que aplicada apenas a esse caso).
+
+**2. Numerador/denominador aceitam campo personalizado** (`FieldRef =
+{fieldId, value?}`), misturado com etapa (`StageRef`) — "OU" entre tudo, até
+3 refs por lado. Resolve o caso de contas sem etapa própria pra algo (ex.:
+"Não compareceu" marcado num checkbox em vez de mover de etapa) — campo não
+sofre nem da limitação de reentrada da cascata nem da janela do histórico,
+é só o valor ATUAL do lead. Campo `select`/`multiselect` com `enums`
+cadastrado ganha dropdown com os valores REAIS na UI; qualquer outro tipo
+(checkbox, texto, data etc.) vira "campo preenchido" (`value` ausente =
+qualquer valor não-vazio conta). **Verificado com dado real** (lead de teste
+no workspace "Fogo Forte Resistencias"): checkbox marcado grava
+`values:[{value:true}]`; desmarcado **some do array por completo** (não vira
+`value:false`) — confirma que a lógica de "preenchido" (checar se há algum
+valor) está correta nos dois sentidos, sem precisar de ajuste.
+
+**Escopo:** as duas mudanças valem tanto pro Dashboard ao vivo
+(`kommo-dashboard`) quanto pro Relatório (`kommo-report-snapshot`), via
+módulo novo `_shared/custom-metrics-count.ts` (mesmo padrão de
+`_shared/kommo-funnel.ts`) — decisão deliberada pra Dashboard e Relatório não
+divergirem pra mesma métrica. `extractCf`/`extractCfValues`/`extractCfDate`
+foram relocadas de `kommo-dashboard/pure.ts` pra `_shared/custom-fields.ts`
+(pure.ts reexporta, zero mudança nos ~15 pontos de uso existentes) porque o
+Relatório passou a precisar também.
+
+**Dois bugs achados numa revisão de código pós-implementação (2026-08-17,
+CORRIGIDOS antes de ir pra produção):**
+- `leadReachedCascata` não batia quando a própria ref era "Perdido" (143) —
+  a função sempre trocava pela etapa de origem antes de comparar, então um
+  lead perdido nunca contava numa métrica tipo "quantos foram perdidos".
+  Corrigido com checagem direta antes da troca.
+- Lead de um funil **arquivado/apagado** ficava fora de qualquer métrica em
+  modo cascata — `stageOrder` era montado só com funis vivos, mas `leads`
+  inclui leads de funil morto por design (ver comentário em
+  `kommo-dashboard/index.ts`). Corrigido com uma query separada de pipelines
+  sem o filtro de `is_archive`/`is_deleted`, só pra montar `stageOrder`.
+
+**Pendente, não é bug de código:** meses do Relatório já travados antes dessa
+mudança mantêm o número calculado do jeito antigo (histórico) pra sempre — o
+`metricFingerprint` (`DashboardSettings.tsx`, decide quando disparar backfill
+cirúrgico) não detecta a troca de `countMode` em métricas que já existiam,
+porque o valor default já vem aplicado nos dois lados da comparação (antes e
+depois) desde a leitura do banco. Quem quiser os meses antigos recalculados
+com cascata precisa rodar "Forçar recálculo" manualmente por workspace.
+
+Verificação: 65 testes Deno (`_shared/custom-metrics-count.test.ts` +
+`pure.test.ts` + `authorize.test.ts`), 83 testes de frontend, `deno check`/
+`tsc -p tsconfig.app.json` limpos, testado ao vivo (deploy + chamada real)
+nos dois modos, incluindo métrica com lado de campo criada e apagada de
+propósito no workspace "Fogo Forte Resistencias" pra validar ponta a ponta.
+
+**Achado à parte, não relacionado a essa mudança:** `npm run typecheck`
+(`tsc --noEmit`, sem `-p`) está checando **zero arquivos** — o `tsconfig.json`
+raiz é "solution style" (`files: []` + `references`), que só funciona de
+verdade com `tsc --build`. Descoberto porque um erro real desta mudança
+passou batido nele; confirmado com um erro proposital que também passou
+batido. O comando que funciona é `tsc --noEmit -p tsconfig.app.json` (achou,
+inclusive, alguns erros de tipo pré-existentes e não relacionados em
+`DashboardAiAnalysis.tsx`, `Integrations.tsx` e `Reports.tsx` — não foram
+corrigidos, fora do escopo). Vale corrigir o script em `package.json`
+separadamente.
+
 ## Onde ficam as tabelas (schemas do Supabase)
 
 Desde a separação de infra (2026-08-02), o schema `kommo` vive no **projeto
@@ -505,6 +697,15 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
+- `20260817120000_kommo_permissions_view_dashboard.sql` — em
+  `kommo.user_permissions`: renomeia `view_suggestions` para `view_cooling` e
+  adiciona `view_dashboard boolean not null default true` (com `UPDATE` que
+  reverte pra `false` só quem hoje é o perfil "só sugestões" puro). Recria
+  `get_my_permissions()` (via `DROP FUNCTION` + `CREATE`, não `CREATE OR
+  REPLACE` — o `RETURNS TABLE` mudou de 3 pra 5 colunas) pra devolver as 4
+  flags. Ver seção "Permissões de usuário — 4 flags simétricas e
+  independentes" acima. **APLICADA em produção** via `supabase db push
+  --linked` em 2026-08-17.
 - `20260808150000_kommo_report_snapshot_months_24.sql` — recria só
   `trigger_report_snapshot_all()` trocando `'months', 12` por `'months', 24`.
   Motivo: a comparação "Comparar com: mesmo mês, ano passado" (YoY) no

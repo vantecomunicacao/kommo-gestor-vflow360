@@ -64,20 +64,22 @@ export function sessionFor(role: Role) {
 // ---------------------------------------------------------------------------
 // Permissões (retorno do RPC get_my_permissions)
 //   gestor   -> vê tudo + admin
-//   vendedor -> "só sugestões" (isSuggestionsOnly === true)
+//   vendedor -> só Leads esfriando (view_cooling true, resto false)
 // ---------------------------------------------------------------------------
 
 export function permissionsFor(role: Role) {
   if (role === "gestor") {
     return {
-      view_suggestions: true,
+      view_cooling: true,
+      view_dashboard: true,
       view_integrations: true,
       view_settings: true,
       is_admin: true,
     };
   }
   return {
-    view_suggestions: true,
+    view_cooling: true,
+    view_dashboard: false,
     view_integrations: false,
     view_settings: false,
     is_admin: false,

@@ -6,8 +6,19 @@
 //   - update_password: muda a senha da conta única (efeito também no GHL) — usar com ciência.
 //   - list_users: escopado aos usuários com presença no kommo.*.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { z } from "https://esm.sh/zod@3.23.8";
 import { resolveCallerIdentity } from "../_shared/authorize.ts";
 import { corsHeadersBase as corsHeaders } from "../_shared/cors.ts";
+
+// As 4 flags de kommo.user_permissions (ver migration 20260817120000). Validado
+// aqui pra evitar o silent-fail de nome de campo errado no payload (!!undefined
+// vira false sem avisar nada) — ja foi causa raiz de bug neste projeto.
+const PermissionsSchema = z.object({
+  view_cooling: z.boolean().optional().default(false),
+  view_dashboard: z.boolean().optional().default(false),
+  view_integrations: z.boolean().optional().default(false),
+  view_settings: z.boolean().optional().default(false),
+});
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -37,7 +48,7 @@ Deno.serve(async (req) => {
         // Escopo: só usuários com presença no kommo.* (não lista usuários só-GHL).
         const [{ data: kRoles }, { data: kPerms }, { data: kMembers }, { data: kProfiles }] = await Promise.all([
           db.from("user_roles").select("user_id, role"),
-          db.from("user_permissions").select("user_id, view_suggestions, view_integrations, view_settings"),
+          db.from("user_permissions").select("user_id, view_cooling, view_dashboard, view_integrations, view_settings"),
           db.from("workspace_members").select("user_id, workspace_id, role, workspaces(name)"),
           db.from("profiles").select("user_id, full_name"),
         ]);
@@ -62,13 +73,17 @@ Deno.serve(async (req) => {
             last_sign_in_at: u?.last_sign_in_at ?? null,
             full_name: kProfiles?.find((x) => x.user_id === id)?.full_name || null,
             roles: (kRoles?.filter((r) => r.user_id === id).map((r) => r.role)) || [],
-            workspaces: (kMembers?.filter((m) => m.user_id === id) || []).map((m: {
-              workspace_id: string; role: string; workspaces?: Array<{ name: string }> | null;
-            }) => ({
-              workspace_id: m.workspace_id, role: m.role, name: m.workspaces?.[0]?.name,
-            })),
+            workspaces: (kMembers?.filter((m) => m.user_id === id) || []).map((m) => {
+              // Embed é many-to-one (workspace_members.workspace_id -> workspaces.id),
+              // PostgREST devolve objeto único; o client sem Database generics infere
+              // como array por padrão — trata os dois formatos pra não depender disso.
+              const ws = m.workspaces as unknown as { name?: string } | { name?: string }[] | null;
+              const name = Array.isArray(ws) ? ws[0]?.name : ws?.name;
+              return { workspace_id: m.workspace_id, role: m.role, name };
+            }),
             permissions: {
-              view_suggestions: !!p?.view_suggestions,
+              view_cooling: !!p?.view_cooling,
+              view_dashboard: !!p?.view_dashboard,
               view_integrations: !!p?.view_integrations,
               view_settings: !!p?.view_settings,
             },
@@ -114,11 +129,10 @@ Deno.serve(async (req) => {
             { user_id: newId, workspace_id, role: "member" }, { onConflict: "workspace_id,user_id" },
           );
         }
+        const newPerms = PermissionsSchema.parse(permissions ?? {});
         await db.from("user_permissions").upsert({
           user_id: newId,
-          view_suggestions: !!permissions?.view_suggestions,
-          view_integrations: !!permissions?.view_integrations,
-          view_settings: !!permissions?.view_settings,
+          ...newPerms,
         }, { onConflict: "user_id" });
         return json({ ok: true, user_id: newId });
       }
@@ -126,11 +140,10 @@ Deno.serve(async (req) => {
       case "set_permissions": {
         const { user_id, permissions } = body;
         if (!user_id || !permissions) return json({ error: "user_id e permissions obrigatórios" }, 400);
+        const parsed = PermissionsSchema.parse(permissions);
         const { error } = await db.from("user_permissions").upsert({
           user_id,
-          view_suggestions: !!permissions.view_suggestions,
-          view_integrations: !!permissions.view_integrations,
-          view_settings: !!permissions.view_settings,
+          ...parsed,
         }, { onConflict: "user_id" });
         if (error) throw error;
         return json({ ok: true });

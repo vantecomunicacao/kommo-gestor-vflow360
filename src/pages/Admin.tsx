@@ -15,7 +15,8 @@ import { toast } from "sonner";
 import { Plus, Trash2, KeyRound, Shield, ShieldOff, UserPlus, Loader2, Lock } from "lucide-react";
 
 interface UserPerms {
-  view_suggestions: boolean;
+  view_cooling: boolean;
+  view_dashboard: boolean;
   view_integrations: boolean;
   view_settings: boolean;
 }
@@ -49,7 +50,8 @@ export default function Admin() {
   const [newWorkspace, setNewWorkspace] = useState<string>("");
   const [newRole, setNewRole] = useState<"user" | "admin">("user");
   const [newPerms, setNewPerms] = useState<UserPerms>({
-    view_suggestions: false,
+    view_cooling: false,
+    view_dashboard: false,
     view_integrations: false,
     view_settings: false,
   });
@@ -66,7 +68,8 @@ export default function Admin() {
   // permissions dialog
   const [permsUser, setPermsUser] = useState<AdminUser | null>(null);
   const [permsDraft, setPermsDraft] = useState<UserPerms>({
-    view_suggestions: false,
+    view_cooling: false,
+    view_dashboard: false,
     view_integrations: false,
     view_settings: false,
   });
@@ -160,7 +163,7 @@ export default function Admin() {
       toast.success("Usuário criado");
       setCreateOpen(false);
       setNewEmail(""); setNewPassword(""); setNewName(""); setNewWorkspace(""); setNewRole("user");
-      setNewPerms({ view_suggestions: false, view_integrations: false, view_settings: false });
+      setNewPerms({ view_cooling: false, view_dashboard: false, view_integrations: false, view_settings: false });
       refresh();
     } catch (e) {
       toast.error("Erro ao criar", { description: (e as Error).message });
@@ -303,13 +306,20 @@ export default function Admin() {
               <div className="space-y-2 pt-2 border-t border-border">
                 <Label className="text-sm font-semibold">Permissões de acesso</Label>
                 <p className="text-xs text-muted-foreground">
-                  Dashboard e Relatórios são liberados para todos. Marque as áreas extras que este usuário poderá acessar.
+                  Marque as áreas que este usuário poderá acessar.
                 </p>
                 <div className="flex items-center justify-between pt-1">
+                  <Label className="font-normal">Ver Dashboard e Relatórios</Label>
+                  <Switch
+                    checked={newPerms.view_dashboard}
+                    onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_dashboard: v }))}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
                   <Label className="font-normal">Ver Leads esfriando</Label>
                   <Switch
-                    checked={newPerms.view_suggestions}
-                    onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_suggestions: v }))}
+                    checked={newPerms.view_cooling}
+                    onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_cooling: v }))}
                   />
                 </div>
                 <div className="flex items-center justify-between">
@@ -447,14 +457,20 @@ export default function Admin() {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Dashboard e Relatórios são liberados para todos os usuários.
-              Ative apenas as áreas extras que este usuário poderá acessar.
+              Ative apenas as áreas que este usuário poderá acessar.
             </p>
+            <div className="flex items-center justify-between">
+              <Label className="font-normal">Ver Dashboard e Relatórios</Label>
+              <Switch
+                checked={permsDraft.view_dashboard}
+                onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_dashboard: v }))}
+              />
+            </div>
             <div className="flex items-center justify-between">
               <Label className="font-normal">Ver Leads esfriando</Label>
               <Switch
-                checked={permsDraft.view_suggestions}
-                onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_suggestions: v }))}
+                checked={permsDraft.view_cooling}
+                onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_cooling: v }))}
               />
             </div>
             <div className="flex items-center justify-between">

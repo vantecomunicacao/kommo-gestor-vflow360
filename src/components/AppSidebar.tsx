@@ -3,7 +3,7 @@ import { NavLink } from "@/components/NavLink";
 import { useLocation, useNavigate } from "react-router-dom";
 import { WorkspaceSelector } from "@/components/WorkspaceSelector";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { usePermissions, isSuggestionsOnly } from "@/contexts/PermissionsContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useProfile } from "@/hooks/useProfile";
 import {
@@ -27,9 +27,7 @@ export function AppSidebar() {
   const { signOut, loading: authLoading } = useAuth();
   const { displayName, email, initial } = useProfile();
   const { permissions } = usePermissions();
-  const { isAdmin, viewSuggestions, viewIntegrations, viewSettings } = permissions;
-  // Vendedor (so sugestoes) nao ve os itens de gestor no menu.
-  const gestor = !isSuggestionsOnly(permissions);
+  const { isAdmin, viewCooling, viewDashboard, viewIntegrations, viewSettings } = permissions;
 
   const handleSignOut = async () => {
     await signOut();
@@ -40,11 +38,11 @@ export function AppSidebar() {
   // Sugestões) e observabilidade (Sistema/Logs) ficam fora do menu até a Fase 2.
   // Ver docs/ROADMAP_FASE2_COPILOTO.md.
   const navItems: { title: string; url: string; icon: typeof LayoutDashboard; show: boolean; end?: boolean; badge?: string }[] = [
-    { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: gestor },
-    { title: "Relatórios", url: "/relatorios", icon: BarChart3, show: gestor },
-    { title: "Leads esfriando", url: "/leads-esfriando", icon: Snowflake, show: viewSuggestions || isAdmin },
-    { title: "Anotações", url: "/anotacoes", icon: NotebookPen, show: gestor, badge: "beta" },
-    { title: "Integrações", url: "/integrations", icon: Plug, show: viewIntegrations },
+    { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard, show: viewDashboard || isAdmin },
+    { title: "Relatórios", url: "/relatorios", icon: BarChart3, show: viewDashboard || isAdmin },
+    { title: "Leads esfriando", url: "/leads-esfriando", icon: Snowflake, show: viewCooling || isAdmin },
+    { title: "Anotações", url: "/anotacoes", icon: NotebookPen, show: viewDashboard || isAdmin, badge: "beta" },
+    { title: "Integrações", url: "/integrations", icon: Plug, show: viewIntegrations || isAdmin },
     { title: "Admin", url: "/admin", icon: ShieldCheck, show: isAdmin },
   ].filter((i) => i.show);
 
@@ -158,7 +156,7 @@ export function AppSidebar() {
           <ThemeToggle placement="inline" />
         </div>
         <SidebarMenu>
-          {viewSettings && (
+          {(viewSettings || isAdmin) && (
             <SidebarMenuItem>
               <SidebarMenuButton asChild tooltip="Configurações">
                 <NavLink
