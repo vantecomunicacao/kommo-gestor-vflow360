@@ -658,6 +658,22 @@ Kommo, porque ele é compartilhado com produção viva do GHL.
   `@tailwindcss/typography` já estava como dependência no `package.json` mas
   nunca tinha sido registrado no array `plugins` de `tailwind.config.ts`;
   adicionado.
+- 2026-08-13 (`20260813140000_kommo_ai_provider_config_vault.sql` +
+  `20260813150000_kommo_ai_rate_limit_and_audit.sql`): **duas novas tabelas**
+  `kommo.ai_call_log` (rate limit de chamadas de IA por workspace, auto-limpa —
+  só guarda a última hora) e `kommo.ai_provider_config_audit` (quem
+  criou/trocou/removeu a chave OpenAI do workspace e quando). Junto,
+  `kommo.ai_provider_config.api_key` (texto puro) foi substituída por
+  `api_key_secret_id` (referência ao Supabase Vault, mesmo padrão do token do
+  Kommo em `20260618120000_kommo_vault_token.sql`) — a chave em si só é
+  lida/gravada via `kommo.set_ai_provider_config`/`get_ai_provider_config`/
+  `delete_ai_provider_config` (`SECURITY DEFINER`, restritas a service_role),
+  nunca mais direto pela tabela do frontend. **Achado nesta revisão
+  (2026-08-18):** as duas tabelas e as 3 funções já estavam aplicadas em
+  produção e em uso real (`kommo-ai-analyze/index.ts`), só não tinham sido
+  adicionadas a este inventário nem a `scripts/kommo-schema-manifest.json` —
+  puro atraso de documentação, achado por `node scripts/check-schema-drift.mjs`
+  e corrigido nesta mesma revisão (sem mudança de comportamento/código).
 
 > **Verificação mecânica (Fase 0, 2026-08-06):** `node scripts/check-schema-drift.mjs`
 > compara essa lista (espelhada em `scripts/kommo-schema-manifest.json`, junto com
@@ -691,7 +707,9 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.report_snapshots` | Fotos mensais congeladas (relatório de comparação mês a mês) |
 | `kommo.lead_actions` | Ações do vflow por lead (tarefa/tag criadas) — anti-duplicidade dos leads esfriando |
 | `kommo.dashboard_analyses` | Histórico das análises de IA sob demanda do Dashboard (prompt + params + resultado + custo) |
-| `kommo.ai_provider_config` | Chave OpenAI/modelo por usuário (tela Configurações › IA) — antes gravava no public/GHL e falhava |
+| `kommo.ai_provider_config` | Chave OpenAI/modelo por workspace (tela Configurações › IA) — antes gravava no public/GHL e falhava. Desde 2026-08-13 a chave em si mora cifrada no Vault (`api_key_secret_id`), não mais em coluna `text` |
+| `kommo.ai_call_log` | Metering pra rate limit de chamadas de IA por workspace (auto-limpa, só guarda a última hora). Criada em `20260813150000_kommo_ai_rate_limit_and_audit.sql` |
+| `kommo.ai_provider_config_audit` | Auditoria de quem criou/trocou/removeu a chave de IA do workspace e quando. Criada em `20260813150000_kommo_ai_rate_limit_and_audit.sql` |
 | `kommo.tasks` | Tarefas do CRM Kommo (prazo, responsável, concluída) — base de "tarefas atrasadas" por vendedor. Criada em `20260626130000_kommo_tasks.sql`, que também adiciona `kommo.leads.closest_task_at` |
 | `kommo.workspace_notes` | Bloco de notas mensal do usuário (ata de reunião: pontos bons/ruins, combinados) — sem relação com métricas/leads, só texto livre (rich text, doc JSON do Tiptap). `created_by` é `auth.users.id` solto (sem FK — ver changelog 2026-08-10). Criada em `20260810170000_kommo_workspace_notes.sql` |
 

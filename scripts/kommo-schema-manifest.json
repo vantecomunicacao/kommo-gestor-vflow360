@@ -1,7 +1,9 @@
 {
   "_comment": "Inventário declarado do schema `kommo` no projeto novo (fjncmmqvmocwykpshgsh). Fonte de verdade: CLAUDE.md > 'Tabelas do Kommo (schema kommo) — inventário oficial'. Atualize ESTE arquivo na mesma alteração que atualizar aquela seção do CLAUDE.md — scripts/check-schema-drift.mjs compara isto contra o banco real.",
   "tables": [
+    "ai_call_log",
     "ai_provider_config",
+    "ai_provider_config_audit",
     "contacts",
     "custom_fields",
     "dashboard_analyses",
@@ -28,6 +30,8 @@
     "add_workspace_member",
     "can_manage_workspace",
     "create_workspace",
+    "delete_ai_provider_config",
+    "get_ai_provider_config",
     "get_integration_token",
     "get_my_permissions",
     "has_role",
@@ -35,6 +39,7 @@
     "is_workspace_member",
     "list_workspace_members",
     "remove_workspace_member",
+    "set_ai_provider_config",
     "set_integration_token",
     "set_updated_at",
     "trigger_report_snapshot_all",
