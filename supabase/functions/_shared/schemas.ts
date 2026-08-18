@@ -37,6 +37,10 @@ export const KommoDashboardPayloadSchema = z.object({
     (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : {}),
     z.record(stringArray),
   ),
+  // Quando true, `dailyLeads` cobre o período pedido inteiro (startDate→endDate,
+  // até 400 dias) em vez da janela fixa de 7 dias — usado pelo card "Vendas e
+  // Perdas por Mês" do Dashboard, que precisa de vários meses de uma vez.
+  dailyLeadsFullRange: z.boolean().optional().default(false),
 });
 export type KommoDashboardPayload = z.infer<typeof KommoDashboardPayloadSchema>;
 

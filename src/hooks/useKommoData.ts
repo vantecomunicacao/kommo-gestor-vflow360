@@ -176,6 +176,8 @@ export interface DashboardFilters {
   additionalEndDate?: Date | null;
   /** Eixo de data do período: "criacao" (aba Comercial) ou "fechamento" (aba Financeiro). Default: "criacao". */
   dateBasis?: "criacao" | "fechamento";
+  /** `dailyLeads` cobre startDate→endDate inteiro (até 400 dias) em vez da janela fixa de 7 dias. */
+  dailyLeadsFullRange?: boolean;
 }
 
 interface UseGhlDataOptions {
@@ -216,6 +218,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.additionalStartDate?.getTime() ?? null,
       filters.additionalEndDate?.getTime() ?? null,
       filters.dateBasis ?? "criacao",
+      filters.dailyLeadsFullRange ?? false,
     ],
     [
       filters.workspaceId,
@@ -231,6 +234,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
       filters.additionalStartDate,
       filters.additionalEndDate,
       filters.dateBasis,
+      filters.dailyLeadsFullRange,
     ],
   );
 
@@ -252,6 +256,7 @@ export function useKommoData(filters: DashboardFilters, options: UseGhlDataOptio
           additionalStartDate: filters.additionalStartDate ? filters.additionalStartDate.toISOString() : null,
           additionalEndDate: filters.additionalEndDate ? filters.additionalEndDate.toISOString() : null,
           dateBasis: filters.dateBasis ?? "criacao",
+          dailyLeadsFullRange: filters.dailyLeadsFullRange ?? false,
         },
       });
       if (functionError) throw new Error(functionError.message);

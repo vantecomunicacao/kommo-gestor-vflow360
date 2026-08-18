@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
-import { subDays, startOfDay, endOfDay, differenceInDays, format } from "date-fns";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { subDays, subMonths, startOfDay, startOfMonth, endOfDay, differenceInDays, format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Link, useSearchParams } from "react-router-dom";
 import { Users, TrendingUp, TrendingDown, Target, Banknote, Receipt, HandCoins, RefreshCw, SlidersHorizontal, BarChart3, Wallet, Snowflake, Sparkles } from "lucide-react";
@@ -30,6 +30,7 @@ import { LostOpportunitiesCard } from "@/components/dashboard/LostOpportunitiesC
 import { DataQuality } from "@/components/dashboard/DataQuality";
 import { CustomFieldCharts } from "@/components/dashboard/CustomFieldCharts";
 import { LossReasons } from "@/components/dashboard/LossReasons";
+import { MonthlyResults } from "@/components/dashboard/MonthlyResults";
 import { DailyLeads } from "@/components/dashboard/DailyLeads";
 import { FunnelVelocity } from "@/components/dashboard/FunnelVelocity";
 import {
@@ -41,6 +42,8 @@ import { ErrorState } from "@/components/dashboard/ErrorState";
 import { AnimatedSection } from "@/components/dashboard/AnimatedSection";
 import DashboardAiAnalysis from "@/components/dashboard/DashboardAiAnalysis";
 
+
+const MONTH_LABEL = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" });
 
 export default function Dashboard() {
   const { activeWorkspace } = useWorkspace();
@@ -96,12 +99,24 @@ export default function Dashboard() {
     endDate: endOfDay(subDays(startDate, 1)),
   }), [filters, startDate, periodDays]);
 
+  // Janela fixa dos últimos 6 meses (independente do seletor de período do
+  // topo) — usada só pelo card "Vendas e Perdas por Mês", pra sempre mostrar
+  // vários meses mesmo quando o período selecionado é curto (ex.: "Últimos 7
+  // dias"). Mesmos filtros de funil/vendedor/UTM/origem da tela, só a data muda.
+  const monthlyFilters: DashboardFilters = useMemo(() => ({
+    ...filters,
+    startDate: startOfMonth(subMonths(new Date(), 5)),
+    endDate: endOfDay(new Date()),
+    dailyLeadsFullRange: true,
+  }), [filters]);
+
   // `enabled: hydrated` evita buscar com uma combinação inválida (workspace novo
   // + filtros ainda do workspace anterior) na janela entre trocar de workspace e
   // a hidratação assíncrona terminar — ver comentário em
   // useDashboardFilterHydration.ts sobre o achado de 2026-08-17.
   const { data, isLoading, isFetching, error, refetch, cachedAt } = useKommoData(filters, { enabled: hydrated });
   const { data: prevData } = useKommoData(prevFilters, { enabled: hydrated && !!data });
+  const { data: monthlyResultsData } = useKommoData(monthlyFilters, { enabled: hydrated && dateBasis === "fechamento" });
   // Receita esfriando: mesmos filtros de funil/vendedor da tela, mas sem corte de
   // período (é uma foto do estado atual, igual à tela dedicada /leads-esfriando).
   const { data: coolingData } = useCoolingLeads(activeWorkspace?.id || null, selectedPipelineIds, selectedSellerIds, { enabled: hydrated && dateBasis === "fechamento" });
@@ -116,6 +131,13 @@ export default function Dashboard() {
     ),
     [data?.leadsOriginDistribution, data?.wonOriginDistribution],
   );
+
+  // Mês selecionado no card "Vendas e Perdas por Mês" — filtra e rola até o
+  // gráfico diário abaixo. Limpo ao trocar de workspace/período pra não deixar
+  // um mês "preso" fora do range filtrado atual.
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const dailyLeadsSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { setSelectedMonth(null); }, [activeWorkspace?.id, filters]);
 
   // "Funis do Dashboard" (Configurações) restringe quais funis aparecem pra escolher
   // aqui — nenhum marcado lá = mostra todos, igual sempre. Vazio quando `data` ainda
@@ -394,7 +416,7 @@ export default function Dashboard() {
         </AnimatedSection>
       )}
 
-      <AnimatedSection className={cn("grid grid-cols-1 gap-5 lg:gap-6", isFinance ? "lg:grid-cols-2" : "lg:grid-cols-3")} delay={0.05}>
+      <AnimatedSection className="grid grid-cols-1 gap-5 lg:gap-6 lg:grid-cols-3" delay={0.05}>
         {!isFinance && (
           <OriginsCard
             mode="leads"
@@ -414,6 +436,16 @@ export default function Dashboard() {
           colorMap={originColorMap}
         />
         <LossReasons lossReasons={data.lossReasons || []} totalLost={data.lostLeads || 0} />
+        {isFinance && (
+          <MonthlyResults
+            dailyLeads={monthlyResultsData?.dailyLeads || []}
+            selectedMonth={selectedMonth}
+            onSelectMonth={(month) => {
+              setSelectedMonth(month);
+              if (month) dailyLeadsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          />
+        )}
       </AnimatedSection>
 
       {isFinance && (
@@ -459,15 +491,21 @@ export default function Dashboard() {
       )}
 
       <AnimatedSection delay={0.05}>
-        <DailyLeads
-          dailyLeads={data.dailyLeads || []}
-          title={isFinance ? "Fechamentos por dia" : "Entrada de Oportunidades"}
-          unitNoun={isFinance ? "fechamentos" : "oportunidades"}
-          tooltip={isFinance
-            ? "Volume diário de negócios fechados (ganho + perdido) pela data de fechamento. Verde = ganho, vermelho = perdido."
-            : "Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período."}
-          splitWonLost={isFinance}
-        />
+        <div ref={dailyLeadsSectionRef} className="scroll-mt-24">
+          <DailyLeads
+            dailyLeads={selectedMonth
+              ? (monthlyResultsData?.dailyLeads || []).filter((d) => d.date.slice(0, 7) === selectedMonth)
+              : (data.dailyLeads || [])}
+            title={isFinance
+              ? `Fechamentos por dia${selectedMonth ? ` — ${MONTH_LABEL.format(new Date(`${selectedMonth}-01T12:00:00Z`)).replace(".", "")}` : ""}`
+              : "Entrada de Oportunidades"}
+            unitNoun={isFinance ? "fechamentos" : "oportunidades"}
+            tooltip={isFinance
+              ? "Volume diário de negócios fechados (ganho + perdido) pela data de fechamento. Verde = ganho, vermelho = perdido."
+              : "Volume diário de novas oportunidades. A linha mostra a tendência ao longo do período."}
+            splitWonLost={isFinance}
+          />
+        </div>
       </AnimatedSection>
 
       {!isFinance && (

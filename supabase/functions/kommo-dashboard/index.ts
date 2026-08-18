@@ -129,6 +129,7 @@ serve(async (req) => {
     const filterUtmCampaigns = payload.utmCampaign;
     const filterOrigins = payload.origin;
     const filterCustomFilters = payload.customFilters;
+    const dailyLeadsFullRange = payload.dailyLeadsFullRange;
 
     // ===== Catálogos =====
     const [{ data: pipelinesRows }, { data: usersRows }, { data: lossRows }, { data: settingsRow }, { data: cfRows }, { data: allPipelinesRows }] = await Promise.all([
@@ -543,10 +544,15 @@ serve(async (req) => {
         .distribution.map((d) => d.name);
     }
 
-    // ===== Daily leads (7 dias) — agrupado por dia em horário de Brasília =====
+    // ===== Daily leads — agrupado por dia em horário de Brasília =====
     // O kommo_created_at é UTC; agrupar por UTC jogava leads da noite (BRT) para o
     // dia seguinte. Bucketiza pela data-calendário em America/Sao_Paulo.
     const endRef = endDate ? new Date(endDate) : new Date();
+    // Padrão: janela fixa de 7 dias terminando em endRef (mantém o gráfico
+    // "Fechamentos/Entrada por dia" curto e legível mesmo com período longo
+    // selecionado). `dailyLeadsFullRange` troca pra cobrir o período pedido
+    // inteiro (até 400 dias) — usado pelo card "Vendas e Perdas por Mês".
+    const startRef = dailyLeadsFullRange && startDate ? new Date(startDate) : new Date(endRef.getTime() - 6 * 86400000);
     const dayLabels = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
     // Conta leads por data-calendário BRT
     // Eixo do gráfico segue o dateBasis: criação (Comercial) ou fechamento (Financeiro).
@@ -566,10 +572,13 @@ serve(async (req) => {
       else if (l.status === "lost") bucket.lost++;
       leadsByDay.set(iso, bucket);
     }
-    // Últimos 7 dias terminando no dia BRT de endRef (aritmética de calendário em UTC puro)
+    // Dias entre startRef e endRef (calendário BRT), aritmética em UTC puro
     const [ey, em, ed] = brtDate(endRef).split("-").map(Number);
+    const [sy, sm, sd] = brtDate(startRef).split("-").map(Number);
+    const spanDays = Math.round((Date.UTC(ey, em - 1, ed) - Date.UTC(sy, sm - 1, sd)) / 86400000) + 1;
+    const dayCount = Math.max(1, Math.min(spanDays, 400));
     const dailyLeads: Array<{ date: string; count: number; won: number; lost: number; dayName: string }> = [];
-    for (let i = 6; i >= 0; i--) {
+    for (let i = dayCount - 1; i >= 0; i--) {
       const d = new Date(Date.UTC(ey, em - 1, ed));
       d.setUTCDate(d.getUTCDate() - i);
       const iso = d.toISOString().slice(0, 10);
