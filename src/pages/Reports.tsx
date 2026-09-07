@@ -789,8 +789,9 @@ export default function Reports() {
                           )}
                           {mo.locked && (
                             <Lock className="inline-block w-2.5 h-2.5 ml-1 mb-0.5 text-muted-foreground cursor-help"
-                              aria-label="Travado"
-                              title="Travado — número final, não muda mais (mesmo que um lead reabra depois)." />
+                              aria-label="Travado">
+                              <title>Travado — número final, não muda mais (mesmo que um lead reabra depois).</title>
+                            </Lock>
                           )}
                         </th>
                       );

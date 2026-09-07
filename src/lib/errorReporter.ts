@@ -1,9 +1,11 @@
 // Centralized error reporter — sends errors to n8n webhook AND persists in DB.
 import { toast } from "sonner";
 
-const WEBHOOK_URL =
-  import.meta.env.VITE_ERROR_WEBHOOK_URL ||
-  "https://n8n-webhook.boliqf.easypanel.host/webhook/erro-lovable";
+// Webhook DEDICADO ao VFlowKommo (item 1.3 do plano de remediação). Sem
+// VITE_ERROR_WEBHOOK_URL definido, o envio pro webhook é PULADO — nada de
+// fallback pro endpoint compartilhado com lovable/GHL. O log em `system_logs`
+// (LOG_EVENT_URL abaixo) continua sempre.
+const WEBHOOK_URL = import.meta.env.VITE_ERROR_WEBHOOK_URL || "";
 const LOG_EVENT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/log-event`;
 const ANON_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 const PROJECT = "VFlowKommo";
@@ -77,14 +79,17 @@ export async function reportError(payload: ReportPayload): Promise<void> {
       timestamp: new Date().toISOString(),
     };
 
-    // Fire-and-forget to both targets; never block UI on reporting.
+    // Fire-and-forget; never block UI on reporting. O webhook só é chamado se
+    // VITE_ERROR_WEBHOOK_URL estiver definido (ver WEBHOOK_URL acima).
     await Promise.all([
-      fetch(WEBHOOK_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        keepalive: true,
-      }).catch(() => {}),
+      WEBHOOK_URL
+        ? fetch(WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+            keepalive: true,
+          }).catch(() => {})
+        : Promise.resolve(),
       fetch(LOG_EVENT_URL, {
         method: "POST",
         headers: {

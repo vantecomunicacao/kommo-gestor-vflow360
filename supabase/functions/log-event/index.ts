@@ -1,12 +1,61 @@
 // Public endpoint that persists log entries from the frontend.
 // JWT verification disabled — anyone can post a log; service role inserts.
+//
+// Guard leve (Fase 1.7 do plano de remediação): rate limit EM MEMÓRIA por IP +
+// global por instância da função. Não persiste entre cold starts nem cobre
+// instâncias paralelas, mas blinda o caso real (um script martelando o
+// endpoint) sem migration nem tabela nova. O fluxo normal do frontend
+// (errorReporter.ts, com dedupe de 10s) fica muito abaixo do teto.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import { corsHeadersBase as corsHeaders } from "../_shared/cors.ts";
+
+const WINDOW_MS = 60_000;
+const PER_IP_MAX = 60; // logs/min por IP
+const GLOBAL_MAX = 600; // logs/min no total (por instância da função)
+
+const ipHits = new Map<string, number[]>();
+let globalHits: number[] = [];
+
+function clientIp(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0].trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
+
+/** true = estourou o teto (não deve gravar). Também registra o hit quando passa. */
+function rateLimited(ip: string): boolean {
+  const now = Date.now();
+  const cutoff = now - WINDOW_MS;
+  globalHits = globalHits.filter((t) => t > cutoff);
+  const mine = (ipHits.get(ip) ?? []).filter((t) => t > cutoff);
+
+  if (globalHits.length >= GLOBAL_MAX || mine.length >= PER_IP_MAX) {
+    ipHits.set(ip, mine);
+    return true;
+  }
+
+  mine.push(now);
+  globalHits.push(now);
+  ipHits.set(ip, mine);
+
+  // limpeza preguiçosa pra o Map não crescer sem limite
+  if (ipHits.size > 5000) {
+    for (const [k, v] of ipHits) if (v.every((t) => t <= cutoff)) ipHits.delete(k);
+  }
+  return false;
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
+    if (rateLimited(clientIp(req))) {
+      return new Response(JSON.stringify({ ok: false, error: "rate_limited" }), {
+        status: 429,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const body = await req.json().catch(() => ({}));
     const level = ["error", "warning", "info"].includes(body?.level) ? body.level : "error";
     const source = String(body?.source ?? "frontend:unknown").slice(0, 200);

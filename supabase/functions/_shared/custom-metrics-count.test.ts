@@ -174,3 +174,44 @@ Deno.test("leadReachedSide - lead não bate em nenhum dos dois", () => {
   const refs: MetricRef[] = [{ pipelineId: "P1", statusId: "20" }, { fieldId: "nao_compareceu" }];
   assertEquals(leadReachedSide(l, refs, stageOrder, new Map()), false);
 });
+
+// ===== Regressão: numerador e denominador contam pela MESMA régua =====
+// A % de uma Métrica Personalizada divide dois lados. Se um lado conta "passou
+// por" (cascata/histórico) e o outro "está agora em", a divisão mistura duas
+// fotos tiradas em critérios diferentes e a % destoa da contagem manual — foi a
+// CAUSA RAIZ, DUAS VEZES (ver CLAUDE.md, "Métricas Personalizadas — semântica do
+// numerador"). Correção: os dois lados passam por countMetricSide(refs, mode)
+// (kommo-dashboard) / leadReachedMetricSide (kommo-report-snapshot) — a MESMA
+// função, só mudando o conjunto de refs. `leadReachedSide` acima replica essa
+// função; estes testes travam a propriedade que ela garante.
+
+Deno.test("regressão — mesma ref nos dois lados => mesma contagem (função é side-agnóstica)", () => {
+  const leads: CascataLead[] = [
+    { kommo_id: "1", pipeline_id: "P1", status_id: "10" },
+    { kommo_id: "2", pipeline_id: "P1", status_id: "20" },
+    { kommo_id: "3", pipeline_id: "P1", status_id: "30" },
+  ];
+  const refs: MetricRef[] = [{ pipelineId: "P1", statusId: "20" }];
+  const asNumerator = leads.filter((l) => leadReachedSide(l, refs, stageOrder, new Map())).length;
+  const asDenominator = leads.filter((l) => leadReachedSide(l, refs, stageOrder, new Map())).length;
+  assertEquals(asNumerator, asDenominator);
+});
+
+Deno.test("regressão — denominador amplo + numerador recorte, MESMA régua => num <= den (ratio <= 100%)", () => {
+  // Cascata é monótona: quem alcançou "30" também alcançou "10". Com a mesma
+  // função nos dois lados, o numerador (recorte "30") nunca passa do
+  // denominador (base "10"). Se o denominador voltasse a contar "está agora em
+  // 10" (o bug), ele daria 1 e o numerador 1 — ou pior, num > den.
+  const leads: CascataLead[] = [
+    { kommo_id: "1", pipeline_id: "P1", status_id: "10" }, // só chegou em 10
+    { kommo_id: "2", pipeline_id: "P1", status_id: "20" }, // passou por 10, está em 20
+    { kommo_id: "3", pipeline_id: "P1", status_id: "30" }, // passou por 10 e 20, está em 30
+  ];
+  const denRefs: MetricRef[] = [{ pipelineId: "P1", statusId: "10" }];
+  const numRefs: MetricRef[] = [{ pipelineId: "P1", statusId: "30" }];
+  const den = leads.filter((l) => leadReachedSide(l, denRefs, stageOrder, new Map())).length;
+  const num = leads.filter((l) => leadReachedSide(l, numRefs, stageOrder, new Map())).length;
+  assertEquals(den, 3);
+  assertEquals(num, 1);
+  assertEquals(num <= den, true);
+});

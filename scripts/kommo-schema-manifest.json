@@ -29,8 +29,10 @@
   "functions": [
     "add_workspace_member",
     "can_manage_workspace",
+    "check_stale_syncs",
     "create_workspace",
     "delete_ai_provider_config",
+    "error_webhook_url",
     "get_ai_provider_config",
     "get_integration_token",
     "get_my_permissions",
@@ -49,6 +51,7 @@
   "kommoOwnedCrons": [
     "kommo-report-snapshot-daily",
     "kommo-sync-full-daily",
+    "kommo-sync-staleness-check",
     "kommo-sync-tick",
     "cleanup-system-logs-daily"
   ],

@@ -33,6 +33,16 @@ interface RawPipeline {
 interface KommoManageResponse {
   success: boolean;
   error?: string;
+  // Campos de topo da ação "status" (kommo-manage não os aninha em `data`).
+  connected?: boolean;
+  subdomain?: string | null;
+  account_id?: string | null;
+  status?: string;
+  sync?: KommoSync | null;
+  // Campos de topo da ação "connect".
+  workspace_id?: string;
+  integration_id?: string;
+  account?: { id?: string | number; name?: string; currency?: string };
   data?: {
     selectedFields?: SavedFieldConfig[];
     selectedStages?: SavedStageConfig[];

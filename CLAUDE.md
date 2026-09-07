@@ -715,6 +715,13 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
+- `20260907120000_kommo_sync_staleness_watchdog.sql` — Fase 1.6 do plano de
+  remediação. Adiciona 2 funções (`kommo.error_webhook_url()` — lê o Vault
+  `kommo_error_webhook_url`; `kommo.check_stale_syncs()` — varre integrações
+  Kommo conectadas e dispara o webhook de erro se `sync_status` está velho
+  (> 26h) ou em erro) + 1 cron `kommo-sync-staleness-check` (diário, 07:30 UTC).
+  Sem o secret no Vault a função só faz `RAISE NOTICE`, não falha. Aditiva; não
+  toca em tabela nem em public/GHL. _(pendente de aplicar — `supabase db push`.)_
 - `20260817120000_kommo_permissions_view_dashboard.sql` — em
   `kommo.user_permissions`: renomeia `view_suggestions` para `view_cooling` e
   adiciona `view_dashboard boolean not null default true` (com `UPDATE` que

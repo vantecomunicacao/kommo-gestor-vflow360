@@ -243,3 +243,39 @@ Deno.test("describeStageRefs - funil ou etapa não encontrados caem no id bruto 
 Deno.test("countPassedThrough - refs vazio devolve 0 sem iterar", () => {
   assertEquals(countPassedThrough([lead({ kommo_id: "1" })], new Map(), []), 0);
 });
+
+// ===== Regressão: o denominador de uma Métrica Personalizada percent NÃO pode
+// usar countCurrentlyIn =====
+// countCurrentlyIn ("está agora em") ficou sem uso em produção depois que o
+// denominador migrou pra countPassedThrough ("passou por") — mas continua
+// exportado. Misturar as duas réguas num mesmo cálculo já foi a causa raiz DUAS
+// VEZES (ver CLAUDE.md, "Métricas Personalizadas — semântica do numerador" e
+// "CORRIGIDO em 2026-08-10"). Este teste deixa a armadilha explícita: se alguém
+// religar o denominador em countCurrentlyIn, o resultado volta a ser
+// inconsistente (numerador > denominador / divisão por zero).
+Deno.test("regressão — numerador e denominador de métrica percent têm de usar a MESMA função (countPassedThrough nos dois lados)", () => {
+  // 3 leads passaram pela etapa "20" e hoje estão TODOS na etapa "30".
+  const leads: DashboardLead[] = [
+    lead({ kommo_id: "1", pipeline_id: "P1", status_id: "30" }),
+    lead({ kommo_id: "2", pipeline_id: "P1", status_id: "30" }),
+    lead({ kommo_id: "3", pipeline_id: "P1", status_id: "30" }),
+  ];
+  const ev = new Map<string, StageEvent[]>([
+    ["1", [{ before: "10", after: "20", t: 1 }]],
+    ["2", [{ before: "10", after: "20", t: 1 }]],
+    ["3", [{ before: "10", after: "20", t: 1 }]],
+  ]);
+  const refs = [{ pipelineId: "P1", statusId: "20" }];
+
+  // Correto: os dois lados por countPassedThrough → 3/3, ratio bem-definido.
+  const numOk = countPassedThrough(leads, ev, refs);
+  const denOk = countPassedThrough(leads, ev, refs);
+  assertEquals(numOk, 3);
+  assertEquals(denOk, 3);
+  assertEquals(numOk <= denOk, true);
+
+  // Bug: denominador por countCurrentlyIn — ninguém está mais fisicamente na "20".
+  const denBuggy = countCurrentlyIn(leads, refs);
+  assertEquals(denBuggy, 0);
+  assertEquals(numOk > denBuggy, true); // num > den => % impossível / divisão por zero
+});

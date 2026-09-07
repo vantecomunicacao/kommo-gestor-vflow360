@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/collapsible";
 import { useToast } from "@/hooks/use-toast";
 import AnalysisReport from "@/components/dashboard/AnalysisReport";
+import { AI_ANALYSIS_BETA } from "@/lib/features";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useParseAnalysis, useRunAnalysis, useAnalysisHistory, useFollowup, useDeleteAnalysis, usePinAnalysis, streamAnalyze,
@@ -67,7 +68,7 @@ function toParams(i: AnalysisInterpretation): AnalysisParams {
   };
 }
 
-function fmtDay(iso: string | null): string {
+function fmtDay(iso: string | null | undefined): string {
   if (!iso) return "—";
   try { return format(parseISO(iso), "dd/MM/yy"); } catch { return iso; }
 }
@@ -277,10 +278,21 @@ export default function DashboardAiAnalysis({ workspaceId, pipelines, initialDat
               <Sparkles className="h-4 w-4" />
             </span>
             Análise com IA
+            {AI_ANALYSIS_BETA && (
+              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                Beta
+              </span>
+            )}
           </SheetTitle>
           <SheetDescription className="text-xs">
             Descreva o que analisar; a IA confirma o período e o funil antes de gerar.
           </SheetDescription>
+          {AI_ANALYSIS_BETA && (
+            <p className="mt-1 flex items-start gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+              <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
+              <span>Recurso em beta — os resultados podem variar. Confira os números antes de tomar decisões.</span>
+            </p>
+          )}
         </SheetHeader>
 
         <div className="mt-4 space-y-4">

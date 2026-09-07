@@ -304,7 +304,11 @@ serve(async (req) => {
     counts.custom_fields = cfRows.length;
 
     // === 5. Contacts (com phone/email extraídos dos custom fields) ===
-    const CONTACTS_MAX_PAGES = 100, CONTACTS_PAGE = 250;
+    // Teto dobrado (Fase 1.5 do plano de remediação): 100→200 páginas = 50k
+    // contatos. Motivado por dado real (Fase 0.5): a maior conta tinha ~22,9k
+    // contatos — 91% do teto antigo (25k), a ~2k de truncar em silêncio.
+    // Se alguma passar de 50k, o aviso em last_sync_warning aparece nas Integrações.
+    const CONTACTS_MAX_PAGES = 200, CONTACTS_PAGE = 250;
     const contacts = await kommoFetchAll(creds, `/contacts?limit=${CONTACTS_PAGE}${contactsSince}`, "contacts", { maxPages: CONTACTS_MAX_PAGES });
     // Mapa id→dados usado abaixo para denormalizar contact_name/phone/email em
     // kommo.leads (evita join no dashboard). Num sync incremental (contactsSince
@@ -337,7 +341,9 @@ serve(async (req) => {
     }
 
     // === 6. Leads (entidade central do dashboard) ===
-    const LEADS_MAX_PAGES = 60, LEADS_PAGE = 250;
+    // Teto dobrado (Fase 1.5): 60→120 páginas = 30k leads. Folga grande (maior
+    // conta real na Fase 0.5 tinha ~2k leads), mas barato e cobre crescimento.
+    const LEADS_MAX_PAGES = 120, LEADS_PAGE = 250;
     const leads = await kommoFetchAll(creds, `/leads?limit=${LEADS_PAGE}&with=contacts${leadsSince}`, "leads", { maxPages: LEADS_MAX_PAGES }) as KommoLead[];
     if (leads.length) {
       // Num sync incremental, `contactById` só tem os contatos alterados neste
@@ -430,7 +436,11 @@ serve(async (req) => {
     // Resiliente: se falhar, NÃO derruba o sync (leads já foram gravados). Limitado
     // para não estourar o tempo da função (incremental fica como melhoria futura).
     try {
-      const EVENTS_MAX_PAGES = 15, EVENTS_PAGE = 100;
+      // Teto ampliado (Fase 1.5): 15→50 páginas = 5k eventos por passada, dentro
+      // da janela de 24 meses. Dimensionado pela Fase 0.5: a maior conta real tem
+      // ~3,5k eventos acumulados, então 5k cobre o backfill dela numa passada só.
+      // Ver nota em CONTACTS_MAX_PAGES.
+      const EVENTS_MAX_PAGES = 50, EVENTS_PAGE = 100;
       const stageEvents = await kommoFetchAll(
         creds, `/events?limit=${EVENTS_PAGE}&filter[type]=lead_status_changed&filter[entity]=lead${eventsSince}`, "events", { maxPages: EVENTS_MAX_PAGES },
       ) as KommoStageChangeEvent[];
@@ -562,10 +572,13 @@ serve(async (req) => {
 });
 
 // Aviso best-effort de falha real de sync (não dispara em erro de autorização —
-// isso é chamador sem permissão, não uma sincronização quebrada). Reusa o mesmo
-// webhook n8n que o frontend já usa em errorReporter.ts; nunca lança.
+// isso é chamador sem permissão, não uma sincronização quebrada). Usa o webhook
+// DEDICADO ao VFlowKommo (ERROR_WEBHOOK_URL, item 1.3 do plano de remediação) —
+// sem env definido, não notifica (nada de fallback pro endpoint compartilhado).
+// Nunca lança.
 async function notifySyncFailure(workspaceId: string, message: string): Promise<void> {
-  const webhookUrl = Deno.env.get("ERROR_WEBHOOK_URL") || "https://n8n-webhook.boliqf.easypanel.host/webhook/erro-lovable";
+  const webhookUrl = Deno.env.get("ERROR_WEBHOOK_URL") || "";
+  if (!webhookUrl) return;
   try {
     await fetch(webhookUrl, {
       method: "POST",
