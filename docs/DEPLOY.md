@@ -125,6 +125,16 @@ supabase secrets list
 supabase secrets set NOME=valor        # aplica no próximo cold start
 ```
 
+Inventário dos secrets esperados no projeto `fjncmmqvmocwykpshgsh`:
+
+| Secret | Usado por | Observação |
+|---|---|---|
+| `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | todas | injetados pela plataforma |
+| `INTERNAL_FUNCTION_SECRET` | `kommo-sync`, `kommo-dashboard`, `kommo-report-snapshot` | par do Vault `kommo_internal_function_secret`; rotação em `RUNBOOK-SECRETS.md` |
+| `OPENAI_API_KEY` | `kommo-ai-analyze` | chave global (fallback); cada workspace pode ter a sua no Vault |
+| `ERROR_WEBHOOK_URL` | `kommo-sync` (watchdog 1.6 lê o Vault `kommo_error_webhook_url`) | sem valor → não envia; sem fallback compartilhado (item 1.3) |
+| `ADMIN_BOOTSTRAP_ALLOWLIST` | `kommo-admin-bootstrap` | CSV de e-mails que podem virar o **primeiro** admin. Só tem efeito quando **não existe nenhum admin** (defesa em profundidade). Valor atual: `mktvantecomunicacao@gmail.com` |
+
 ### Rollback de edge function
 
 ```bash

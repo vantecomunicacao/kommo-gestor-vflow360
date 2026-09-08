@@ -1,7 +1,8 @@
 // VFlow360 Kommo — kommo-admin-bootstrap
 // Permite que o PRIMEIRO usuário autenticado vire admin se ainda não houver admin
 // no schema `kommo`. Espelha admin-bootstrap, mas opera SOMENTE em kommo.* (não toca
-// no schema public/GHL). auth.users é compartilhado — aqui só lemos o caller.
+// no schema public/GHL). auth.users deste projeto é isolado do GHL — aqui só
+// lemos o caller de qualquer forma.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity } from "../_shared/authorize.ts";
 import { corsHeadersBase as corsHeaders } from "../_shared/cors.ts";

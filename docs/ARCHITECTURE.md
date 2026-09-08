@@ -40,6 +40,13 @@ O sistema está **migrado para o Kommo** e opera como um **painel de gestão/ana
   compartilhado (`xcrfbpyhyznyufijrdry`, onde o GHL ainda roda) segue existindo à
   parte — regras de não-interferência do `../CLAUDE.md` se aplicam a ele. Detalhe
   completo em `../CLAUDE.md` → "Infraestrutura Supabase".
+- **Login / `auth.users`:** também isolado. Verificado na Fase 0.1 do plano de
+  remediação (2026-09-08): todo usuário de `auth.users` neste projeto tem
+  presença no `kommo.*`. Trocar a senha de um usuário (tela Admin → "Alterar
+  senha", edge `kommo-admin-users` action `update_password`) afeta **somente o
+  Kommo** — não tem efeito no GHL (projeto Supabase separado). Comentários antigos
+  em `kommo-admin-users`/`kommo-admin-bootstrap` que diziam "auth compartilhado
+  com o GHL" eram herança do banco pré-2026-08-02 e já foram corrigidos.
 - **Filtros do Dashboard:** contrato de filtro (Funil/Etapa/Vendedor/UTM/Origem, todos
   multi-seleção), deep link via URL params e a validação zod do body das edge
   functions estão documentados em `plano-filtros-dashboard.md`.

@@ -1,9 +1,16 @@
 // VFlow360 Kommo — kommo-admin-users
 // Gestão de usuários do sistema Kommo. Espelha admin-users, mas opera SOMENTE no
-// schema `kommo` (não toca em public/GHL). auth.users é COMPARTILHADO com o GHL, então:
-//   - create_user: se o e-mail já existe no auth, ANEXA ao Kommo (não recria/erra).
-//   - delete_user: NUNCA apaga do auth — só remove a presença no kommo.* (revoga acesso).
-//   - update_password: muda a senha da conta única (efeito também no GHL) — usar com ciência.
+// schema `kommo` (não toca em public/GHL).
+//
+// auth.users deste projeto é ISOLADO do GHL — o Kommo tem projeto Supabase
+// próprio (`fjncmmqvmocwykpshgsh`) desde 2026-08-02; o GHL roda em outro projeto.
+// Confirmado na Fase 0.1 do plano de remediação (2026-09-08): todos os usuários
+// de auth.users aqui têm presença no `kommo.*`. Portanto:
+//   - update_password: muda a senha SÓ do Kommo. Não tem efeito no GHL.
+//   - create_user: ainda ANEXA se o e-mail já existir no auth (em vez de errar) —
+//     defensivo; auth.users também lastreia public.profiles/has_role neste projeto.
+//   - delete_user: NÃO apaga de auth.users — só remove a presença no kommo.*
+//     (revoga acesso). É prática segura, não por causa de compartilhamento.
 //   - list_users: escopado aos usuários com presença no kommo.*.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "https://esm.sh/zod@3.23.8";
@@ -30,7 +37,7 @@ Deno.serve(async (req) => {
     const { userId } = await resolveCallerIdentity(req, SUPABASE_URL, ANON_KEY);
     if (!userId) return json({ error: "Unauthorized" }, 401);
 
-    // auth: client de service só para a Admin API (auth.users compartilhado).
+    // auth: client de service só para a Admin API (auth.users deste projeto Kommo).
     const authAdmin = createClient(SUPABASE_URL, SERVICE_ROLE);
     // db: client no schema kommo — todo .from() resolve em kommo.*
     const db = createClient(SUPABASE_URL, SERVICE_ROLE, { db: { schema: "kommo" } });
@@ -45,7 +52,8 @@ Deno.serve(async (req) => {
 
     switch (action) {
       case "list_users": {
-        // Escopo: só usuários com presença no kommo.* (não lista usuários só-GHL).
+        // Escopo: só usuários com presença no kommo.* (guarda defensiva —
+        // auth.users deste projeto é Kommo-only, ver cabeçalho).
         const [{ data: kRoles }, { data: kPerms }, { data: kMembers }, { data: kProfiles }] = await Promise.all([
           db.from("user_roles").select("user_id, role"),
           db.from("user_permissions").select("user_id, view_cooling, view_dashboard, view_integrations, view_settings"),
@@ -102,13 +110,14 @@ Deno.serve(async (req) => {
         const { email, password, full_name, workspace_id, role = "user", permissions } = body;
         if (!email || !password) return json({ error: "email e password obrigatórios" }, 400);
 
-        // auth.users é compartilhado: se já existir, anexa ao Kommo em vez de recriar.
+        // Se o e-mail já existir em auth.users (ex.: usuário recriado), anexa ao
+        // Kommo em vez de errar. auth.users aqui é Kommo-only (ver cabeçalho).
         let newId: string | undefined;
         const { data: created, error: createErr } = await authAdmin.auth.admin.createUser({
           email, password, email_confirm: true, user_metadata: { full_name },
         });
         if (createErr) {
-          // Provável e-mail já cadastrado no auth (possivelmente usuário do GHL) → reaproveita.
+          // Provável e-mail já cadastrado no auth → reaproveita o id existente.
           const { data: existing } = await authAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
           const found = existing?.users.find((u) => (u.email || "").toLowerCase() === String(email).toLowerCase());
           if (!found) throw createErr;
@@ -150,7 +159,7 @@ Deno.serve(async (req) => {
       }
 
       case "update_password": {
-        // ATENÇÃO: senha é da conta única (auth compartilhado) — muda também no GHL.
+        // Muda a senha SÓ do Kommo (auth.users deste projeto é isolado do GHL).
         const { user_id, password } = body;
         if (!user_id || !password) return json({ error: "user_id e password obrigatórios" }, 400);
         const { error } = await authAdmin.auth.admin.updateUserById(user_id, { password });
@@ -159,7 +168,9 @@ Deno.serve(async (req) => {
       }
 
       case "delete_user": {
-        // NÃO apaga do auth (conta compartilhada com o GHL). Só remove do Kommo.
+        // NÃO apaga de auth.users — só revoga o acesso removendo a presença no
+        // kommo.*. Prática segura (auth lastreia public.profiles/has_role), não
+        // por compartilhamento com GHL.
         const { user_id } = body;
         if (!user_id) return json({ error: "user_id obrigatório" }, 400);
         if (user_id === userId) return json({ error: "Não pode remover a si mesmo" }, 400);
