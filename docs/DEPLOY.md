@@ -132,7 +132,8 @@ Inventário dos secrets esperados no projeto `fjncmmqvmocwykpshgsh`:
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` | todas | injetados pela plataforma |
 | `INTERNAL_FUNCTION_SECRET` | `kommo-sync`, `kommo-dashboard`, `kommo-report-snapshot` | par do Vault `kommo_internal_function_secret`; rotação em `RUNBOOK-SECRETS.md` |
 | `OPENAI_API_KEY` | `kommo-ai-analyze` | chave global (fallback); cada workspace pode ter a sua no Vault |
-| `ERROR_WEBHOOK_URL` | `kommo-sync` (watchdog 1.6 lê o Vault `kommo_error_webhook_url`) | sem valor → não envia; sem fallback compartilhado (item 1.3) |
+| `ERROR_WEBHOOK_URL` | `kommo-sync` (`notifySyncFailure`) | **setado 2026-09-08** → `https://vt-n8n-webhook.wx0qbq.easypanel.host/webhook/erro-vf360`. Sem fallback compartilhado (item 1.3). |
+| Vault `kommo_error_webhook_url` | `kommo.check_stale_syncs()` (watchdog 1.6) | mesma URL do `ERROR_WEBHOOK_URL`. Criar via SQL Editor: `select vault.create_secret('<url>', 'kommo_error_webhook_url', '...');`. Sem ele o watchdog só faz `RAISE NOTICE`. |
 | `ADMIN_BOOTSTRAP_ALLOWLIST` | `kommo-admin-bootstrap` | CSV de e-mails que podem virar o **primeiro** admin. Só tem efeito quando **não existe nenhum admin** (defesa em profundidade). Valor atual: `mktvantecomunicacao@gmail.com` |
 | `DASHBOARD_CACHE` | `kommo-dashboard` | Fase 3.1. Ausente/qualquer-coisa = **cache desligado** (comportamento de sempre). `1`/`true`/`on` = liga o cache da resposta do Dashboard (tabela `kommo.dashboard_cache`). |
 | `DASHBOARD_CACHE_TTL_SECONDS` | `kommo-dashboard` | TTL de segurança do cache acima. Default `600`. Limita o quão velhos ficam os campos relativos a "agora" (ex.: tarefas atrasadas) num hit de cache. `0` = confia só nas assinaturas de invalidação. |
@@ -151,10 +152,12 @@ re-deployar o código antigo. Por isso: **um commit atômico por função**.
 
 ## 3. Frontend (Coolify)
 
-Build args atuais (Dockerfile): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`.
-Se um item adicionar um novo `VITE_*` (ex.: `VITE_ERROR_WEBHOOK_URL` no item 1.3),
-**adicione ao Dockerfile como `ARG`/`ENV` e cadastre nos _build args_ do Coolify
-antes do deploy**, senão ele sai `undefined` no bundle.
+Build args atuais (Dockerfile): `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`,
+`VITE_ERROR_WEBHOOK_URL` (setado no Coolify 2026-09-08 →
+`https://vt-n8n-webhook.wx0qbq.easypanel.host/webhook/erro-vf360`). Um novo `VITE_*`
+precisa ser **`ARG`/`ENV` no Dockerfile + env no Coolify** antes do deploy, senão
+sai `undefined` no bundle. Um host novo que o front vá chamar (fetch/ws) também
+precisa entrar em `connect-src` no `nginx.conf` antes de a CSP virar enforce.
 
 ```bash
 npm run build                 # confirma que buildou local antes de subir
