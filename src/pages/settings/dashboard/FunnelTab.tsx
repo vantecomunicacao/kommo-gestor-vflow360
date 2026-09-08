@@ -1,9 +1,10 @@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { FUNNEL_BUCKETS, funnelStageKey, readStageBucket, resolveFunnelLabel } from "@/lib/dashboard-funnel";
+import { FUNNEL_BUCKETS, funnelStageKey, readStageBucket, resolveFunnelLabel, inferStageBucket } from "@/lib/dashboard-funnel";
 
 interface Stage { id: string; name: string; }
 interface Pipeline { id: string; kommo_id: string; name: string; stages: Stage[]; }
@@ -101,13 +102,22 @@ export default function FunnelTab({
         <CardHeader>
           <CardTitle>Mapeamento do funil</CardTitle>
           <CardDescription>
-            Associe cada etapa do CRM a uma das 5 fases do funil analítico. Etapas sem mapeamento são ignoradas.
-            "Venda perdida" não aparece aqui: é uma etapa de saída (não uma fase progressiva) e já é tratada
-            automaticamente pelo Dashboard.
+            Associe cada etapa do CRM a uma das 5 fases do funil analítico.
+            Enquanto você não escolher, o sistema <strong>adivinha pelo nome da etapa</strong>
+            {" "}(selo <span className="text-warning-ink">Inferido</span>) — confira essas antes de confiar nos números.
+            Uma etapa só é realmente ignorada quando o selo diz <span className="text-muted-foreground">Ignorado</span>.
+            "Venda perdida" não aparece aqui: é uma etapa de saída, tratada automaticamente pelo Dashboard.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
+          {/* Fase 4.2: fases que o admin já mapeou à mão em ALGUM funil. O
+              backend só infere pelo nome as fases que não têm nenhum mapeamento
+              manual (ver parseFunnelMapping.covered + fallbackByStage em
+              _shared/kommo-funnel.ts / kommo-dashboard/index.ts). */}
           {pipelines.map((p) => {
+            const coveredBuckets = new Set(
+              Object.values(stageMapping).filter((v) => FUNNEL_BUCKETS.some((b) => b.key === v)),
+            );
             // Etapa de sistema "Venda perdida" (id 143, igual em todo funil) fica fora do
             // seletor: mapeá-la pra uma fase produz um comportamento inconsistente (o
             // Dashboard força todo lead perdido pra "Contato Inicial" sem olhar esse
@@ -120,9 +130,24 @@ export default function FunnelTab({
                 {p.name}
                 <span className="ml-2 text-xs font-normal text-muted-foreground">({mappableStages.length} etapas)</span>
               </h4>
-              {mappableStages.map((s) => (
+              {mappableStages.map((s) => {
+                const explicit = readStageBucket(stageMapping, p.kommo_id, s.id);
+                const inferred = explicit ? null : inferStageBucket(s.name, s.id);
+                const inferShown = inferred && !coveredBuckets.has(inferred) ? inferred : null;
+                return (
                 <div key={s.id} className="grid grid-cols-1 md:grid-cols-3 gap-2 items-center pl-1">
-                  <div className="text-sm">{s.name}</div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span>{s.name}</span>
+                    {explicit ? (
+                      <Badge variant="secondary" className="font-normal">Mapeado</Badge>
+                    ) : inferShown ? (
+                      <Badge variant="outline" className="font-normal text-warning-ink border-warning-ink/40">
+                        Inferido → {resolveFunnelLabel(inferShown, stageLabels)}
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="font-normal text-muted-foreground">Ignorado</Badge>
+                    )}
+                  </div>
                   <Select
                     value={readStageBucket(stageMapping, p.kommo_id, s.id) || "__none__"}
                     onValueChange={(v) =>
@@ -147,7 +172,8 @@ export default function FunnelTab({
                     </SelectContent>
                   </Select>
                 </div>
-              ))}
+                );
+              })}
             </div>
             );
           })}

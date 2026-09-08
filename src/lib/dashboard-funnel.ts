@@ -63,4 +63,26 @@ export function readStageBucket(
   return undefined;
 }
 
+/**
+ * Inferência da fase de uma etapa PELO NOME — espelho de `inferFunnelMapping`
+ * em `supabase/functions/kommo-dashboard/pure.ts`. Usado só pela tela de
+ * Configurações (Fase 4.2) pra mostrar quais etapas o sistema classificou
+ * sozinho vs quais o admin mapeou à mão. **Se mudar a escada de regex aqui,
+ * replicar lá** — `scripts/check-funnel-infer-sync.mjs` (CI) trava a divergência.
+ *
+ * Retorna a fase inferida, ou `null` para a etapa de sistema "Venda perdida"
+ * (143), que nunca entra no funil. `142` (Venda ganha) sempre cai em venda_ganha.
+ */
+export function inferStageBucket(stageName: string | null | undefined, stageId: string): FunnelBucketKey | null {
+  const id = String(stageId);
+  if (id === "142") return "venda_ganha";
+  if (id === "143") return null;
+  const n = (stageName || "").toLowerCase();
+  if (/(ganho|ganha|won|venda)/.test(n)) return "venda_ganha";
+  if (/(fechamento|closing|negocia|proposta enviada)/.test(n)) return "fechamento";
+  if (/(proposta|proposal|enviar|oferta|reuni)/.test(n)) return "proposta_enviada";
+  if (/(qualific|triagem)/.test(n)) return "qualificando";
+  return "contato_inicial";
+}
+
 export const DATE_TYPES =["DATE", "DATETIME", "DATE_TIME", "date", "datetime", "Date", "DateTime"];

@@ -23,6 +23,11 @@ jobs:
         # Métricas Personalizadas são duplicados à mão em src/lib/custom-metrics.ts
         # e supabase/functions/_shared/schemas.ts (runtimes de zod diferentes).
         run: node scripts/check-custom-metrics-sync.mjs
+      - name: Inferência de funil em sincronia (front x edge)
+        # Fase 4.2: a escada de regex que adivinha a fase do funil pelo nome da
+        # etapa é duplicada em kommo-dashboard/pure.ts (verdade) e
+        # src/lib/dashboard-funnel.ts (selo "Inferido" em Configurações).
+        run: node scripts/check-funnel-infer-sync.mjs
       - name: Unit tests
         run: npm test
       - name: Lint
