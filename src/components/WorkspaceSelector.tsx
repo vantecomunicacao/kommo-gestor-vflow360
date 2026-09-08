@@ -27,7 +27,7 @@ interface WorkspaceSelectorProps {
 }
 
 export function WorkspaceSelector({ collapsed }: WorkspaceSelectorProps) {
-  const { workspaces, activeWorkspace, setActiveWorkspaceId, createWorkspace } = useWorkspace();
+  const { workspaces, activeWorkspace, setActiveWorkspaceId, createWorkspace, loading } = useWorkspace();
   const { isAdmin, loading: adminLoading } = useIsAdmin();
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
@@ -59,6 +59,9 @@ export function WorkspaceSelector({ collapsed }: WorkspaceSelectorProps) {
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="right" align="start" className="w-56">
+          {loading && workspaces.length === 0 && (
+            <DropdownMenuItem disabled>Carregando contas…</DropdownMenuItem>
+          )}
           {workspaces.map(ws => (
             <DropdownMenuItem key={ws.id} onClick={() => setActiveWorkspaceId(ws.id)} className="flex items-center justify-between">
               <span className="truncate">{ws.name}</span>
@@ -86,12 +89,15 @@ export function WorkspaceSelector({ collapsed }: WorkspaceSelectorProps) {
           <button className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-sidebar-accent/50 hover:bg-sidebar-accent transition-colors text-sm">
             <Building2 className="w-4 h-4 text-sidebar-primary shrink-0" />
             <span className="flex-1 text-left truncate text-sidebar-foreground font-medium">
-              {activeWorkspace?.name || "Selecionar conta"}
+              {activeWorkspace?.name || (loading ? "Carregando contas…" : "Selecionar conta")}
             </span>
             <ChevronDown className="w-3 h-3 text-sidebar-foreground/60 shrink-0" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-56">
+          {loading && workspaces.length === 0 && (
+            <DropdownMenuItem disabled>Carregando contas…</DropdownMenuItem>
+          )}
           {workspaces.map(ws => (
             <DropdownMenuItem key={ws.id} onClick={() => setActiveWorkspaceId(ws.id)} className="flex items-center justify-between">
               <span className="truncate">{ws.name}</span>

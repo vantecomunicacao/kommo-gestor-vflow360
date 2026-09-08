@@ -46,7 +46,7 @@ import DashboardAiAnalysis from "@/components/dashboard/DashboardAiAnalysis";
 const MONTH_LABEL = new Intl.DateTimeFormat("pt-BR", { month: "short", year: "2-digit" });
 
 export default function Dashboard() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, loading: workspacesLoading } = useWorkspace();
   const { permissions } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -160,6 +160,11 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hydrated, data, defaultPipelineIds, visiblePipelines]);
 
+  // Enquanto a lista de workspaces ainda esta sendo carregada/restaurada, mostra
+  // o skeleton -- nao o erro "Selecione uma conta". Sem isto, uma corrida na
+  // abertura (auth/token ainda assentando) fazia o Dashboard piscar esse erro
+  // mesmo tendo conta, ate um F5.
+  if (workspacesLoading) return <DashboardSkeleton />;
   if (!activeWorkspace) {
     return <ErrorState error="Selecione uma conta para visualizar o dashboard." onRetry={() => window.location.reload()} />;
   }

@@ -37,7 +37,7 @@ const COMPARE_OPTIONS: { value: CompareMode; label: string; desc: string }[] = [
 ];
 
 export default function Reports() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, loading: workspacesLoading } = useWorkspace();
   const wsId = activeWorkspace?.id || null;
   const [dateBasis, setDateBasis] = useState<DateBasis>("fechamento");
   const [rangeMonths, setRangeMonths] = useState<number>(6);
@@ -419,6 +419,9 @@ export default function Reports() {
     );
   };
 
+  if (workspacesLoading) {
+    return <div className="p-6 text-muted-foreground">Carregando…</div>;
+  }
   if (!activeWorkspace) {
     return <div className="p-6 text-muted-foreground">Selecione uma conta para ver os relatórios.</div>;
   }

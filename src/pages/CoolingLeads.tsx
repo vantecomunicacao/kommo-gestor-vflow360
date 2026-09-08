@@ -9,10 +9,11 @@ import { useCoolingLeads } from "@/hooks/useCoolingLeads";
 import { CoolingLeadsCard } from "@/components/dashboard/CoolingLeadsCard";
 import { ErrorState } from "@/components/dashboard/ErrorState";
 import { MultiFilterSelect } from "@/components/filters/MultiFilterSelect";
+import { GenericPageSkeleton } from "@/components/skeletons/RouteSkeletons";
 import { supabase } from "@/integrations/supabase/client";
 
 export default function CoolingLeads() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, loading: workspacesLoading } = useWorkspace();
   const wsId = activeWorkspace?.id;
   // Filtros de sessão (não persistidos) — só valem pra esta tela.
   const [pipelineIds, setPipelineIds] = useState<string[]>([]);
@@ -47,6 +48,9 @@ export default function CoolingLeads() {
     });
   }, [defaultPipelineIds]);
 
+  // Enquanto os workspaces ainda carregam (auth/token assentando na abertura),
+  // skeleton -- nao o erro "Selecione uma conta".
+  if (workspacesLoading) return <GenericPageSkeleton />;
   if (!activeWorkspace) {
     return <ErrorState error="Selecione uma conta para visualizar os leads esfriando." onRetry={() => window.location.reload()} />;
   }

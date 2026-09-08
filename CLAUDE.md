@@ -417,6 +417,53 @@ bug de verdade). Também cobre o caso de falha total (cai em `DEFAULT` sem
 travar `loading`) e o caminho feliz (sucesso de primeira, sem atraso). 81
 testes no total (`npm run test`), todos verdes.
 
+## "Erro ao carregar dashboard / Selecione uma conta" na abertura — CORRIGIDO em 2026-09-08
+
+Sintoma reportado: às vezes o app abre e o Dashboard mostra "Erro ao carregar
+dashboard — Selecione uma conta para visualizar o dashboard", mesmo o usuário
+tendo conta. Às vezes o seletor de contas na sidebar também abre **vazio** (só
+"Nova conta" / "Gerenciar contas"). Um F5 resolve. Mesma família de corrida de
+abertura do "Menu lateral perdendo itens" (seção acima) e do retry do
+`PermissionsContext`.
+
+Causa raiz em `src/contexts/WorkspaceContext.tsx`: (1) `loading` era um
+`useState` que só virava `false` **dentro** do efeito de fetch — entre o `user`
+aparecer (evento de auth) e o efeito rodar (efeitos só rodam depois do commit)
+existe um render com `user` novo mas `loading` ainda `false` (valor de quando
+não havia usuário) e `workspaces` ainda `[]`; `Dashboard.tsx` fazia
+`if (!activeWorkspace)` sem checar `loading` e pintava o `ErrorState` nesse
+instante. (2) O `catch` da busca de `workspaces` só fazia `console.error`, **sem
+retry** — se a query falhasse por token ainda não assentado no cliente Supabase
+(aba acordando de segundo plano, sessão restaurada precisando de refresh, rede
+lenta na abertura), `workspaces` ficava `[]` de forma **definitiva** (nada
+reexecuta o efeito; `AuthContext` ignora refresh de token de propósito), daí o
+seletor vazio e o erro travado até um reload forçar o handshake inteiro.
+
+**Corrigido** em `src/contexts/WorkspaceContext.tsx`:
+- `loading` virou **derivado** por comparação síncrona a cada render
+  (`authLoading || resolvedFor !== (user?.id ?? NO_USER)`, sentinela `NO_USER`),
+  mesmo padrão que o `PermissionsContext` adotou em 2026-08-17 — fecha a janela
+  sem esperar o efeito.
+- Efeito só roda depois de `authLoading` terminar; retry com backoff (3
+  tentativas, 500ms/1000ms) na busca de `workspaces`, com `console.warn`/
+  `console.error` a cada falha (antes era silencioso). Esgotadas as tentativas,
+  marca como resolvido (para de mostrar skeleton, cai no estado "sem conta" com
+  botão de recarregar, em vez de spinner infinito).
+
+Guardas de "ainda carregando" antes do fallback de "sem conta", nas telas que
+gateiam por `activeWorkspace`: `Dashboard.tsx` (`<DashboardSkeleton/>`),
+`CoolingLeads.tsx` (`<GenericPageSkeleton/>`), `Reports.tsx` ("Carregando…"),
+`settings/DashboardSettings.tsx` (spinner). `WorkspaceSelector.tsx` mostra
+"Carregando contas…" no gatilho e no dropdown enquanto `loading`.
+
+**Verificado com teste** (a race depende de timing real de rede/token, não
+reproduzível à mão): novo `src/contexts/WorkspaceContext.test.tsx` mocka a
+cadeia `from().select().is().order()` pra falhar 1-2x antes de suceder e
+confirma que o contexto recupera a lista; cobre também falha total (para de
+carregar, `workspaces` fica `[]`, sem travar) e caminho feliz (1 tentativa).
+`tsc --noEmit -p tsconfig.app.json` limpo, `npm run lint` 0 problemas,
+`npm run test` 86 testes verdes (era 83).
+
 ## Permissões de usuário — 4 flags simétricas e independentes (2026-08-17)
 
 Reorganização do sistema de permissões de `kommo.user_permissions`. Antes eram

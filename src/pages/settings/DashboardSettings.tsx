@@ -30,7 +30,7 @@ interface CustomField {
 }
 
 export default function DashboardSettings() {
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, loading: workspacesLoading } = useWorkspace();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -292,7 +292,7 @@ export default function DashboardSettings() {
     });
   };
 
-  if (loading) {
+  if (loading || workspacesLoading) {
     return <div className="flex items-center justify-center h-96"><Loader2 className="w-6 h-6 animate-spin" /></div>;
   }
 
