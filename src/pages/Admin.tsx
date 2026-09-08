@@ -34,6 +34,18 @@ interface AdminUser {
 
 interface Workspace { id: string; name: string; owner_id: string; }
 
+// Fase 4.1: o que cada flag libera, em uma linha — o admin não tinha como
+// prever o efeito só pelo rótulo do toggle. As 4 são independentes (ver
+// CLAUDE.md > "Permissões de usuário — 4 flags simétricas e independentes");
+// admin global recebe as 4 automaticamente. Sem nenhuma marcada, o usuário
+// cai em /sem-acesso ao entrar.
+const PERM_HELP: Record<keyof UserPerms, string> = {
+  view_dashboard: "Libera as páginas Dashboard, Relatórios e Anotações.",
+  view_cooling: "Libera a página Leads esfriando. Não afeta as outras áreas.",
+  view_integrations: "Libera a página Integrações (conectar/reconectar o Kommo).",
+  view_settings: "Libera Configurações (funil, métricas, filtros, metas, IA).",
+};
+
 export default function Admin() {
   const { user } = useAuth();
   const { isAdmin, loading: roleLoading } = useIsAdmin();
@@ -308,29 +320,41 @@ export default function Admin() {
                 <p className="text-xs text-muted-foreground">
                   Marque as áreas que este usuário poderá acessar.
                 </p>
-                <div className="flex items-center justify-between pt-1">
-                  <Label className="font-normal">Ver Dashboard e Relatórios</Label>
+                <div className="flex items-start justify-between gap-3 pt-1">
+                  <div className="space-y-0.5">
+                    <Label className="font-normal">Ver Dashboard e Relatórios</Label>
+                    <p className="text-xs text-muted-foreground">{PERM_HELP.view_dashboard}</p>
+                  </div>
                   <Switch
                     checked={newPerms.view_dashboard}
                     onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_dashboard: v }))}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <Label className="font-normal">Ver Leads esfriando</Label>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <Label className="font-normal">Ver Leads esfriando</Label>
+                    <p className="text-xs text-muted-foreground">{PERM_HELP.view_cooling}</p>
+                  </div>
                   <Switch
                     checked={newPerms.view_cooling}
                     onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_cooling: v }))}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <Label className="font-normal">Ver Integrações</Label>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <Label className="font-normal">Ver Integrações</Label>
+                    <p className="text-xs text-muted-foreground">{PERM_HELP.view_integrations}</p>
+                  </div>
                   <Switch
                     checked={newPerms.view_integrations}
                     onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_integrations: v }))}
                   />
                 </div>
-                <div className="flex items-center justify-between">
-                  <Label className="font-normal">Ver Configurações</Label>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-0.5">
+                    <Label className="font-normal">Ver Configurações</Label>
+                    <p className="text-xs text-muted-foreground">{PERM_HELP.view_settings}</p>
+                  </div>
                   <Switch
                     checked={newPerms.view_settings}
                     onCheckedChange={(v) => setNewPerms((p) => ({ ...p, view_settings: v }))}
@@ -459,29 +483,41 @@ export default function Admin() {
             <p className="text-xs text-muted-foreground">
               Ative apenas as áreas que este usuário poderá acessar.
             </p>
-            <div className="flex items-center justify-between">
-              <Label className="font-normal">Ver Dashboard e Relatórios</Label>
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label className="font-normal">Ver Dashboard e Relatórios</Label>
+                <p className="text-xs text-muted-foreground">{PERM_HELP.view_dashboard}</p>
+              </div>
               <Switch
                 checked={permsDraft.view_dashboard}
                 onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_dashboard: v }))}
               />
             </div>
-            <div className="flex items-center justify-between">
-              <Label className="font-normal">Ver Leads esfriando</Label>
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label className="font-normal">Ver Leads esfriando</Label>
+                <p className="text-xs text-muted-foreground">{PERM_HELP.view_cooling}</p>
+              </div>
               <Switch
                 checked={permsDraft.view_cooling}
                 onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_cooling: v }))}
               />
             </div>
-            <div className="flex items-center justify-between">
-              <Label className="font-normal">Ver Integrações</Label>
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label className="font-normal">Ver Integrações</Label>
+                <p className="text-xs text-muted-foreground">{PERM_HELP.view_integrations}</p>
+              </div>
               <Switch
                 checked={permsDraft.view_integrations}
                 onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_integrations: v }))}
               />
             </div>
-            <div className="flex items-center justify-between">
-              <Label className="font-normal">Ver Configurações</Label>
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <Label className="font-normal">Ver Configurações</Label>
+                <p className="text-xs text-muted-foreground">{PERM_HELP.view_settings}</p>
+              </div>
               <Switch
                 checked={permsDraft.view_settings}
                 onCheckedChange={(v) => setPermsDraft((p) => ({ ...p, view_settings: v }))}

@@ -529,6 +529,10 @@ export default function MetricsReportTab({
                       <Label className="text-xs">
                         {m.format === "percent" ? "Passaram por / têm o campo (numerador)" : "Passaram por / têm o campo"}
                       </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        "Passar por" uma etapa conta o lead que está nela agora <strong>ou</strong> que já
+                        entrou nela antes e depois avançou/voltou. Não é "quem está na etapa neste momento".
+                      </p>
                       {renderRefsEditor(m, "numerator")}
                     </div>
 

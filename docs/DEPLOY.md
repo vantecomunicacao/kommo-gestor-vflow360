@@ -205,10 +205,12 @@ Abrir o app logado e verificar, sem erro no console:
 
 `.github/workflows/ci.yml` — **bloqueante**:
 
-- Frontend: `typecheck`, `test`, `lint`.
+- Frontend: `typecheck`, `check-custom-metrics-sync.mjs`, `test`, `lint`.
 - Edge: `deno check` (todas as functions), `check-auth-guardrail.mjs`, `deno test`.
 
-Fora da CI (rodar manual antes de release maior):
+### Checklist de release maior (rodar manual — precisam de credencial real do projeto, por isso ficam fora da CI)
 
-- `node scripts/check-schema-drift.mjs` (precisa de credencial do projeto).
-- `npm run test:e2e` (Playwright, backend mockado).
+- [ ] `node scripts/check-schema-drift.mjs` — schema `kommo` real x manifesto/CLAUDE.md.
+- [ ] `node scripts/check-types-drift.mjs` — `src/integrations/supabase/types.ts` x `supabase gen types`. Rodar **sempre depois de aplicar migration**.
+- [ ] `npm run test:e2e` — Playwright, backend mockado (contra o dev server).
+- [ ] `npm run test:e2e:real` — Playwright contra o Supabase de verdade (usa `.env.e2e-real`). Só antes de release que mexeu em auth/permissões/rotas.

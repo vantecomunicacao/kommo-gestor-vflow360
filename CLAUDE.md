@@ -743,6 +743,14 @@ Kommo, porque ele é compartilhado com produção viva do GHL.
 > releases maiores ou sempre que desconfiar que o CLAUDE.md ficou pra trás — foi
 > assim que o drift de URL dos crons (2026-08-05) e as 3 tabelas faltando no
 > inventário foram achados manualmente, antes de existir esse script.
+>
+> **Fase 4.3/4.4 (2026-09-08):** dois checks a mais. `node scripts/check-types-drift.mjs`
+> (local, precisa da CLI linkada) regenera `src/integrations/supabase/types.ts`
+> via `supabase gen types` e falha se divergir do commitado — rodar **sempre
+> depois de aplicar migration**. `node scripts/check-custom-metrics-sync.mjs`
+> (estático, **roda na CI**) falha se as listas de ícone/cor/countMode/format e
+> os limites das Métricas Personalizadas divergirem entre `src/lib/custom-metrics.ts`
+> e `supabase/functions/_shared/schemas.ts` (duplicados à mão por runtime de zod).
 
 Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
