@@ -721,6 +721,19 @@ Kommo, porque ele é compartilhado com produção viva do GHL.
   adicionadas a este inventário nem a `scripts/kommo-schema-manifest.json` —
   puro atraso de documentação, achado por `node scripts/check-schema-drift.mjs`
   e corrigido nesta mesma revisão (sem mudança de comportamento/código).
+- 2026-09-08 (`20260908120000_kommo_dashboard_cache.sql`): **nova tabela**
+  `kommo.dashboard_cache` — Fase 3.1 do plano de remediação. Guarda a resposta
+  já calculada do `kommo-dashboard` chaveada por `workspace_id` + `filters_hash`
+  (sha256 da combinação de filtros). A edge function reaproveita o cache
+  enquanto `sync_status.last_sync_at` (assinatura `sync_sig`) e
+  `dashboard_settings.updated_at` (`settings_sig`) não mudarem, mais um TTL de
+  segurança. **Desligada por padrão** — só ativa com o secret `DASHBOARD_CACHE`
+  (1/true/on); `DASHBOARD_CACHE_TTL_SECONDS` ajusta o TTL (default 600s). Falha
+  de leitura/escrita do cache é engolida (cai no cálculo normal). Também cria a
+  função `kommo.cleanup_dashboard_cache()` + cron `kommo-dashboard-cache-cleanup`
+  (04:20 UTC, apaga linhas > 48h). Aditiva; RLS `svc all`; não toca em tabela
+  existente nem em public/GHL. Tabela é descartável (pode ser truncada).
+  _(pendente de aplicar — `supabase db push`.)_
 
 > **Verificação mecânica (Fase 0, 2026-08-06):** `node scripts/check-schema-drift.mjs`
 > compara essa lista (espelhada em `scripts/kommo-schema-manifest.json`, junto com
@@ -759,6 +772,7 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 | `kommo.ai_provider_config_audit` | Auditoria de quem criou/trocou/removeu a chave de IA do workspace e quando. Criada em `20260813150000_kommo_ai_rate_limit_and_audit.sql` |
 | `kommo.tasks` | Tarefas do CRM Kommo (prazo, responsável, concluída) — base de "tarefas atrasadas" por vendedor. Criada em `20260626130000_kommo_tasks.sql`, que também adiciona `kommo.leads.closest_task_at` |
 | `kommo.workspace_notes` | Bloco de notas mensal do usuário (ata de reunião: pontos bons/ruins, combinados) — sem relação com métricas/leads, só texto livre (rich text, doc JSON do Tiptap). `created_by` é `auth.users.id` solto (sem FK — ver changelog 2026-08-10). Criada em `20260810170000_kommo_workspace_notes.sql` |
+| `kommo.dashboard_cache` | Fase 3.1: cache da resposta do `kommo-dashboard` por `workspace_id`+`filters_hash`. Descartável (invalidação por assinatura `sync_status.last_sync_at`/`dashboard_settings.updated_at` + TTL). **Off por padrão** — secret `DASHBOARD_CACHE`. Criada em `20260908120000_kommo_dashboard_cache.sql` |
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
@@ -836,6 +850,14 @@ Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 > Registre aqui cada criação/exclusão/alteração estrutural de tabela `kommo`,
 > com data (AAAA-MM-DD) e migration. Mais recente no topo.
 
+- 2026-09-08 (`20260908120000_kommo_dashboard_cache.sql`): **nova tabela**
+  `kommo.dashboard_cache` — Fase 3.1. Cache da resposta do `kommo-dashboard`
+  (`workspace_id` + `filters_hash` sha256, `payload jsonb`, assinaturas
+  `sync_sig`/`settings_sig`, `computed_at`). Off por padrão (secret
+  `DASHBOARD_CACHE`); `DASHBOARD_CACHE_TTL_SECONDS` default 600. + função
+  `kommo.cleanup_dashboard_cache()` e cron `kommo-dashboard-cache-cleanup`
+  (04:20 UTC, apaga > 48h). Aditiva; RLS `svc all`; descartável. Ver seção
+  "Fase 3.1" no CLAUDE.md acima. _(pendente de aplicar em prod.)_
 - 2026-08-08 (sem migration — só `kommo-report-snapshot/index.ts`, deployada em
   produção): carência da trava ("period lock", ver entrada abaixo) deixou de ser
   única (3 dias pros dois eixos) e virou diferenciada por eixo —

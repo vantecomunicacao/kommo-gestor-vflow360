@@ -134,6 +134,8 @@ Inventário dos secrets esperados no projeto `fjncmmqvmocwykpshgsh`:
 | `OPENAI_API_KEY` | `kommo-ai-analyze` | chave global (fallback); cada workspace pode ter a sua no Vault |
 | `ERROR_WEBHOOK_URL` | `kommo-sync` (watchdog 1.6 lê o Vault `kommo_error_webhook_url`) | sem valor → não envia; sem fallback compartilhado (item 1.3) |
 | `ADMIN_BOOTSTRAP_ALLOWLIST` | `kommo-admin-bootstrap` | CSV de e-mails que podem virar o **primeiro** admin. Só tem efeito quando **não existe nenhum admin** (defesa em profundidade). Valor atual: `mktvantecomunicacao@gmail.com` |
+| `DASHBOARD_CACHE` | `kommo-dashboard` | Fase 3.1. Ausente/qualquer-coisa = **cache desligado** (comportamento de sempre). `1`/`true`/`on` = liga o cache da resposta do Dashboard (tabela `kommo.dashboard_cache`). |
+| `DASHBOARD_CACHE_TTL_SECONDS` | `kommo-dashboard` | TTL de segurança do cache acima. Default `600`. Limita o quão velhos ficam os campos relativos a "agora" (ex.: tarefas atrasadas) num hit de cache. `0` = confia só nas assinaturas de invalidação. |
 
 ### Rollback de edge function
 

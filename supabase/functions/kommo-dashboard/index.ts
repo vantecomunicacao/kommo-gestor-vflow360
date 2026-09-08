@@ -11,7 +11,7 @@ import { z } from "https://esm.sh/zod@3.23.8";
 import { fetchAllRows } from "../_shared/paginate.ts";
 import { authorizeWorkspace } from "../_shared/authorize.ts";
 import { buildBucketResolver, parseFunnelMapping } from "../_shared/kommo-funnel.ts";
-import { KommoDashboardPayloadSchema, CustomMetricsListSchema, CustomFiltersListSchema } from "../_shared/schemas.ts";
+import { KommoDashboardPayloadSchema, CustomMetricsListSchema, CustomFiltersListSchema, type KommoDashboardPayload } from "../_shared/schemas.ts";
 import { corsHeadersExtended as corsHeaders } from "../_shared/cors.ts";
 import {
   buildStageOrder, buildLostBeforeMap, oldestEventDate, leadReachedCascata,
@@ -97,6 +97,33 @@ function brtDate(d: Date): string {
 }
 const VALID_BUCKETS: Bucket[] = ["contato_inicial", "qualificando", "proposta_enviada", "fechamento", "venda_ganha"];
 
+// ===== Cache da resposta (Fase 3.1) =====
+// filtersHash: assinatura estável da combinação de filtros (sha256 hex). Arrays
+// são ordenados e as chaves fixas, pra a mesma seleção sempre gerar a mesma
+// chave. NÃO inclui workspace_id (é a chave de partição da tabela).
+async function filtersHash(p: KommoDashboardPayload): Promise<string> {
+  const s = (a: string[]) => [...a].sort();
+  const cf: Record<string, string[]> = {};
+  for (const k of Object.keys(p.customFilters).sort()) cf[k] = s(p.customFilters[k] ?? []);
+  const canon = JSON.stringify({
+    startDate: p.startDate ?? null,
+    endDate: p.endDate ?? null,
+    dateBasis: p.dateBasis ?? null,
+    additionalStartDate: p.additionalStartDate ?? null,
+    additionalEndDate: p.additionalEndDate ?? null,
+    pipelineId: s(p.pipelineId),
+    stageIds: s(p.stageIds),
+    sellerIds: s(p.sellerIds),
+    utmMedium: s(p.utmMedium),
+    utmCampaign: s(p.utmCampaign),
+    origin: s(p.origin),
+    customFilters: cf,
+    dailyLeadsFullRange: !!p.dailyLeadsFullRange,
+  });
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -106,12 +133,56 @@ serve(async (req) => {
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY")!;
     const db = createClient(SUPABASE_URL, SERVICE_KEY, { db: { schema: "kommo" } });
 
+    // Cache da resposta (Fase 3.1): desligado por padrão. Ligar com o secret
+    // DASHBOARD_CACHE = 1/true/on. TTL de segurança (limita o quão velhos ficam
+    // os campos relativos a "agora", ex.: tarefas atrasadas): DASHBOARD_CACHE_TTL_SECONDS
+    // (default 600s). 0 = sem TTL, confia só nas assinaturas de invalidação.
+    const CACHE_ON = ["1", "true", "on", "yes"].includes((Deno.env.get("DASHBOARD_CACHE") || "").trim().toLowerCase());
+    const ttlRaw = Deno.env.get("DASHBOARD_CACHE_TTL_SECONDS");
+    const ttlParsed = ttlRaw != null && ttlRaw.trim() !== "" ? Number(ttlRaw) : 600;
+    const CACHE_TTL_MS = Math.max(0, Number.isFinite(ttlParsed) ? ttlParsed : 600) * 1000;
+
     const payload = KommoDashboardPayloadSchema.parse(await req.json().catch(() => ({})));
     const workspaceId = payload.workspace_id;
 
     // Auth: JWT válido + membership (usuário) OU segredo interno (cron). Ver
     // _shared/authorize.ts — request sem usuário e sem segredo é rejeitado.
     await authorizeWorkspace({ req, db, supabaseUrl: SUPABASE_URL, anonKey: ANON_KEY, workspaceId });
+
+    // ===== Cache: leitura (Fase 3.1) — só com DASHBOARD_CACHE ligado =====
+    // Assinaturas de invalidação: last_sync_at (bumpa a cada sync concluído) e
+    // dashboard_settings.updated_at (bumpa quando o usuário edita Configurações).
+    // Qualquer falha aqui é engolida — cai no cálculo normal.
+    let cacheKey: string | null = null;
+    let syncSig = "";
+    let settingsSig = "";
+    if (CACHE_ON) {
+      try {
+        const [{ data: ssRow }, { data: dsRow }] = await Promise.all([
+          db.from("sync_status").select("last_sync_at").eq("workspace_id", workspaceId).maybeSingle(),
+          db.from("dashboard_settings").select("updated_at").eq("workspace_id", workspaceId).maybeSingle(),
+        ]);
+        syncSig = (ssRow?.last_sync_at as string) ?? "";
+        settingsSig = (dsRow?.updated_at as string) ?? "";
+        cacheKey = await filtersHash(payload);
+        const { data: hit } = await db.from("dashboard_cache")
+          .select("payload,sync_sig,settings_sig,computed_at")
+          .eq("workspace_id", workspaceId).eq("filters_hash", cacheKey).maybeSingle();
+        if (
+          hit && hit.sync_sig === syncSig && hit.settings_sig === settingsSig &&
+          (CACHE_TTL_MS === 0 || Date.now() - new Date(hit.computed_at as string).getTime() < CACHE_TTL_MS)
+        ) {
+          // Preserva a UX atual: `cachedAt` continua sendo o horário da resposta
+          // ("Atualizado HH:mm" do header). `servedFromCache` é só diagnóstico.
+          return new Response(
+            JSON.stringify({ ...(hit.payload as Record<string, unknown>), cachedAt: new Date().toISOString(), servedFromCache: true }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } },
+          );
+        }
+      } catch (e) {
+        console.warn("kommo-dashboard cache read pulado:", serializeErr(e));
+      }
+    }
 
     const startDate = payload.startDate;
     const endDate = payload.endDate;
@@ -729,7 +800,7 @@ serve(async (req) => {
       return { ...common, denominatorCount: base, value: base > 0 ? (passed / base) * 100 : null };
     });
 
-    return new Response(JSON.stringify({
+    const responseBody = {
       totalLeads, lostLeads,
       lostLeadsDetail: lostOpps.slice(0, 200).map((l, i) => ({ id: i + 1, name: l.name || `Lead ${String(l.kommo_id).slice(0, 6)}`, contactName: l.contact_name || null })),
       funnelStages, conversionRates, sellers,
@@ -762,7 +833,25 @@ serve(async (req) => {
       // front pra montar o aviso de janela de confiabilidade do modo "histórico".
       eventsHistorySince,
       cachedAt: new Date().toISOString(),
-    }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    };
+
+    // ===== Cache: escrita (Fase 3.1) — falha aqui nunca quebra a resposta =====
+    if (CACHE_ON && cacheKey) {
+      try {
+        await db.from("dashboard_cache").upsert({
+          workspace_id: workspaceId,
+          filters_hash: cacheKey,
+          payload: responseBody,
+          sync_sig: syncSig,
+          settings_sig: settingsSig,
+          computed_at: new Date().toISOString(),
+        }, { onConflict: "workspace_id,filters_hash" });
+      } catch (e) {
+        console.warn("kommo-dashboard cache write pulado:", serializeErr(e));
+      }
+    }
+
+    return new Response(JSON.stringify(responseBody), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (err) {
     // Body fora do formato esperado (ex.: sem workspace_id) → 400 com mensagem clara.
     if (err instanceof z.ZodError) {

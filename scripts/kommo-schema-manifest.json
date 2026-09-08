@@ -7,6 +7,7 @@
     "contacts",
     "custom_fields",
     "dashboard_analyses",
+    "dashboard_cache",
     "dashboard_settings",
     "integrations",
     "lead_actions",
@@ -30,6 +31,7 @@
     "add_workspace_member",
     "can_manage_workspace",
     "check_stale_syncs",
+    "cleanup_dashboard_cache",
     "create_workspace",
     "delete_ai_provider_config",
     "error_webhook_url",
@@ -49,6 +51,7 @@
     "trigger_sync_all_full"
   ],
   "kommoOwnedCrons": [
+    "kommo-dashboard-cache-cleanup",
     "kommo-report-snapshot-daily",
     "kommo-sync-full-daily",
     "kommo-sync-staleness-check",
