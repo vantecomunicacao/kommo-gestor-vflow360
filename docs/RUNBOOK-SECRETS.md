@@ -1,46 +1,30 @@
 # Runbook — Rotação de segredos (Fase 2 do plano de remediação)
 
-> **Objetivo:** trocar as senhas/chaves que já passaram pela pasta sincronizada
-> do OneDrive, **uma de cada vez**, sem o usuário do sistema perceber nada.
->
 > Regras invioláveis do projeto (`../CLAUDE.md`): Supabase só o projeto
 > `fjncmmqvmocwykpshgsh`; Coolify só o app `kommo-gestor-vflow360-prod`; push só
 > pro GitHub oficial.
 
 ---
 
-## Por que fazer isso (linguagem simples)
+## ❌ Etapa 2.0 (sair do OneDrive) — CANCELADA (checado em 2026-09-13)
 
-O arquivo `.env` do repositório guarda **todas as senhas do sistema**. Enquanto o
-repositório esteve dentro do OneDrive, esse arquivo foi copiado automaticamente
-pra nuvem da Microsoft. Não houve vazamento conhecido — mas a boa prática depois
-de qualquer exposição possível é **trocar as chaves** e parar de sincronizar o
-arquivo. É higiene, não incêndio.
+O plano original partia da premissa de que a pasta do projeto (nome
+`...\OneDrive\Documentos\...`) estava sendo sincronizada de verdade pra nuvem da
+Microsoft, copiando o `.env` (com todas as senhas) junto. **Checado nesta
+sessão e não é o caso:** nenhum processo `OneDrive.exe` rodando, nenhuma conta
+OneDrive cadastrada no Windows desta máquina, e a pasta não tem os atributos de
+arquivo que o OneDrive usa pra sincronizar. O nome "OneDrive" no caminho é só
+herança de uma pasta local — não há sincronização acontecendo.
 
----
-
-## Etapa 2.0 — Tirar o `.env` do OneDrive (fazer PRIMEIRO, isolado) 🟢
-
-Nada disso toca no sistema em produção — é só a sua máquina de desenvolvimento.
-
-1. Feche o VS Code / qualquer coisa usando a pasta.
-2. Mova a pasta inteira do projeto pra **fora** do OneDrive. Sugestão:
-   `C:\dev\Kommo-Vflow360-Gestor` (qualquer lugar fora de
-   `OneDrive\`, `Dropbox\`, `Google Drive\`).
-3. Reabra o projeto do novo caminho. Rode `npm ci` e `npm run dev` uma vez pra
-   confirmar que subiu normal.
-4. Guarde **uma cópia dos segredos atuais** num gerenciador de senhas
-   (Bitwarden, 1Password, o cofre do navegador). É a sua rede de segurança pro
-   rollback de cada item abaixo.
-5. (Opcional, recomendado) confirme que o `.gitignore` já ignora `.env` — ignora
-   (`git check-ignore .env` responde `.env`).
-
-> Enquanto o `.env` estiver no OneDrive, **não adianta rotacionar** — a chave
-> nova cairia no mesmo lugar. 2.0 é pré-requisito de tudo abaixo.
+**Consequência:** não existe a exposição que justificava mover a pasta nem
+rotacionar os segredos com urgência. A 2.1 abaixo (rotação) deixou de ser
+"conserto de vazamento" e virou **higiene opcional** — fazer quando quiser,
+sem pressa, pelo mesmo motivo que qualquer sistema troca senhas de tempos em
+tempos, não porque algo vazou.
 
 ---
 
-## Regras da janela de rotação (2.1)
+## Regras da janela de rotação (2.1) — se/quando decidir fazer
 
 - Faça em **horário de baixo uso** (fim de tarde / noite).
 - **Uma chave por vez.** Troca → atualiza todos os lugares que usam → testa →
@@ -50,7 +34,7 @@ Nada disso toca no sistema em produção — é só a sua máquina de desenvolvi
 
 ---
 
-## 2.1 — Segredos de baixo impacto (🟡 — efeito visível nenhum se seguir a ordem)
+## 2.1 — Segredos de baixo impacto (🟢 opcional, sem urgência — efeito visível nenhum se seguir a ordem)
 
 Ordem sugerida: do menos crítico pro mais crítico. `INTERNAL_FUNCTION_SECRET`
 **por último**.
@@ -165,7 +149,7 @@ supabase secrets set ADMIN_BOOTSTRAP_ALLOWLIST='mktvantecomunicacao@gmail.com' -
 
 ## Depois da rotação 2.1
 
-- [ ] `.env` local atualizado com **todos** os valores novos, e **fora** do OneDrive.
+- [ ] `.env` local atualizado com **todos** os valores novos.
 - [ ] Cópia dos valores **novos** no gerenciador de senhas.
 - [ ] Valores **antigos** apagados do gerenciador (depois de confirmar que tudo
       funciona) — não deixe chave morta guardada.
