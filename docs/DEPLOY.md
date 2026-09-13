@@ -217,3 +217,11 @@ Abrir o app logado e verificar, sem erro no console:
 - [ ] `node scripts/check-types-drift.mjs` — `src/integrations/supabase/types.ts` x `supabase gen types`. Rodar **sempre depois de aplicar migration**.
 - [ ] `npm run test:e2e` — Playwright, backend mockado (contra o dev server).
 - [ ] `npm run test:e2e:real` — Playwright contra o Supabase de verdade (usa `.env.e2e-real`). Só antes de release que mexeu em auth/permissões/rotas.
+
+### Backup manual do banco (plano Supabase é FREE — sem backup automático/PITR)
+
+- [ ] `node scripts/backup-kommo-data.mjs` — exporta todas as tabelas do schema
+      `kommo` pra `backups/<timestamp>/*.ndjson`. Rodar de vez em quando (ex.:
+      mensal) e **antes de qualquer operação arriscada em massa** (ex.: "Forçar
+      recálculo" em muitos workspaces). Guardar a pasta gerada fora do repo —
+      ela é ignorada pelo git de propósito (dado real de cliente).

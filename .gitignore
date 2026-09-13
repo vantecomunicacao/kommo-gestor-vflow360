@@ -18,6 +18,10 @@ dist-ssr
 !.env.example
 .supabase-creds
 
+# Backups manuais do banco (Fase 0.3, scripts/backup-kommo-data.mjs) — dados
+# reais de clientes, nunca commitar. Guardar fora do repo.
+/backups/
+
 # Supabase CLI local state (não versionar)
 supabase/.branches/
 supabase/.temp/

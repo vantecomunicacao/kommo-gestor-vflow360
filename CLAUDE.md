@@ -784,6 +784,18 @@ Criadas na migration fundacional `20260617120000_kommo_schema_foundation.sql`:
 
 Migrations posteriores que mexem no schema `kommo` **sem criar tabelas novas**:
 
+- `20260913120000_kommo_dashboard_cache_grant.sql` — corrige um bug da
+  migration `20260908120000` (Fase 3.1): criou a RLS policy de
+  `kommo.dashboard_cache` mas esqueceu o `GRANT` de tabela pro `service_role`
+  (RLS só filtra linha; sem o grant de base, Postgres nega a tabela inteira
+  antes de a policy entrar em jogo). Achado ao rodar
+  `scripts/backup-kommo-data.mjs` (Fase 0.3) — `select *` na tabela voltou
+  `permission denied`. **Nunca afetou produção** (o cache está desligado por
+  padrão — `DASHBOARD_CACHE`), mas se alguém tivesse ligado o secret o cache
+  simplesmente nunca funcionaria (falha engolida pelo try/catch, sempre caindo
+  no cálculo normal, sem erro visível). **APLICADA em prod** 2026-09-13;
+  `scripts/backup-kommo-data.mjs` rodado de novo depois, sem falhas (25
+  tabelas, 83.773 linhas).
 - `20260907120000_kommo_sync_staleness_watchdog.sql` — Fase 1.6 do plano de
   remediação. Adiciona 2 funções (`kommo.error_webhook_url()` — lê o Vault
   `kommo_error_webhook_url`; `kommo.check_stale_syncs()` — varre integrações
