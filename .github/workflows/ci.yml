@@ -71,7 +71,8 @@ jobs:
         run: |
           deno test --allow-env \
             supabase/functions/_shared/ \
-            supabase/functions/kommo-dashboard/
+            supabase/functions/kommo-dashboard/ \
+            supabase/functions/kommo-sync/
 
   # E2E (Playwright) fica FORA da CI de propósito: precisa de credenciais
   # reais do Kommo/Supabase que não devem virar secret de CI neste momento.

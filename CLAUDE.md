@@ -464,6 +464,84 @@ carregar, `workspaces` fica `[]`, sem travar) e caminho feliz (1 tentativa).
 `tsc --noEmit -p tsconfig.app.json` limpo, `npm run lint` 0 problemas,
 `npm run test` 86 testes verdes (era 83).
 
+## Leads "fantasmas" (excluídos no Kommo, ativos no Dashboard) — CORRIGIDO em 2026-10-07
+
+Sintoma reportado: Funil de vendas da "Reymann Resistencias", leads criados em
+set/2026 — Kommo mostrava 219, nosso banco 223. Causa raiz (provada com dado
+real, não só deduzida): a reconciliação de exclusões do full-scan diário
+(`kommo-sync`, passo 6b) lia a lista LOCAL de leads vivos com um select sem
+paginação — o PostgREST corta em 1000 linhas, então em conta com mais de 1000
+leads ativos o excedente nunca era checado. Comparando a listagem completa do
+Kommo com o banco: 7 fantasmas na Reymann (1406 ativos x 1399 no Kommo), **7 de
+7 fora da janela de 1000 linhas**, 0 dentro. Exclusões confirmadas pelos eventos
+`lead_deleted` do Kommo (28/09 e 01/10) — vários full-scans rodaram depois sem
+marcar. Todos os outros leitores de `kommo.leads` (Dashboard, Relatório, Leads
+esfriando) já usavam `fetchAllRows`; esse era o único que tinha ficado de fora.
+
+**Correção** (`kommo-sync/index.ts` + novo `kommo-sync/reconcile.ts`):
+- Leitura local paginada (`fetchAllRows`, ordenado por `kommo_id`).
+- Como a correção aumenta o estrago possível de uma listagem truncada do Kommo
+  (antes o bug limitava a 1000), duas travas: (1) cada candidato é **confirmado
+  no Kommo pelo ID** (`filter[id][]` — lead excluído não volta, lead vivo volta)
+  antes de marcar; falha na confirmação pula a reconciliação com aviso, sem
+  derrubar o sync; (2) teto de 20% dos vivos (e > 50) — acima disso não grava e
+  avisa em `last_sync_warning`; `force_reconcile: true` libera.
+- Checagem de consistência: após reconciliação gravada, leads vivos no banco têm
+  que bater com o que o Kommo listou, senão vira warning (teria pego este bug no
+  1º dia).
+- Resposta da function ganhou `leads_deleted_candidates`/`_alive`/`_blocked`.
+- Testes: `kommo-sync/reconcile.test.ts` (10) e `_shared/paginate.test.ts` (4);
+  `kommo-sync/` adicionado ao `deno test` da CI.
+
+**Validação em produção (deploy 2026-10-07, `dry_run` nas 5 contas com > 1000
+leads):** Reymann 7 (exatamente os 7 IDs previstos), ConsulttAgro 18, Fogo Forte
+4, Campo Bello 2, Dermacentrum 0 — `alive=0` e nada bloqueado em todas.
+
+**Decisões do usuário (2026-10-07):**
+- Meses do Relatório já travados (Financeiro, carência de 3 dias) que contam
+  fantasma ganho/perdido (Reymann: 1 em ago, 1 em set) **ficam como estão** — não
+  usar "Forçar recálculo" (reabre a célula inteira por diferença de 1 lead).
+  Daqui pra frente o Financeiro fica certo: exclusão é reconciliada no full-scan
+  diário e entra no snapshot seguinte; só o que é excluído DEPOIS da trava fica
+  congelado — comportamento esperado da trava, não bug.
+- Tarefas não têm reconciliação de exclusão (tarefa apagada no Kommo continua
+  aberta aqui) — **aceito, sem correção**.
+- Marcação por evento `lead_deleted` (complemento avaliado) — não feita; não
+  substitui a reconciliação (eventos só retêm ~3 semanas; merge/restauração).
+
+**Full-scan diário enxugado (mesmo dia):** o `full: true` do cron re-baixava
+TUDO (contatos, tarefas, eventos), mas só a lista completa de LEADS é necessária
+(pra reconciliação). Dermacentrum (23k contatos + 5k eventos) levava ~125-137s —
+acima do timeout de 120s do `pg_net` do cron e perto do teto de wall-clock da
+edge function. Agora `full: true` = full-scan só de leads; contatos/tarefas/
+eventos seguem incrementais pelos watermarks (como no tick de 12h);
+`full_all: true` re-sincroniza tudo (operação manual). Junto: o lookup de
+contatos no banco pra denormalizar `contact_name/phone/email` em leads passou a
+ser em lotes de 200 (no full-scan vira ~1 id por lead — `.in()` único estouraria
+URL/teto de 1000) e a lançar em erro (antes ignorava e gravaria contato null em
+massa). Medido em produção (dry_run): Dermacentrum **123s → 19s**, 2484/2484
+leads com contato mantendo o nome.
+
+**Revisão de código pós-implementação (mesmo dia) — ajustes aplicados:**
+- `full`/`full_all`/`force_reconcile` só valem pelo caminho interno
+  (`x-internal-secret`); chamada de usuário sempre passa pelo cooldown. Antes,
+  qualquer membro podia mandar `full`/`cron` no body e furar o cooldown (o
+  frontend nunca envia essas flags — só `workspace_id`).
+- Teto de 20% checado sobre os CANDIDATOS, antes de confirmar no Kommo (lista
+  anormal não vira centenas de chamadas de API); pausa de 180ms entre lotes de
+  confirmação (rate limit).
+- Qualquer falha na reconciliação (leitura local ou confirmação) vira aviso e
+  pula só esse passo — não derruba o sync.
+- Checagem de consistência soma os leads confirmados vivos fora da listagem
+  (evita aviso falso). Counts: `leads_deleted_to_mark` (confirmados) x
+  `leads_deleted_reconciled` (de fato gravados; 0 em dry-run/bloqueio).
+- Tarefas ganharam aviso de teto (20 páginas), como contatos/eventos já tinham.
+- **Não aplicados (avaliados):** segurar watermark ao bater teto (reprocessaria
+  as mesmas páginas a cada tick); upsert dos leads vivos fora da listagem (raro;
+  o aviso de divergência denuncia); paralelizar o lookup de contatos (~13
+  consultas nas contas atuais); `fetchAllRows` com `db-max-rows` < 1000 (é 1000
+  no projeto — foi justamente o corte que causou o bug).
+
 ## Permissões de usuário — 4 flags simétricas e independentes (2026-08-17)
 
 Reorganização do sistema de permissões de `kommo.user_permissions`. Antes eram

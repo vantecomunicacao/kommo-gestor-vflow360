@@ -14,6 +14,8 @@ import {
   unixToIso, leadStatusKind, extractContactPhoneEmail,
 } from "../_shared/kommo-client.ts";
 import { authorizeWorkspace, type KommoClient } from "../_shared/authorize.ts";
+import { fetchAllRows } from "../_shared/paginate.ts";
+import { aliveLeadIds, missingLeadIds, reconcileGuard } from "./reconcile.ts";
 
 // Formatos da API do Kommo (api/v4), derivados do uso real abaixo — não é o
 // schema completo da API, só os campos que este sync lê.
@@ -166,11 +168,20 @@ serve(async (req) => {
         { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    // Flags de operação (full / full_all / force_reconcile) só valem pelo caminho
+    // interno (cron ou operador com x-internal-secret). O frontend nunca as envia;
+    // aceitá-las de usuário deixava qualquer membro furar o cooldown com um full-scan
+    // caro e desligar a trava de exclusão em massa.
+    const isInternal = auth.via === "internal";
+    const forceFullAll = isInternal && body.full_all === true;
+    const forceFull = isInternal && (body.full === true || forceFullAll);
+    const forceReconcile = isInternal && body.force_reconcile === true;
+
     // --- Cooldown do "Atualizar agora" (server-side, não burlável) ---
-    // Só vale para sync MANUAL de usuário: cron (segredo interno), full-scan e a
-    // sonda não entram. Antes o cooldown vivia no localStorage do frontend e era
-    // contornável limpando o storage; agora a autoridade é o sync_status.last_sync_at.
-    const isManualUserSync = auth.via === "user" && body.cron !== true && body.full !== true;
+    // Vale para TODA chamada de usuário (cron e operação vêm pelo caminho interno).
+    // Antes o cooldown vivia no localStorage do frontend e era contornável limpando
+    // o storage; agora a autoridade é o sync_status.last_sync_at.
+    const isManualUserSync = auth.via === "user";
     if (isManualUserSync) {
       const { data: st } = await db.from("sync_status")
         .select("last_sync_at,is_running").eq("workspace_id", workspaceId).maybeSingle();
@@ -195,23 +206,27 @@ serve(async (req) => {
       const sec = Math.floor(new Date(iso).getTime() / 1000);
       return Number.isFinite(sec) ? `&filter[${field}][from]=${sec}` : "";
     };
-    // `full: true` no body força um re-sync completo (ignora watermarks) — útil p/ operação.
-    const forceFull = body.full === true;
+    // `full: true` (cron diário) → full-scan SÓ de leads: é o que a reconciliação de
+    // exclusões (passo 6b) precisa. Contatos/tarefas/eventos seguem incrementais — o
+    // tick de 12h já traz o que mudou neles, e re-baixar tudo todo dia custava caro
+    // (2026-10-07: Dermacentrum, 23k contatos + 5k eventos → ~125s, perto do teto de
+    // wall-clock da edge function). `full_all: true` re-sincroniza TUDO (operação manual).
+    // (forceFull/forceFullAll definidos acima, junto do cooldown — só caminho interno.)
     const leadsSince    = forceFull ? "" : sinceParam(wm?.leads_last_seen_at,    "updated_at");
-    const contactsSince = forceFull ? "" : sinceParam(wm?.contacts_last_seen_at, "updated_at");
-    const tasksSince    = forceFull ? "" : sinceParam(wm?.tasks_last_seen_at,    "updated_at");
+    const contactsSince = forceFullAll ? "" : sinceParam(wm?.contacts_last_seen_at, "updated_at");
+    const tasksSince    = forceFullAll ? "" : sinceParam(wm?.tasks_last_seen_at,    "updated_at");
     // Eventos de etapa: backfill limitado por DATA (24 meses), não por contagem —
     // sem isso, uma conta sem watermark (1ª sync) buscava "o que coubesse" no teto
     // de página (imprevisível: 2 anos numa conta de baixo volume, 2 semanas numa de
     // alto volume) e nunca mais revisitava o que ficou de fora. Alinhado com
     // REPORT_SNAPSHOT_MONTHS (src/lib/reports-metrics.ts) — o Relatório nunca
     // mostra mais que isso mesmo, então não faz sentido sincronizar mais eventos do
-    // que o produto usa. `full:true` também respeita esse chão (não faz sentido
-    // "recarregar tudo" trazer eventos de antes do que qualquer tela usa).
+    // que o produto usa. Só `full_all:true` zera o watermark de eventos (o `full:true`
+    // do cron diário mantém eventos incrementais), e mesmo ele respeita esse chão.
     const EVENTS_BACKFILL_MONTHS = 24;
     const eventsFloor = new Date(startTs);
     eventsFloor.setUTCMonth(eventsFloor.getUTCMonth() - EVENTS_BACKFILL_MONTHS);
-    const eventsWatermark = !forceFull && wm?.events_last_seen_at ? new Date(wm.events_last_seen_at) : null;
+    const eventsWatermark = !forceFullAll && wm?.events_last_seen_at ? new Date(wm.events_last_seen_at) : null;
     const eventsFrom = eventsWatermark && eventsWatermark > eventsFloor ? eventsWatermark : eventsFloor;
     const eventsSince = sinceParam(eventsFrom.toISOString(), "created_at");
     const newWatermark  = new Date(startTs - OVERLAP_MS).toISOString();
@@ -356,11 +371,15 @@ serve(async (req) => {
           .map((id) => String(id))
           .filter((id) => !contactById.has(id)),
       ));
-      if (missingContactIds.length) {
-        const { data: existingContacts } = await db.from("contacts")
+      // Em lotes: no full-scan diário (leads completos, contatos incrementais) isso
+      // vira ~1 id por lead — um `.in()` único estouraria a URL e o teto de 1000 linhas
+      // do PostgREST. Erro lança (antes era ignorado e gravava contato null em massa).
+      for (let i = 0; i < missingContactIds.length; i += 200) {
+        const { data: existingContacts, error: cErr } = await db.from("contacts")
           .select("kommo_id,name,phone,email")
           .eq("workspace_id", workspaceId)
-          .in("kommo_id", missingContactIds);
+          .in("kommo_id", missingContactIds.slice(i, i + 200));
+        if (cErr) throw cErr;
         for (const c of (existingContacts ?? []) as Array<{ kommo_id: string; name: string | null; phone: string | null; email: string | null }>) {
           contactById.set(String(c.kommo_id), { name: c.name ?? null, phone: c.phone ?? null, email: c.email ?? null });
         }
@@ -402,32 +421,58 @@ serve(async (req) => {
     // Guarda: se a busca bateu no teto de páginas, o retorno pode estar truncado —
     // nesse caso NÃO reconcilia (evitaria marcar leads válidos como excluídos).
     // dry_run: faz a varredura e reporta o que SERIA marcado, sem gravar nada.
+    // Travas (ver reconcile.ts): teto de 20% dos vivos checado ANTES de confirmar
+    // (lista anormal de candidatos não vira centenas de chamadas ao Kommo), e cada
+    // candidato é confirmado no Kommo pelo ID antes de marcar. Qualquer falha nesse
+    // passo pula a reconciliação com aviso — não derruba o sync (leads já gravados).
+    // Counts: `_to_mark` = confirmados excluídos; `_reconciled` = de fato gravados
+    // (0 em dry-run/bloqueio/falha).
     const dryRun = body.dry_run === true;
     const hitPageCap = leads.length >= LEADS_MAX_PAGES * LEADS_PAGE;
+    // Só com reconciliação efetivamente gravada faz sentido exigir banco == Kommo no fim.
+    let reconcileApplied = false;
+    let aliveUnlisted = 0; // existem no Kommo mas faltaram na listagem → seguem vivos no banco
+    const seenLeadIds = new Set(leads.map((l) => String(l.id)));
     if (hitPageCap) {
       warnings.push(
         `leads: atingiu o teto de ${LEADS_MAX_PAGES * LEADS_PAGE} registros — pode haver leads não sincronizados`,
       );
     }
     if (leadsSince === "" && !hitPageCap) {
-      const seen = new Set(leads.map((l) => String(l.id)));
-      const { data: localLeads } = await db.from("leads")
-        .select("kommo_id").eq("workspace_id", workspaceId).neq("is_deleted", true);
-      const missing = ((localLeads ?? []) as Array<{ kommo_id: string }>)
-        .map((r) => r.kommo_id)
-        .filter((id) => !seen.has(id));
-      if (!dryRun) {
-        for (let i = 0; i < missing.length; i += 200) {
-          const chunk = missing.slice(i, i + 200);
-          const { error } = await db.from("leads").update({ is_deleted: true })
-            .eq("workspace_id", workspaceId).in("kommo_id", chunk);
-          if (error) throw error;
-        }
-      }
-      counts.leads_deleted_reconciled = missing.length;
+      counts.leads_deleted_reconciled = 0;
       counts.leads_deleted_dry_run = dryRun ? 1 : 0;
-      // amostra p/ inspeção no dry-run (limita p/ não estourar a resposta)
-      leadsDeletedIdsSample = missing.slice(0, 100);
+      try {
+        // Paginado: sem isso o PostgREST corta em 1000 linhas e os leads além disso
+        // nunca eram checados (achado 2026-10-07, 7 fantasmas na Reymann, todos fora da janela).
+        const localLeads = await fetchAllRows<{ kommo_id: string }>((from, to) => db.from("leads")
+          .select("kommo_id").eq("workspace_id", workspaceId).neq("is_deleted", true)
+          .order("kommo_id").range(from, to));
+        const candidates = missingLeadIds(localLeads.map((r) => String(r.kommo_id)), seenLeadIds);
+        counts.leads_deleted_candidates = candidates.length;
+        const blockReason = reconcileGuard(candidates.length, localLeads.length, forceReconcile);
+        counts.leads_deleted_blocked = blockReason ? 1 : 0;
+        if (blockReason) {
+          warnings.push(blockReason);
+        } else {
+          const alive = await aliveLeadIds(creds, candidates);
+          aliveUnlisted = alive.size;
+          const missing = candidates.filter((id) => !alive.has(id));
+          counts.leads_deleted_alive = alive.size;
+          counts.leads_deleted_to_mark = missing.length;
+          leadsDeletedIdsSample = missing.slice(0, 100); // amostra p/ inspeção (dry-run)
+          if (!dryRun) {
+            for (let i = 0; i < missing.length; i += 200) {
+              const { error } = await db.from("leads").update({ is_deleted: true })
+                .eq("workspace_id", workspaceId).in("kommo_id", missing.slice(i, i + 200));
+              if (error) throw error;
+            }
+            counts.leads_deleted_reconciled = missing.length;
+            reconcileApplied = true;
+          }
+        }
+      } catch (rErr) {
+        warnings.push(`leads: reconciliação de exclusões pulada — ${serializeErr(rErr).slice(0, 200)}`);
+      }
     } else if (leadsSince === "" && hitPageCap) {
       counts.leads_deleted_reconciled = -1; // sinaliza: pulado por teto de páginas
     }
@@ -479,7 +524,15 @@ serve(async (req) => {
 
     // === 8. Tarefas (follow-up: atrasadas + leads sem próxima ação) ===
     try {
-      const tasks = await kommoFetchAll(creds, `/tasks?limit=250${tasksSince}`, "tasks", { maxPages: 20 }) as KommoTask[];
+      const TASKS_MAX_PAGES = 20, TASKS_PAGE = 250;
+      const tasks = await kommoFetchAll(creds, `/tasks?limit=${TASKS_PAGE}${tasksSince}`, "tasks", { maxPages: TASKS_MAX_PAGES }) as KommoTask[];
+      // Bateu no teto → a rodada pode estar truncada. Avisa (igual contatos/eventos) —
+      // o full diário não re-baixa mais tarefas, então o aviso é o que denuncia o buraco
+      // (corrigir subindo o teto + full_all). Não segura o watermark de propósito:
+      // reprocessaria as mesmas páginas a cada tick, batendo no teto de novo.
+      if (tasks.length >= TASKS_MAX_PAGES * TASKS_PAGE) {
+        warnings.push(`tarefas: atingiu o teto de ${TASKS_MAX_PAGES * TASKS_PAGE} registros — pode haver tarefas não sincronizadas`);
+      }
       const taskRows = tasks
         .filter((t) => t.entity_type === "leads")
         .map((t) => ({
@@ -508,6 +561,14 @@ serve(async (req) => {
       .select("kommo_id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId).neq("is_deleted", true);
 
+    // Checagem de consistência: depois de uma reconciliação gravada, leads vivos no
+    // banco == leads que o Kommo listou. Teria pego o bug das 1000 linhas no 1º dia
+    // (Reymann: 1406 x 1399); fica como alarme pra qualquer divergência futura.
+    // (+ aliveUnlisted: confirmados vivos pelo ID mesmo fora da listagem — seguem vivos aqui.)
+    const expectedAlive = seenLeadIds.size + aliveUnlisted;
+    if (reconcileApplied && totalLeadsCount != null && totalLeadsCount !== expectedAlive) {
+      warnings.push(`leads: banco tem ${totalLeadsCount} leads ativos, Kommo tem ${expectedAlive} — divergência após reconciliação`);
+    }
     if (stageEventsError) warnings.push(`eventos de etapa: ${stageEventsError}`);
     if (tasksError) warnings.push(`tarefas: ${tasksError}`);
 
