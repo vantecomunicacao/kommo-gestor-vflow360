@@ -179,14 +179,15 @@ export default function Dashboard() {
 
   const formatPercentage = (v: number) => `${v.toFixed(1)}%`;
 
-  // Aba Financeira: eixo de data = fechamento (ganho + perdido). Vários cards de
+  // Aba Resultados: eixo de data = fechamento (ganho + perdido). Vários cards de
   // processo/pipeline não fazem sentido nesse eixo e são ocultados (ver
-  // docs/plano-abas-comercial-financeiro.md).
+  // docs/plano-abas-comercial-financeiro.md). Desde 2026-11-23 a linha de topo
+  // dessa aba só tem números absolutos (vendas/receita): "Leads Fechados" e
+  // "Taxa de Ganho" saíram porque dependem de a equipe marcar perdidos no CRM
+  // (lead parado aberto infla a taxa; faxina em massa derruba) e misturam lead
+  // que nem respondeu com negociação perdida — taxa de etapa específica fica
+  // a cargo das Métricas Personalizadas.
   const isFinance = dateBasis === "fechamento";
-  const totalLeadsLabel = isFinance ? "Leads Fechados" : "Total de Leads";
-  const totalLeadsTooltip = isFinance
-    ? "Leads fechados no período (ganho + perdido), pela data de fechamento."
-    : "Quantidade total de leads criados no período filtrado.";
 
   // Aplica os rótulos customizados das etapas (Configurações → Nomes das etapas do funil).
   const funnelStagesLabeled = data.funnelStages.map((s) => ({
@@ -199,7 +200,7 @@ export default function Dashboard() {
   const {
     currentWon, prevWon, leadsTrend, wonTrend, convTrend,
     wonRevenue, negotiatingRevenue, ticketAvg, revenueTrend, negotiatingTrend, ticketTrend,
-    currentWinRate, winRateTrend, lostRevenue, lostRevenueTrend,
+    currentWinRate, lostRevenue, lostRevenueTrend,
   } = deriveDashboardMetrics(data, prevData);
   const currentLost = data.lostLeads || 0;
 
@@ -322,22 +323,23 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <AnimatedSection className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
-        <MetricCard title={totalLeadsLabel} value={data.totalLeads} icon={Users} variant="default" tooltip={totalLeadsTooltip} trend={leadsTrend} />
-        <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Leads que chegaram à etapa de venda ganha no período." trend={wonTrend} />
-        {isFinance ? (
-          <MetricCard title="Taxa de Ganho" value={formatPercentage(currentWinRate)} icon={TrendingUp} variant="accent" tooltip="Dos negócios que fecharam no período (ganhos + perdidos), o percentual que foi ganho." trend={winRateTrend} />
-        ) : (
-          <MetricCard title="Taxa de Conversão" value={formatPercentage(data.conversionRates.overallConversion)} icon={TrendingUp} variant="accent" tooltip="Percentual da primeira etapa até venda ganha." trend={convTrend} />
-        )}
-        <MetricCard title="Receita Ganha" value={formatBRL(wonRevenue)} icon={Banknote} variant="success" tooltip="Soma dos valores dos leads marcados como Venda Ganha no período." trend={revenueTrend} />
-        {isFinance ? (
+      {isFinance ? (
+        <AnimatedSection className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 lg:gap-5">
+          <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Negócios ganhos no período, pela data de fechamento." trend={wonTrend} />
+          <MetricCard title="Receita Ganha" value={formatBRL(wonRevenue)} icon={Banknote} variant="success" tooltip="Soma dos valores dos leads marcados como Venda Ganha no período." trend={revenueTrend} />
+          <MetricCard title="Ticket Médio" value={formatBRL(ticketAvg)} icon={Receipt} variant="default" tooltip="Receita ganha dividida pela quantidade de vendas ganhas no período." trend={ticketTrend} />
           <MetricCard title="Receita Perdida" value={formatBRL(lostRevenue)} icon={TrendingDown} variant="default" tooltip="Soma do valor dos leads perdidos no período (pela data de fechamento). Tendência: cair é positivo." trend={lostRevenueTrend} />
-        ) : (
+        </AnimatedSection>
+      ) : (
+        <AnimatedSection className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 lg:gap-5">
+          <MetricCard title="Total de Leads" value={data.totalLeads} icon={Users} variant="default" tooltip="Quantidade total de leads criados no período filtrado." trend={leadsTrend} />
+          <MetricCard title="Vendas Ganhas" value={currentWon} icon={Target} variant="success" tooltip="Leads que chegaram à etapa de venda ganha no período." trend={wonTrend} />
+          <MetricCard title="Taxa de Conversão" value={formatPercentage(data.conversionRates.overallConversion)} icon={TrendingUp} variant="accent" tooltip="Percentual da primeira etapa até venda ganha." trend={convTrend} />
+          <MetricCard title="Receita Ganha" value={formatBRL(wonRevenue)} icon={Banknote} variant="success" tooltip="Soma dos valores dos leads marcados como Venda Ganha no período." trend={revenueTrend} />
           <MetricCard title="Em Negociação" value={formatBRL(negotiatingRevenue)} icon={HandCoins} variant="accent" tooltip="Soma dos valores dos leads nas etapas Proposta Enviada e Fechamento — receita potencial em jogo no pipeline." trend={negotiatingTrend} />
-        )}
-        <MetricCard title="Ticket Médio" value={formatBRL(ticketAvg)} icon={Receipt} variant="default" tooltip="Receita ganha dividida pela quantidade de vendas ganhas no período." trend={ticketTrend} />
-      </AnimatedSection>
+          <MetricCard title="Ticket Médio" value={formatBRL(ticketAvg)} icon={Receipt} variant="default" tooltip="Receita ganha dividida pela quantidade de vendas ganhas no período." trend={ticketTrend} />
+        </AnimatedSection>
+      )}
 
       {isFinance ? (
         <AnimatedSection className="flex flex-col lg:flex-row gap-3 sm:gap-4 lg:gap-5 items-stretch" delay={0.05}>
